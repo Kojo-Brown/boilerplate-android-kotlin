@@ -1,0 +1,37 @@
+# Spec: boilerplate-android-kotlin
+
+> Spec-driven. Mark `[x]` only after pushing.
+
+## Phase 1 — Foundation
+- [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
+- [x] Jetpack Compose + Material3 scaffold
+- [x] Hilt dependency injection setup (Application + Activity)
+- [x] Navigation Compose with typed routes (Kotlin Serialization)
+- [x] `build.gradle.kts` with version catalog (`libs.versions.toml`)
+
+## Phase 2 — Architecture
+- [ ] MVVM + UiState sealed class pattern per screen
+- [ ] Repository pattern: `UserRepository` interface + `UserRepositoryImpl`
+- [ ] Kotlin Coroutines + Flow for reactive data
+- [ ] Room 2.7 database + DAO + Entity pattern
+
+## Phase 3 — Network
+- [ ] Retrofit 3 + OkHttp 5 with JWT interceptor + token refresh
+- [ ] Kotlin Serialization (`kotlinx.serialization`) for JSON
+- [ ] Result<T> wrapper for error handling in repositories
+
+## Phase 4 — Auth & ML
+- [ ] DataStore Preferences for token persistence
+- [ ] Google Sign-In + Credential Manager API
+- [ ] MLKit barcode scanning screen example
+- [ ] CameraX integration with MLKit text recognition
+
+## Phase 5 — UI Components
+- [ ] Reusable Compose components: `AppButton`, `AppTextField`, `LoadingIndicator`
+- [ ] Dark/light theme with `MaterialTheme` tokens
+- [ ] Adaptive layout (phone + tablet)
+
+## Phase 6 — Testing & DevOps
+- [ ] JUnit 5 + MockK unit tests for ViewModels
+- [ ] Compose UI tests with `createComposeRule`
+- [ ] GitHub Actions: lint → test → build APK
