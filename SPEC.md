@@ -10,7 +10,7 @@
 - [x] `build.gradle.kts` with version catalog (`libs.versions.toml`)
 
 ## Phase 2 — Architecture
-- [ ] MVVM + UiState sealed class pattern per screen
+- [x] MVVM + UiState sealed class pattern per screen
 - [ ] Repository pattern: `UserRepository` interface + `UserRepositoryImpl`
 - [ ] Kotlin Coroutines + Flow for reactive data
 - [ ] Room 2.7 database + DAO + Entity pattern
