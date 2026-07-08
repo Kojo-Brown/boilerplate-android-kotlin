@@ -11,7 +11,7 @@
 
 ## Phase 2 — Architecture
 - [x] MVVM + UiState sealed class pattern per screen
-- [ ] Repository pattern: `UserRepository` interface + `UserRepositoryImpl`
+- [x] Repository pattern: `UserRepository` interface + `UserRepositoryImpl`
 - [ ] Kotlin Coroutines + Flow for reactive data
 - [ ] Room 2.7 database + DAO + Entity pattern
 
