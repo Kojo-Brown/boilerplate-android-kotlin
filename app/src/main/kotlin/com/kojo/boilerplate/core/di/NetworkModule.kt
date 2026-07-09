@@ -7,6 +7,7 @@ import com.kojo.boilerplate.core.network.InMemoryTokenProvider
 import com.kojo.boilerplate.core.network.TokenAuthenticator
 import com.kojo.boilerplate.core.network.TokenProvider
 import com.kojo.boilerplate.core.network.api.AuthApi
+import com.kojo.boilerplate.core.network.api.UserApi
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -107,4 +108,8 @@ object NetworkModule {
         .client(okHttpClient)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
+
+    @Provides
+    @Singleton
+    fun provideUserApi(retrofit: Retrofit): UserApi = retrofit.create(UserApi::class.java)
 }
