@@ -16,7 +16,7 @@
 - [x] Room 2.7 database + DAO + Entity pattern
 
 ## Phase 3 — Network
-- [ ] Retrofit 3 + OkHttp 5 with JWT interceptor + token refresh
+- [x] Retrofit 3 + OkHttp 5 with JWT interceptor + token refresh
 - [ ] Kotlin Serialization (`kotlinx.serialization`) for JSON
 - [ ] Result<T> wrapper for error handling in repositories
 
