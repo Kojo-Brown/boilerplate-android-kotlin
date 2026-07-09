@@ -17,7 +17,7 @@
 
 ## Phase 3 — Network
 - [x] Retrofit 3 + OkHttp 5 with JWT interceptor + token refresh
-- [ ] Kotlin Serialization (`kotlinx.serialization`) for JSON
+- [x] Kotlin Serialization (`kotlinx.serialization`) for JSON
 - [ ] Result<T> wrapper for error handling in repositories
 
 ## Phase 4 — Auth & ML
