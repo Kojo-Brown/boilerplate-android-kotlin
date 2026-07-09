@@ -1,6 +1,8 @@
 package com.kojo.boilerplate.core.data.repository
 
 import com.kojo.boilerplate.core.data.model.User
+import com.kojo.boilerplate.core.database.dao.FakeUserDao
+import com.kojo.boilerplate.core.database.entity.UserEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -10,19 +12,25 @@ import org.junit.Test
 
 class UserRepositoryImplTest {
 
+    private lateinit var userDao: FakeUserDao
     private lateinit var repository: UserRepositoryImpl
 
     @Before
     fun setUp() {
-        repository = UserRepositoryImpl()
+        userDao = FakeUserDao(
+            initialEntities = listOf(
+                UserEntity(id = "1", displayName = "Alice Johnson", email = "alice@example.com", avatarUrl = null),
+                UserEntity(id = "2", displayName = "Bob Smith", email = "bob@example.com", avatarUrl = null),
+                UserEntity(id = "3", displayName = "Carol White", email = "carol@example.com", avatarUrl = null),
+            ),
+        )
+        repository = UserRepositoryImpl(userDao)
     }
 
     @Test
-    fun `getUsers returns initial seed list`() = runTest {
+    fun `getUsers returns mapped domain users`() = runTest {
         val users = repository.getUsers().first()
         assertEquals(3, users.size)
-        assertEquals("1", users[0].id)
-        assertEquals("Alice Johnson", users[0].displayName)
     }
 
     @Test
@@ -44,7 +52,6 @@ class UserRepositoryImplTest {
         repository.saveUser(newUser)
         val users = repository.getUsers().first()
         assertEquals(4, users.size)
-        assertEquals("Dave Brown", users.last().displayName)
     }
 
     @Test

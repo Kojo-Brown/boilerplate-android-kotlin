@@ -13,7 +13,7 @@
 - [x] MVVM + UiState sealed class pattern per screen
 - [x] Repository pattern: `UserRepository` interface + `UserRepositoryImpl`
 - [x] Kotlin Coroutines + Flow for reactive data
-- [ ] Room 2.7 database + DAO + Entity pattern
+- [x] Room 2.7 database + DAO + Entity pattern
 
 ## Phase 3 — Network
 - [ ] Retrofit 3 + OkHttp 5 with JWT interceptor + token refresh
