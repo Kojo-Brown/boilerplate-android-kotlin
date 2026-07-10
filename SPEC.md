@@ -21,7 +21,7 @@
 - [x] Result<T> wrapper for error handling in repositories
 
 ## Phase 4 — Auth & ML
-- [ ] DataStore Preferences for token persistence
+- [x] DataStore Preferences for token persistence
 - [ ] Google Sign-In + Credential Manager API
 - [ ] MLKit barcode scanning screen example
 - [ ] CameraX integration with MLKit text recognition
