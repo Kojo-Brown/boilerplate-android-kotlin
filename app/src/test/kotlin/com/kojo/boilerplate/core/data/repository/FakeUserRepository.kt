@@ -13,6 +13,9 @@ class FakeUserRepository(initialUsers: List<User> = emptyList()) : UserRepositor
     var shouldThrowOnGetUsers: Throwable? = null
     var shouldThrowOnGetUser: Throwable? = null
 
+    var syncCurrentUserResult: Result<User> = Result.failure(NotImplementedError("not configured"))
+    var syncUserResult: Result<User> = Result.failure(NotImplementedError("not configured"))
+
     override fun getUsers(): Flow<List<User>> = _users.map { list ->
         shouldThrowOnGetUsers?.let { throw it }
         list
@@ -33,6 +36,10 @@ class FakeUserRepository(initialUsers: List<User> = emptyList()) : UserRepositor
             }
         }
     }
+
+    override suspend fun syncCurrentUser(): Result<User> = syncCurrentUserResult
+
+    override suspend fun syncUser(id: String): Result<User> = syncUserResult
 
     fun setUsers(users: List<User>) {
         _users.value = users
