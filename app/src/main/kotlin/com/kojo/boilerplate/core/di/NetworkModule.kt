@@ -2,8 +2,8 @@ package com.kojo.boilerplate.core.di
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.kojo.boilerplate.BuildConfig
+import com.kojo.boilerplate.core.datastore.DataStoreTokenProvider
 import com.kojo.boilerplate.core.network.AuthInterceptor
-import com.kojo.boilerplate.core.network.InMemoryTokenProvider
 import com.kojo.boilerplate.core.network.TokenAuthenticator
 import com.kojo.boilerplate.core.network.TokenProvider
 import com.kojo.boilerplate.core.network.api.AuthApi
@@ -31,7 +31,7 @@ abstract class NetworkBindsModule {
 
     @Binds
     @Singleton
-    abstract fun bindTokenProvider(impl: InMemoryTokenProvider): TokenProvider
+    abstract fun bindTokenProvider(impl: DataStoreTokenProvider): TokenProvider
 }
 
 @Module
