@@ -11,4 +11,7 @@ sealed interface AppDestination {
 
     @Serializable
     data class Profile(val userId: String) : AppDestination
+
+    @Serializable
+    data object BarcodeScanner : AppDestination
 }
