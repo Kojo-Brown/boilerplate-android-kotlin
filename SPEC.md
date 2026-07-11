@@ -22,7 +22,7 @@
 
 ## Phase 4 — Auth & ML
 - [x] DataStore Preferences for token persistence
-- [ ] Google Sign-In + Credential Manager API
+- [x] Google Sign-In + Credential Manager API
 - [ ] MLKit barcode scanning screen example
 - [ ] CameraX integration with MLKit text recognition
 
