@@ -14,4 +14,7 @@ sealed interface AppDestination {
 
     @Serializable
     data object BarcodeScanner : AppDestination
+
+    @Serializable
+    data object TextRecognition : AppDestination
 }
