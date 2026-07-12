@@ -27,7 +27,7 @@
 - [x] CameraX integration with MLKit text recognition
 
 ## Phase 5 — UI Components
-- [ ] Reusable Compose components: `AppButton`, `AppTextField`, `LoadingIndicator`
+- [x] Reusable Compose components: `AppButton`, `AppTextField`, `LoadingIndicator`
 - [ ] Dark/light theme with `MaterialTheme` tokens
 - [ ] Adaptive layout (phone + tablet)
 
