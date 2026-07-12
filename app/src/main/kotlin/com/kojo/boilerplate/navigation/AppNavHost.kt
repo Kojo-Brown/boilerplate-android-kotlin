@@ -10,6 +10,7 @@ import com.kojo.boilerplate.feature.home.HomeScreen
 import com.kojo.boilerplate.feature.profile.ProfileScreen
 import com.kojo.boilerplate.feature.scanner.BarcodeScannerScreen
 import com.kojo.boilerplate.feature.signin.GoogleSignInScreen
+import com.kojo.boilerplate.feature.textrecognition.TextRecognitionScreen
 
 @Composable
 fun AppNavHost(
@@ -40,6 +41,9 @@ fun AppNavHost(
                 onNavigateToBarcodeScanner = {
                     navController.navigate(AppDestination.BarcodeScanner)
                 },
+                onNavigateToTextRecognition = {
+                    navController.navigate(AppDestination.TextRecognition)
+                },
             )
         }
 
@@ -51,6 +55,12 @@ fun AppNavHost(
 
         composable<AppDestination.BarcodeScanner> {
             BarcodeScannerScreen(
+                onNavigateUp = navController::navigateUp,
+            )
+        }
+
+        composable<AppDestination.TextRecognition> {
+            TextRecognitionScreen(
                 onNavigateUp = navController::navigateUp,
             )
         }

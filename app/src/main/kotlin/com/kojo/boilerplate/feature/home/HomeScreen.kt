@@ -4,13 +4,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -38,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun HomeScreen(
     onNavigateToProfile: (userId: String) -> Unit,
     onNavigateToBarcodeScanner: () -> Unit,
+    onNavigateToTextRecognition: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -48,11 +52,21 @@ fun HomeScreen(
             TopAppBar(title = { Text("Home") })
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToBarcodeScanner) {
-                Icon(
-                    imageVector = Icons.Default.QrCodeScanner,
-                    contentDescription = "Scan barcode",
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FloatingActionButton(onClick = onNavigateToTextRecognition) {
+                    Icon(
+                        imageVector = Icons.Default.DocumentScanner,
+                        contentDescription = "Recognize text",
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+                FloatingActionButton(onClick = onNavigateToBarcodeScanner) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Scan barcode",
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
             }
         },
     ) { innerPadding ->

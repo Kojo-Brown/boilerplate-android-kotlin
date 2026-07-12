@@ -98,6 +98,7 @@ dependencies {
 
     // MLKit
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.mlkit.text.recognition)
 
     // Google Credential Manager
     implementation(libs.androidx.credentials)
