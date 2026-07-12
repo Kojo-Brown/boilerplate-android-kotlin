@@ -24,7 +24,7 @@
 - [x] DataStore Preferences for token persistence
 - [x] Google Sign-In + Credential Manager API
 - [x] MLKit barcode scanning screen example
-- [ ] CameraX integration with MLKit text recognition
+- [x] CameraX integration with MLKit text recognition
 
 ## Phase 5 — UI Components
 - [ ] Reusable Compose components: `AppButton`, `AppTextField`, `LoadingIndicator`
