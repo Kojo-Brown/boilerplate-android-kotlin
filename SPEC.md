@@ -29,7 +29,7 @@
 ## Phase 5 — UI Components
 - [x] Reusable Compose components: `AppButton`, `AppTextField`, `LoadingIndicator`
 - [x] Dark/light theme with `MaterialTheme` tokens
-- [ ] Adaptive layout (phone + tablet)
+- [x] Adaptive layout (phone + tablet)
 
 ## Phase 6 — Testing & DevOps
 - [ ] JUnit 5 + MockK unit tests for ViewModels
