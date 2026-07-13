@@ -42,12 +42,14 @@ fun HomeScreen(
     onNavigateToProfile: (userId: String) -> Unit,
     onNavigateToBarcodeScanner: () -> Unit,
     onNavigateToTextRecognition: () -> Unit,
+    modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(title = { Text("Home") })
         },
