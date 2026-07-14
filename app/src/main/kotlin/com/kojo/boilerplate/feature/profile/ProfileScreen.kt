@@ -61,7 +61,7 @@ fun ProfileScreen(
 }
 
 @Composable
-private fun ProfileContent(
+internal fun ProfileContent(
     uiState: ProfileUiState,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
