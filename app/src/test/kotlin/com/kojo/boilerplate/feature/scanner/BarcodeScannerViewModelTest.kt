@@ -1,33 +1,36 @@
 package com.kojo.boilerplate.feature.scanner
 
-import com.kojo.boilerplate.core.coroutines.MainDispatcherRule
+import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
+import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Rule
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.RegisterExtension
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@ExtendWith(MockKExtension::class)
 class BarcodeScannerViewModelTest {
 
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
+    @JvmField
+    @RegisterExtension
+    val mainDispatcherExtension = MainDispatcherExtension()
 
     private lateinit var viewModel: BarcodeScannerViewModel
 
-    @Before
+    @BeforeEach
     fun setUp() {
         viewModel = BarcodeScannerViewModel()
     }
 
     @Test
     fun `initial uiState is Scanning`() = runTest {
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.Scanning)
+        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
     }
 
     @Test
@@ -61,8 +64,7 @@ class BarcodeScannerViewModelTest {
 
         val state = viewModel.uiState.first()
         assertTrue(state is BarcodeScannerUiState.PermissionDenied)
-        val denied = state as BarcodeScannerUiState.PermissionDenied
-        assertTrue(denied.message.isNotBlank())
+        assertTrue((state as BarcodeScannerUiState.PermissionDenied).message.isNotBlank())
     }
 
     @Test
@@ -79,8 +81,7 @@ class BarcodeScannerViewModelTest {
         viewModel.onBarcodeDetected("https://example.com", BarcodeFormat.QR_CODE)
         viewModel.resumeScanning()
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.Scanning)
+        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
     }
 
     @Test
@@ -88,8 +89,7 @@ class BarcodeScannerViewModelTest {
         viewModel.onError("Camera error")
         viewModel.resumeScanning()
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.Scanning)
+        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
     }
 
     @Test

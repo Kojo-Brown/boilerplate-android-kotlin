@@ -32,6 +32,6 @@
 - [x] Adaptive layout (phone + tablet)
 
 ## Phase 6 — Testing & DevOps
-- [ ] JUnit 5 + MockK unit tests for ViewModels
+- [x] JUnit 5 + MockK unit tests for ViewModels
 - [ ] Compose UI tests with `createComposeRule`
 - [ ] GitHub Actions: lint → test → build APK
