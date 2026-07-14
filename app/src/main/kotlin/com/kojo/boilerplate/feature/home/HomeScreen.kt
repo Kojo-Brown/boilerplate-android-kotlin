@@ -90,7 +90,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun SearchBar(
+internal fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -121,7 +121,7 @@ private fun SearchBar(
 }
 
 @Composable
-private fun HomeContent(
+internal fun HomeContent(
     uiState: HomeUiState,
     onRetry: () -> Unit,
     onItemClick: (HomeItem) -> Unit,

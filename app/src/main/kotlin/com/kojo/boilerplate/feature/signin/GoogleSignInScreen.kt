@@ -91,7 +91,7 @@ fun GoogleSignInScreen(
 }
 
 @Composable
-private fun SignInContent(
+internal fun SignInContent(
     onSignInClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -129,7 +129,7 @@ private fun SignInContent(
 }
 
 @Composable
-private fun SignedInContent(
+internal fun SignedInContent(
     user: GoogleUser,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
