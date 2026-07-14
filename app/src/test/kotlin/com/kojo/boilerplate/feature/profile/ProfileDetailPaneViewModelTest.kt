@@ -1,23 +1,35 @@
 package com.kojo.boilerplate.feature.profile
 
-import com.kojo.boilerplate.core.coroutines.MainDispatcherRule
+import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import com.kojo.boilerplate.core.data.model.User
-import com.kojo.boilerplate.core.data.repository.FakeUserRepository
+import com.kojo.boilerplate.core.data.repository.UserRepository
+import io.mockk.every
+import io.mockk.impl.annotations.MockK
+import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Rule
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.RegisterExtension
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@ExtendWith(MockKExtension::class)
 class ProfileDetailPaneViewModelTest {
 
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
+    @JvmField
+    @RegisterExtension
+    val mainDispatcherExtension = MainDispatcherExtension()
+
+    @MockK
+    lateinit var userRepository: UserRepository
 
     private val testUser = User(
         id = "user-1",
@@ -26,30 +38,27 @@ class ProfileDetailPaneViewModelTest {
         avatarUrl = null,
     )
 
-    private lateinit var fakeRepository: FakeUserRepository
+    @BeforeEach
+    fun setUp() {
+        every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
+    }
 
     private fun createViewModel(userId: String = testUser.id) = ProfileDetailPaneViewModel(
         userId = userId,
-        userRepository = fakeRepository,
+        userRepository = userRepository,
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 
-    @Before
-    fun setUp() {
-        fakeRepository = FakeUserRepository(listOf(testUser))
-    }
-
     @Test
     fun `initial uiState is Loading`() {
-        val viewModel = createViewModel()
-        assertEquals(ProfileUiState.Loading, viewModel.uiState.value)
+        assertEquals(ProfileUiState.Loading, createViewModel().uiState.value)
     }
 
     @Test
     fun `uiState emits Success when user exists`() = runTest {
         val viewModel = createViewModel()
 
-        val state = viewModel.uiState.first { it is ProfileUiState.Success }
+        val state = viewModel.uiState.value
 
         assertTrue(state is ProfileUiState.Success)
         val success = state as ProfileUiState.Success
@@ -60,50 +69,51 @@ class ProfileDetailPaneViewModelTest {
 
     @Test
     fun `uiState emits Error when user is not found`() = runTest {
+        every { userRepository.getUser("nonexistent-id") } returns flowOf(null)
+
         val viewModel = createViewModel(userId = "nonexistent-id")
 
-        val state = viewModel.uiState.first { it is ProfileUiState.Error }
-
+        val state = viewModel.uiState.value
         assertTrue(state is ProfileUiState.Error)
         assertTrue((state as ProfileUiState.Error).message.contains("nonexistent-id"))
     }
 
     @Test
     fun `uiState emits Error when repository throws`() = runTest {
-        fakeRepository.shouldThrowOnGetUser = RuntimeException("database error")
+        every { userRepository.getUser(testUser.id) } returns flow { throw RuntimeException("database error") }
+
         val viewModel = createViewModel()
 
-        val state = viewModel.uiState.first { it is ProfileUiState.Error }
-
+        val state = viewModel.uiState.value
         assertEquals("database error", (state as ProfileUiState.Error).message)
     }
 
     @Test
     fun `retry recovers from error state`() = runTest {
-        fakeRepository.shouldThrowOnGetUser = RuntimeException("transient error")
+        every { userRepository.getUser(testUser.id) } returns flow { throw RuntimeException("transient error") }
         val viewModel = createViewModel()
 
-        viewModel.uiState.first { it is ProfileUiState.Error }
+        assertTrue(viewModel.uiState.value is ProfileUiState.Error)
 
-        fakeRepository.shouldThrowOnGetUser = null
+        every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
         viewModel.retry()
 
-        val state = viewModel.uiState.first { it is ProfileUiState.Success }
-        assertEquals("Alice Johnson", (state as ProfileUiState.Success).profile.displayName)
+        val state = viewModel.uiState.value as ProfileUiState.Success
+        assertEquals("Alice Johnson", state.profile.displayName)
     }
 
     @Test
     fun `uiState updates when user data changes in repository`() = runTest {
+        val userFlow = MutableStateFlow<User?>(testUser)
+        every { userRepository.getUser(testUser.id) } returns userFlow
+
         val viewModel = createViewModel()
-        viewModel.uiState.first { it is ProfileUiState.Success }
+        assertTrue(viewModel.uiState.value is ProfileUiState.Success)
 
         val updatedUser = testUser.copy(displayName = "Alice Updated")
-        fakeRepository.saveUser(updatedUser)
+        userFlow.value = updatedUser
 
-        val state = viewModel.uiState.first {
-            it is ProfileUiState.Success &&
-                (it as ProfileUiState.Success).profile.displayName == "Alice Updated"
-        }
-        assertEquals("Alice Updated", (state as ProfileUiState.Success).profile.displayName)
+        val state = viewModel.uiState.value as ProfileUiState.Success
+        assertEquals("Alice Updated", state.profile.displayName)
     }
 }

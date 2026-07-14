@@ -1,33 +1,36 @@
 package com.kojo.boilerplate.feature.textrecognition
 
-import com.kojo.boilerplate.core.coroutines.MainDispatcherRule
+import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
+import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Rule
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.RegisterExtension
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@ExtendWith(MockKExtension::class)
 class TextRecognitionViewModelTest {
 
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
+    @JvmField
+    @RegisterExtension
+    val mainDispatcherExtension = MainDispatcherExtension()
 
     private lateinit var viewModel: TextRecognitionViewModel
 
-    @Before
+    @BeforeEach
     fun setUp() {
         viewModel = TextRecognitionViewModel()
     }
 
     @Test
     fun `initial uiState is Scanning`() = runTest {
-        val state = viewModel.uiState.first()
-        assertTrue(state is TextRecognitionUiState.Scanning)
+        assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
     }
 
     @Test
@@ -77,8 +80,7 @@ class TextRecognitionViewModelTest {
 
         val state = viewModel.uiState.first()
         assertTrue(state is TextRecognitionUiState.PermissionDenied)
-        val denied = state as TextRecognitionUiState.PermissionDenied
-        assertTrue(denied.message.isNotBlank())
+        assertTrue((state as TextRecognitionUiState.PermissionDenied).message.isNotBlank())
     }
 
     @Test
@@ -95,8 +97,7 @@ class TextRecognitionViewModelTest {
         viewModel.onTextDetected("Some text", emptyList())
         viewModel.resumeScanning()
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is TextRecognitionUiState.Scanning)
+        assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
     }
 
     @Test

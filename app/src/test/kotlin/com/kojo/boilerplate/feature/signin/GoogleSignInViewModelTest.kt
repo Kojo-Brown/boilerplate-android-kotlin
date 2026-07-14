@@ -1,38 +1,50 @@
 package com.kojo.boilerplate.feature.signin
 
 import android.content.Context
-import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.kojo.boilerplate.core.auth.FakeGoogleAuthRepository
 import com.kojo.boilerplate.core.auth.FakeGoogleAuthRepository.Companion.fakeGoogleUser
+import com.kojo.boilerplate.core.auth.GoogleAuthRepository
 import com.kojo.boilerplate.core.auth.GoogleUser
-import com.kojo.boilerplate.core.coroutines.MainDispatcherRule
+import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import io.mockk.coEvery
+import io.mockk.impl.annotations.MockK
+import io.mockk.junit5.MockKExtension
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Rule
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.RegisterExtension
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@ExtendWith(MockKExtension::class)
 class GoogleSignInViewModelTest {
 
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
+    @JvmField
+    @RegisterExtension
+    val mainDispatcherExtension = MainDispatcherExtension()
+
+    @MockK
+    lateinit var googleAuthRepository: GoogleAuthRepository
 
     private val fakeContext: Context = mockk(relaxed = true)
 
     @Test
     fun `initial uiState is Idle`() {
-        val viewModel = buildViewModel()
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.success(fakeGoogleUser())
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
         assertEquals(GoogleSignInUiState.Idle, viewModel.uiState.value)
     }
 
     @Test
     fun `signIn emits Success on successful authentication`() = runTest {
         val user = fakeGoogleUser()
-        val viewModel = buildViewModel(signInResult = Result.success(user))
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.success(user)
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
 
@@ -42,9 +54,8 @@ class GoogleSignInViewModelTest {
 
     @Test
     fun `signIn emits Error when repository returns failure`() = runTest {
-        val viewModel = buildViewModel(
-            signInResult = Result.failure(RuntimeException("Network error")),
-        )
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.failure(RuntimeException("Network error"))
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
 
@@ -55,9 +66,8 @@ class GoogleSignInViewModelTest {
 
     @Test
     fun `signIn reverts to Idle when user cancels credential selection`() = runTest {
-        val viewModel = buildViewModel(
-            signInResult = Result.failure(GetCredentialCancellationException()),
-        )
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.failure(GetCredentialCancellationException())
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
 
@@ -83,7 +93,9 @@ class GoogleSignInViewModelTest {
     @Test
     fun `signOut resets uiState to Idle`() = runTest {
         val user = fakeGoogleUser()
-        val viewModel = buildViewModel(signInResult = Result.success(user))
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.success(user)
+        coEvery { googleAuthRepository.signOut() } returns Result.success(Unit)
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
         viewModel.uiState.first { it is GoogleSignInUiState.Success }
@@ -96,9 +108,8 @@ class GoogleSignInViewModelTest {
 
     @Test
     fun `clearError transitions Error back to Idle`() = runTest {
-        val viewModel = buildViewModel(
-            signInResult = Result.failure(RuntimeException("oops")),
-        )
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.failure(RuntimeException("oops"))
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
         viewModel.uiState.first { it is GoogleSignInUiState.Error }
@@ -111,23 +122,12 @@ class GoogleSignInViewModelTest {
 
     @Test
     fun `error message falls back to default when throwable has no message`() = runTest {
-        val viewModel = buildViewModel(
-            signInResult = Result.failure(RuntimeException()),
-        )
+        coEvery { googleAuthRepository.signIn(any()) } returns Result.failure(RuntimeException())
+        val viewModel = GoogleSignInViewModel(googleAuthRepository)
 
         viewModel.signIn(fakeContext)
 
         val state = viewModel.uiState.first { it is GoogleSignInUiState.Error }
         assertEquals("Sign-in failed", (state as GoogleSignInUiState.Error).message)
     }
-
-    private fun buildViewModel(
-        signInResult: Result<GoogleUser> = Result.success(fakeGoogleUser()),
-        signOutResult: Result<Unit> = Result.success(Unit),
-    ): GoogleSignInViewModel = GoogleSignInViewModel(
-        googleAuthRepository = FakeGoogleAuthRepository(
-            signInResult = signInResult,
-            signOutResult = signOutResult,
-        ),
-    )
 }
