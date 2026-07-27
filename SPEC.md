@@ -2,6 +2,12 @@
 
 > Spec-driven. Mark `[x]` only after pushing.
 
+## Phase 0 — Green Baseline (blocks all feature work)
+- [ ] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists
+- [ ] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally
+- [ ] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR
+- [ ] Confirm `assembleDebug` produces an installable APK in CI
+
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
 - [x] Jetpack Compose + Material3 scaffold
@@ -35,3 +41,56 @@
 - [x] JUnit 5 + MockK unit tests for ViewModels
 - [x] Compose UI tests with `createComposeRule`
 - [x] GitHub Actions: lint → test → build APK
+
+## Phase 7 — Coroutines & Concurrency
+- [ ] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup
+- [ ] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper
+- [ ] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen`
+- [ ] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival
+- [ ] `callbackFlow` + `awaitClose` wrapping a legacy listener API
+- [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
+- [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
+- [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
+
+## Phase 8 — Architecture & Patterns
+- [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
+- [ ] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule
+- [ ] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding
+- [ ] Decorator pattern: repository wrappers adding cache, retry, and telemetry
+- [ ] Observer pattern: app-wide event bus on `SharedFlow`
+- [ ] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen
+- [ ] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules
+
+## Phase 9 — Offline-First & Data
+- [ ] WorkManager background sync with constraints, backoff, and unique work
+- [ ] Offline-first repository: single source of truth in Room with a `NetworkBoundResource`
+- [ ] Conflict resolution: last-write-wins vs merge, with a version column
+- [ ] Paging 3 with `RemoteMediator` over Room + network
+- [ ] Room migrations with exported schemas and a migration test suite
+- [ ] Idempotent sync requests with client-generated keys
+- [ ] DataStore Proto for typed structured preferences
+
+## Phase 10 — Compose Performance & UI
+- [ ] Recomposition profiling: Layout Inspector counts + a fix for an unstable-lambda hotspot
+- [ ] Stability: `@Immutable`, `@Stable`, and the compiler-metrics report checked into CI
+- [ ] `derivedStateOf` and `remember` keying to cut redundant work
+- [ ] `LazyColumn` performance: keys, `contentType`, and item prefetch
+- [ ] Custom layouts and `SubcomposeLayout` for a measure-dependent component
+- [ ] Shared-element transitions + predictive back gesture
+- [ ] Material3 dynamic colour, edge-to-edge, and full accessibility semantics
+
+## Phase 11 — Security & Release
+- [ ] EncryptedSharedPreferences / Keystore-backed token storage, never plaintext
+- [ ] Certificate pinning in OkHttp with a documented rotation plan
+- [ ] Root/tamper detection with Play Integrity API
+- [ ] R8 full mode with keep rules + a mapping-file upload step
+- [ ] Play Store signing via CI with secrets from the GitHub secret store only
+- [ ] Baseline Profiles + Macrobenchmark startup test with a CI budget
+- [ ] Dependency and licence scanning gate in CI
+
+## Phase 12 — TDD & Advanced Testing
+- [ ] TDD kata: one use-case built red→green→refactor, one commit per step
+- [ ] Turbine tests for Flow emissions
+- [ ] Screenshot tests with Paparazzi + a CI diff gate
+- [ ] Instrumented tests on an emulator matrix in CI
+- [ ] Hilt test modules with fake bindings replacing network and DB
