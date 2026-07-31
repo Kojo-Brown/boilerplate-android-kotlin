@@ -48,10 +48,6 @@ android {
         buildConfig = true
     }
 
-    room {
-        schemaDirectory("$projectDir/schemas")
-    }
-
     testOptions {
         unitTests {
             all { test ->
@@ -59,6 +55,12 @@ android {
             }
         }
     }
+}
+
+// The Room Gradle Plugin registers `room` on the project, not on the `android`
+// extension, so this block has to sit outside `android { }`.
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 dependencies {
@@ -136,4 +138,30 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+}
+
+/**
+ * Proves that every version declared in `gradle/libs.versions.toml` actually exists on a
+ * configured repository, by forcing resolution of every classpath the app builds against.
+ *
+ * `./gradlew :app:dependencies` is not a substitute: it prints a `FAILED` marker next to an
+ * unresolvable module and still exits 0, so it cannot gate CI. Resolving each configuration
+ * and rethrowing its failures turns a non-existent version into a build failure.
+ */
+tasks.register("resolveAllDependencies") {
+    group = "verification"
+    description = "Resolves every classpath configuration so a non-existent dependency version fails the build."
+
+    val classpaths = configurations.matching { it.isCanBeResolved && it.name.endsWith("Classpath") }
+
+    doLast {
+        var artifacts = 0
+        classpaths.forEach { configuration ->
+            val resolved = configuration.resolvedConfiguration
+            resolved.rethrowFailure()
+            artifacts += resolved.resolvedArtifacts.size
+            logger.lifecycle("Resolved ${configuration.name}")
+        }
+        logger.lifecycle("Resolved ${classpaths.size} configurations, $artifacts artifacts")
+    }
 }
