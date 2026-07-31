@@ -3,10 +3,28 @@
 > Spec-driven. Mark `[x]` only after pushing.
 
 ## Phase 0 — Green Baseline (blocks all feature work)
-- [ ] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists
+- [x] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists — every version resolves; the blockers were structural, not versions (PR #18)
 - [ ] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally
 - [ ] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR
 - [ ] Confirm `assembleDebug` produces an installable APK in CI
+
+Item 1 complete as of PR #18 (2026-07-31). `dependency-resolution.yml` resolved
+31 configurations / 2309 module nodes with 0 failures in 1m41s, so every version
+in `libs.versions.toml` exists — including `androidx.compose.material3.adaptive:adaptive`,
+which the Compose BOM 2024.12.01 does supply despite being declared without one.
+
+Nothing was wrong with the versions. The build simply could not be invoked: the
+Gradle wrapper was missing `gradlew`, `gradlew.bat` and `gradle-wrapper.jar`;
+there was no `gradle.properties`, so `android.useAndroidX` was unset; and
+`room { }` sat inside `android { }`, where it does not compile.
+
+Known gaps carried into item 2: the resolution gate checks metadata only, so a
+published-but-empty module would still pass it — `compileDebugKotlin` and
+`assembleDebug` are what close that. `detekt` is referenced by CLAUDE.md but is
+not configured anywhere in the build, so item 2 has to add it. The wrapper has
+no `distributionSha256Sum`. `README.md` still advertises "Retrofit 3 + OkHttp 5"
+while the catalog pins Retrofit 2.11.0 / OkHttp 4.12.0 — a real migration, not a
+doc typo. None of the gates in CLAUDE.md beyond `./gradlew --version` have run.
 
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
