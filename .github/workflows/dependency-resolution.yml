@@ -1,0 +1,51 @@
+name: Dependency Resolution
+
+# Phase 0 gate: proves every version declared in gradle/libs.versions.toml actually
+# exists and resolves. This deliberately does not compile, lint, or test — those are
+# separate Phase 0 items and land in ci.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve every declared version
+    runs-on: ubuntu-latest
+    # Metadata-only resolution is a couple of minutes' work. Anything approaching this
+    # ceiling means the job is stuck, and a stuck job should fail rather than sit on a
+    # runner for the six-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify the Gradle wrapper runs
+        run: ./gradlew --version
+
+      - name: Resolve every declared dependency
+        run: ./gradlew :app:resolveAllDependencies --stacktrace
+
+      - name: Dependency tree
+        if: always()
+        run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath

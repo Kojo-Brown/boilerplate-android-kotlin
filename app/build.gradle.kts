@@ -48,10 +48,6 @@ android {
         buildConfig = true
     }
 
-    room {
-        schemaDirectory("$projectDir/schemas")
-    }
-
     testOptions {
         unitTests {
             all { test ->
@@ -59,6 +55,12 @@ android {
             }
         }
     }
+}
+
+// The Room Gradle Plugin registers `room` on the project, not on the `android`
+// extension, so this block has to sit outside `android { }`.
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 dependencies {
@@ -136,4 +138,62 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+}
+
+/**
+ * Proves that every version declared in `gradle/libs.versions.toml` actually exists on a
+ * configured repository, by resolving the dependency *graph* of every classpath the app
+ * builds against and reporting every module that could not be resolved.
+ *
+ * `./gradlew :app:dependencies` is not a substitute: it prints a `FAILED` marker next to an
+ * unresolvable module and still exits 0, so it cannot gate CI.
+ *
+ * This walks metadata only and deliberately does not download artifacts. A version that does
+ * not exist fails during metadata resolution, which is the question this task answers, and
+ * skipping the artifact fetch keeps the job to a couple of minutes instead of pulling every
+ * variant's full graph — MLKit and CameraX alone are hundreds of megabytes. The trade-off is
+ * that a published-but-empty module (POM present, AAR missing) would slip through here; the
+ * compile and assemble gates in Phase 0 items 2 and 4 are what cover that.
+ */
+tasks.register("resolveAllDependencies") {
+    group = "verification"
+    description = "Resolves every classpath's dependency graph so a non-existent version fails the build."
+
+    val graphs = configurations
+        .matching { it.isCanBeResolved && it.name.endsWith("Classpath") }
+        .map { it.name to it.incoming.resolutionResult.rootComponent }
+
+    doLast {
+        val failures = mutableListOf<String>()
+        var modules = 0
+
+        graphs.forEach { (name, rootComponent) ->
+            val seen = mutableSetOf<ResolvedComponentResult>()
+
+            fun visit(component: ResolvedComponentResult) {
+                if (!seen.add(component)) return
+                component.dependencies.forEach { dependency ->
+                    when (dependency) {
+                        is ResolvedDependencyResult -> visit(dependency.selected)
+                        is UnresolvedDependencyResult ->
+                            failures += "$name -> ${dependency.requested.displayName}: ${dependency.failure.message}"
+                        else -> Unit
+                    }
+                }
+            }
+
+            visit(rootComponent.get())
+            modules += seen.size
+            logger.lifecycle("Resolved $name (${seen.size} modules)")
+        }
+
+        if (failures.isNotEmpty()) {
+            throw GradleException(
+                "${failures.size} dependency/dependencies could not be resolved:\n" +
+                    failures.joinToString("\n") { "  $it" },
+            )
+        }
+
+        logger.lifecycle("Resolved ${graphs.size} configurations, $modules module nodes, 0 failures")
+    }
 }
