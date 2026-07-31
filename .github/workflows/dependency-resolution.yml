@@ -21,6 +21,10 @@ jobs:
   resolve:
     name: Resolve every declared version
     runs-on: ubuntu-latest
+    # Metadata-only resolution is a couple of minutes' work. Anything approaching this
+    # ceiling means the job is stuck, and a stuck job should fail rather than sit on a
+    # runner for the six-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
