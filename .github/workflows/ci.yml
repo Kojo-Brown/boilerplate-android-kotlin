@@ -81,7 +81,7 @@ jobs:
           retention-days: 7
 
   build:
-    name: Build APK
+    name: Build + verify APK
     runs-on: ubuntu-latest
     # The template's ordering, kept: an APK is only worth producing once the code
     # that goes into it has compiled, linted and passed its tests.
@@ -102,10 +102,32 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: assembleDebug
-        run: ./gradlew assembleDebug --stacktrace
+      # Two seconds, no SDK needed, and it runs before the ~3 minutes of Gradle work so a
+      # broken verifier is reported immediately rather than after the build.
+      - name: verify-apk.sh self-test
+        run: ./scripts/verify-apk.test.sh
 
+      # writeDebugApkIdentity emits the package/version/sdk values the APK is expected to
+      # carry, straight out of the build DSL, for the verification step below.
+      - name: assembleDebug
+        run: ./gradlew assembleDebug writeDebugApkIdentity --stacktrace
+
+      # Phase 0 item 4. assembleDebug exiting 0 says the build ran; this says the artifact
+      # is one the platform would actually install: well-formed, 4-byte aligned, signed
+      # with the debug key under a v2+ scheme across API 26-35, and carrying the package,
+      # versionCode, versionName and sdk levels build.gradle.kts declares.
+      #
+      # apksigner, zipalign and aapt2 come from the build-tools AGP installs for
+      # compileSdk during the step above, so no separate sdkmanager step is needed.
+      - name: Verify APK is installable
+        run: ./scripts/verify-apk.sh
+
+      # Uploaded even when verification fails: when the APK is wrong, the APK is the
+      # evidence, and re-running CI to get a copy of it wastes a round trip. Gated on the
+      # file existing so a failed assembleDebug reports one failure rather than two —
+      # a missing APK on the success path is already a hard failure in the step above.
       - name: Upload APK
+        if: ${{ !cancelled() && hashFiles('app/build/outputs/apk/debug/app-debug.apk') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
