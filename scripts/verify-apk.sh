@@ -47,6 +47,16 @@ fail() {
     failures=$((failures + 1))
 }
 
+# Echoes the tool output a failed check was reading. The build-tools these three
+# commands come from is whatever the machine has installed, and their output format does
+# move between versions — build-tools 37 renamed a badging line this script parses. When
+# a parse comes back empty the raw text is the only thing that says why, and printing it
+# here turns that into a one-run diagnosis instead of a blind fix and another CI round.
+dump() {
+    printf '  --- %s ---\n' "$1" >&2
+    printf '%s\n' "$2" | sed 's/^/  | /' >&2
+}
+
 check_equals() {
     local label="$1" expected="$2" actual="$3"
     if [ "$expected" = "$actual" ]; then
@@ -160,14 +170,22 @@ else
     printf '%s\n' "$signer_output" | grep -E '^Verified using' >&2 || true
 fi
 
-signer_dn="$(printf '%s\n' "$signer_output" |
-    sed -n 's/^Signer #1 certificate DN: //p' | head -n 1)"
-if [ -z "$signer_dn" ]; then
+# apksigner labels the certificate differently depending on version and on whether the
+# signing key has a rotation lineage: `Signer #1 certificate DN:` and
+# `Signer (minSdkVersion=..., maxSdkVersion=...) certificate DN:` are both in the wild.
+# Match on the parts that do not vary, and check every DN printed rather than the first,
+# so an unexpected second signer cannot hide behind a correct one.
+signer_dns="$(printf '%s\n' "$signer_output" | sed -n 's/^Signer[^:]*certificate DN: //p')"
+if [ -z "$signer_dns" ]; then
     fail "apksigner printed no signer certificate DN"
-elif [ "$signer_dn" = "$DEBUG_CERT_DN" ]; then
-    pass "signed with the Android debug key"
+    dump "apksigner verify --print-certs output" "$signer_output"
 else
-    fail "signer DN is '$signer_dn', expected '$DEBUG_CERT_DN'"
+    unexpected_dn="$(printf '%s\n' "$signer_dns" | grep -vxF "$DEBUG_CERT_DN" | head -n 1 || true)"
+    if [ -n "$unexpected_dn" ]; then
+        fail "signer DN is '$unexpected_dn', expected '$DEBUG_CERT_DN'"
+    else
+        pass "signed with the Android debug key"
+    fi
 fi
 
 # --- identity ------------------------------------------------------------------------
@@ -184,11 +202,25 @@ sdk_field() {
     printf '%s\n' "$badging" | sed -n "s/^$1:'\([^']*\)'.*/\1/p" | head -n 1
 }
 
+# build-tools 37's aapt2 emits the minSdk line as `minSdkVersion:'26'`; earlier ones call
+# it `sdkVersion:'26'`. Accept either rather than pinning a build-tools version here, so
+# the check reports on the APK and not on which SDK the machine happens to have.
+actual_min_sdk="$(sdk_field sdkVersion)"
+[ -n "$actual_min_sdk" ] || actual_min_sdk="$(sdk_field minSdkVersion)"
+
 check_equals "package" "$EXPECTED_APPLICATION_ID" "$(badging_field name)"
 check_equals "versionCode" "$EXPECTED_VERSION_CODE" "$(badging_field versionCode)"
 check_equals "versionName" "$EXPECTED_VERSION_NAME" "$(badging_field versionName)"
-check_equals "minSdk" "$EXPECTED_MIN_SDK" "$(sdk_field sdkVersion)"
+check_equals "minSdk" "$EXPECTED_MIN_SDK" "$actual_min_sdk"
 check_equals "targetSdk" "$EXPECTED_TARGET_SDK" "$(sdk_field targetSdkVersion)"
+
+# An empty field is a parse failure, not a wrong APK, and the two want different fixes.
+# Show the lines the parse was looking at so the next run says which it was.
+if [ -z "$(badging_field name)" ] || [ -z "$actual_min_sdk" ] ||
+    [ -z "$(sdk_field targetSdkVersion)" ]; then
+    dump "aapt2 badging (package and sdk lines)" \
+        "$(printf '%s\n' "$badging" | grep -iE '^package:|sdkversion' || true)"
+fi
 
 # Without a LAUNCHER activity the APK installs but cannot be started from the launcher,
 # which for this boilerplate is indistinguishable from a broken build.

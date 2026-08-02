@@ -156,6 +156,18 @@ expect 'a wrong minSdk is caught' 1 "minSdk is '21'" \
 expect 'a wrong targetSdk is caught' 1 "targetSdk is '34'" \
     "sed -i \"s/targetSdkVersion:'35'/targetSdkVersion:'34'/\" aapt2.out"
 
+# build-tools 37 is what the CI runner ships, and its output differs from the older
+# format in both of these places. Both spellings have to keep working: the script is run
+# by whatever SDK the machine has, and pinning one here would only move the problem.
+expect "build-tools 37's minSdkVersion badging line is accepted" 0 "minSdk is '26'" \
+    "sed -i \"s/^sdkVersion:'26'/minSdkVersion:'26'/\" aapt2.out"
+expect 'a rotation-style signer line is accepted' 0 'signed with the Android debug key' \
+    "sed -i 's/^Signer #1 certificate DN: /Signer (minSdkVersion=26, maxSdkVersion=35) certificate DN: /' apksigner.out"
+expect 'a wrong minSdk is still caught in the newer badging format' 1 "minSdk is '21'" \
+    "sed -i \"s/^sdkVersion:'26'/minSdkVersion:'21'/\" aapt2.out"
+expect 'an unexpected second signer is caught' 1 "signer DN is 'CN=Someone Else, O=X, C=US'" \
+    "printf 'Signer #2 certificate DN: CN=Someone Else, O=X, C=US\n' >>apksigner.out"
+
 expect 'a failed signature check is caught' 1 'apksigner verify failed' \
     'echo 1 >apksigner.exit'
 expect 'a v1-only signature is caught' 1 'no v2+ APK signature scheme verified' \
