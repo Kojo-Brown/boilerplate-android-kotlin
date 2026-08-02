@@ -9,6 +9,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 
+// flatMapLatest is still @ExperimentalCoroutinesApi in coroutines 1.9.0. The
+// opt-in is recorded here rather than left as a compiler warning so that the
+// experimental surface this class depends on is visible at the declaration.
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = ProfileDetailPaneViewModel.Factory::class)
 class ProfileDetailPaneViewModel @AssistedInject constructor(
     @Assisted private val userId: String,

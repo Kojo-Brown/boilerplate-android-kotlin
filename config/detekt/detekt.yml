@@ -80,7 +80,6 @@ exceptions:
     # `safeCall` in core/common/Result.kt exists precisely to catch everything
     # at the I/O boundary and turn it into a typed Result. That is the rule's
     # intended exception, not a violation of it.
-    excludeGuardClauses: true
     allowedExceptionNameRegex: '_|(ignore|expected).*'
 
   SwallowedException:

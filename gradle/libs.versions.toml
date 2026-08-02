@@ -7,7 +7,13 @@ coreKtx = "1.15.0"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 datastore = "1.1.1"
-hilt = "2.52"
+# 2.52 cannot read Kotlin 2.1 metadata — hiltJavaCompileDebug died with
+# "Unable to read Kotlin metadata due to unsupported metadata version", which
+# blocked lintDebug and testDebugUnitTest alike. 2.57.2 is the newest release
+# whose own Kotlin toolchain (kotlin-metadata-jvm / kotlin-stdlib 2.1.21) stays
+# in the same 2.1.x line as this project's Kotlin 2.1.0; later releases jump to
+# 2.3.x on the processor classpath for no benefit here.
+hilt = "2.57.2"
 hiltNavigationCompose = "1.2.0"
 lifecycleRuntimeKtx = "2.9.0"
 navigationCompose = "2.8.5"
