@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -80,7 +81,7 @@ class ProfileDetailPaneViewModelTest {
 
     @Test
     fun `uiState emits Error when repository throws`() = runTest {
-        every { userRepository.getUser(testUser.id) } returns flow { throw RuntimeException("database error") }
+        every { userRepository.getUser(testUser.id) } returns flow { throw IOException("database error") }
 
         val viewModel = createViewModel()
 
@@ -90,7 +91,7 @@ class ProfileDetailPaneViewModelTest {
 
     @Test
     fun `retry recovers from error state`() = runTest {
-        every { userRepository.getUser(testUser.id) } returns flow { throw RuntimeException("transient error") }
+        every { userRepository.getUser(testUser.id) } returns flow { throw IOException("transient error") }
         val viewModel = createViewModel()
 
         assertTrue(viewModel.uiState.value is ProfileUiState.Error)

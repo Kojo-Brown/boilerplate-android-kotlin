@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -133,7 +134,7 @@ class HomeViewModelTest {
 
     @Test
     fun `uiState emits Error when repository throws`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw RuntimeException("network error") }
+        every { userRepository.getUsers() } returns flow { throw IOException("network error") }
 
         val viewModel = buildViewModel()
 
@@ -144,7 +145,7 @@ class HomeViewModelTest {
 
     @Test
     fun `retry triggers new collection after error`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw RuntimeException("transient error") }
+        every { userRepository.getUsers() } returns flow { throw IOException("transient error") }
         val viewModel = buildViewModel()
 
         assertTrue(viewModel.uiState.value is HomeUiState.Error)

@@ -26,10 +26,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun ProfileDetailPane(
     userId: String,
     modifier: Modifier = Modifier,
-    viewModel: ProfileDetailPaneViewModel = hiltViewModel<ProfileDetailPaneViewModel, ProfileDetailPaneViewModel.Factory>(
-        key = userId,
-        creationCallback = { factory -> factory.create(userId) },
-    ),
+    viewModel: ProfileDetailPaneViewModel =
+        hiltViewModel<ProfileDetailPaneViewModel, ProfileDetailPaneViewModel.Factory>(
+            key = userId,
+            creationCallback = { factory -> factory.create(userId) },
+        ),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 

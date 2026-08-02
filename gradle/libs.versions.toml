@@ -15,7 +15,14 @@ datastore = "1.1.1"
 # 2.3.x on the processor classpath for no benefit here.
 hilt = "2.57.2"
 hiltNavigationCompose = "1.2.0"
-lifecycleRuntimeKtx = "2.9.0"
+# 2.9.0 ships lint checks built against a newer Kotlin Analysis API than the lint
+# bundled with AGP 8.7.3, so lintAnalyzeDebug crashed rather than reporting:
+# "Found class org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall, but
+# interface was expected", inside androidx.lifecycle.lint.NonNullableMutableLiveDataDetector.
+# 2.8.7 predates that split and carries every API this project uses (LocalLifecycleOwner
+# and collectAsStateWithLifecycle both landed in 2.8.0). The forward fix is to raise AGP
+# instead — see the note in SPEC.md.
+lifecycleRuntimeKtx = "2.8.7"
 navigationCompose = "2.8.5"
 room = "2.7.0"
 coroutines = "1.9.0"
