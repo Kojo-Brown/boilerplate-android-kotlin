@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -31,16 +33,23 @@ import java.nio.file.Files
  * version of this file did exactly that, and `testDebugUnitTest` hung until the CI job
  * timed out rather than failing.
  *
- * Determinism comes from `first { … }` suspending until the awaited state actually arrives
- * rather than from sleeping, and every wait is bounded by [TIMEOUT_MS] so a reintroduced
- * deadlock fails this test instead of hanging the job.
+ * Determinism comes from [awaitPendingWrites], which joins the persistence the provider
+ * launches and never returns a handle to, rather than from sleeping or polling. Every wait
+ * is bounded by [TIMEOUT_MS] so a reintroduced deadlock fails this test instead of hanging
+ * the job.
  */
 class DataStoreTokenProviderTest {
 
     private val tempDir: File = Files.createTempDirectory("datastore_test").toFile()
 
-    // Owns both the DataStore's internal actor and the provider's fire-and-forget writes.
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // The DataStore's internal actor lives here. It never completes, so it is kept apart
+    // from the scope below — otherwise there would be no way to wait on the provider's
+    // writes without also waiting on an actor that runs forever.
+    private val dataStoreScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // The provider's fire-and-forget persistence. Isolating it is what makes
+    // awaitPendingWrites() possible.
+    private val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private lateinit var provider: DataStoreTokenProvider
 
@@ -48,17 +57,18 @@ class DataStoreTokenProviderTest {
     fun setUp() {
         provider = DataStoreTokenProvider(
             dataStore = PreferenceDataStoreFactory.create(
-                scope = scope,
+                scope = dataStoreScope,
                 produceFile = { File(tempDir, "test_auth_tokens.preferences_pb") },
             ),
             ioDispatcher = Dispatchers.IO,
-            appScope = scope,
+            appScope = appScope,
         )
     }
 
     @After
     fun tearDown() {
-        scope.cancel()
+        appScope.cancel()
+        dataStoreScope.cancel()
         tempDir.deleteRecursively()
     }
 
@@ -94,10 +104,9 @@ class DataStoreTokenProviderTest {
     @Test
     fun `tokensFlow emits current tokens after update`() = runBlocking {
         provider.updateTokens("access-flow", "refresh-flow")
+        awaitPendingWrites()
 
-        // updateTokens caches synchronously but persists on appScope, so wait for the
-        // write to land instead of assuming it already has.
-        val tokens = withTimeout(TIMEOUT_MS) { provider.tokensFlow.first { it != null } }
+        val tokens = withTimeout(TIMEOUT_MS) { provider.tokensFlow.first() }
 
         assertEquals(AuthTokens("access-flow", "refresh-flow"), tokens)
     }
@@ -105,12 +114,27 @@ class DataStoreTokenProviderTest {
     @Test
     fun `tokensFlow emits null after clearTokens`() = runBlocking {
         provider.updateTokens("access-flow", "refresh-flow")
-        withTimeout(TIMEOUT_MS) { provider.tokensFlow.first { it != null } }
+        awaitPendingWrites()
+        assertEquals(
+            AuthTokens("access-flow", "refresh-flow"),
+            withTimeout(TIMEOUT_MS) { provider.tokensFlow.first() },
+        )
 
         provider.clearTokens()
-        val tokens = withTimeout(TIMEOUT_MS) { provider.tokensFlow.first { it == null } }
+        awaitPendingWrites()
 
-        assertNull(tokens)
+        assertNull(withTimeout(TIMEOUT_MS) { provider.tokensFlow.first() })
+    }
+
+    /**
+     * updateTokens and clearTokens update the cache synchronously and persist on appScope
+     * without returning anything to wait on — deliberately, since OkHttp calls the
+     * interceptor and authenticator synchronously. Joining appScope's children is what
+     * makes the persisted value observable at a defined point instead of racing it: an
+     * earlier version polled the flow with `first { it != null }` and timed out.
+     */
+    private suspend fun awaitPendingWrites() {
+        withTimeout(TIMEOUT_MS) { appScope.coroutineContext.job.children.toList().joinAll() }
     }
 
     private companion object {

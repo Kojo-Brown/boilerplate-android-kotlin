@@ -26,6 +26,32 @@ no `distributionSha256Sum`. `README.md` still advertises "Retrofit 3 + OkHttp 5"
 while the catalog pins Retrofit 2.11.0 / OkHttp 4.12.0 — a real migration, not a
 doc typo. None of the gates in CLAUDE.md beyond `./gradlew --version` have run.
 
+Known gaps carried out of item 2 (PR #19):
+
+**AGP 8.7.3 is now the limiting version, and it forced a dependency backwards.**
+`lifecycle` had to drop from 2.9.0 to 2.8.7 because 2.9.0 ships lint checks built
+against a newer Kotlin Analysis API than the lint bundled with AGP 8.7.3. The two
+disagree on whether `KaCallableMemberCall` is a class or an interface, and
+`lintAnalyzeDebug` crashed outright — `Unexpected failure during lint analysis of
+MainActivity.kt` inside `androidx.lifecycle.lint.NonNullableMutableLiveDataDetector`
+— rather than reporting findings. Disabling `NullSafeMutableLiveData`, which lint
+itself suggests, was rejected: it silences a check to hide a toolchain mismatch that
+could take out any other detector just as easily.
+
+Raising AGP is the forward fix and should be its own item. It is not a one-line
+change — AGP 8.9+ needs a newer Gradle than the wrapper's 8.10.2 in some
+combinations, so the wrapper moves with it — and it should land with lifecycle
+restored to 2.9.x and a re-run of all four gates.
+
+Also still open from item 1: the wrapper has no `distributionSha256Sum`, and
+`README.md` advertises "Retrofit 3 + OkHttp 5" while the catalog pins Retrofit
+2.11.0 / OkHttp 4.12.0 — a real migration, not a doc typo.
+
+The four gates run in `.github/workflows/gates.yml`, deliberately separate from
+`ci.yml`: promoting `workflow-templates/ci.yml` is item 3, and that template also
+carries the `assembleDebug`/APK job that item 4 covers. Folding `gates.yml` into
+`ci.yml` belongs to item 3.
+
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
 - [x] Jetpack Compose + Material3 scaffold
