@@ -5,7 +5,7 @@
 ## Phase 0 — Green Baseline (blocks all feature work)
 - [x] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists — every version resolves; the blockers were structural, not versions (PR #18)
 - [x] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally — all four green in CI; six stacked failures behind them, from detekt never being configured to a test suite that deadlocked rather than failed (PR #19)
-- [ ] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR
+- [x] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR — promoted with `gates.yml` folded in and `workflow-templates/` removed; the template had never been runnable (PR #20)
 - [ ] Confirm `assembleDebug` produces an installable APK in CI
 
 Item 1 complete as of PR #18 (2026-07-31). `dependency-resolution.yml` resolved
@@ -67,10 +67,22 @@ SDK, and it called the variant-less `lint`/`test` tasks instead of the
 `lintDebug`/`testDebugUnitTest` that CLAUDE.md specifies.
 
 Item 3 also brought in the template's `assembleDebug` job, so the task is now
-observed in CI. Item 4 is the part that job does not cover: exit code 0 is not
-the same claim as an installable APK, and nothing yet checks that what lands in
+observed in CI. On PR #20 it ran for the first time in this repository's history
+and succeeded in 2m38s, uploading a 50,300,882-byte `app-debug` artifact.
+
+That is where item 4 starts, not where it ends: exit code 0 is not the same
+claim as an installable APK, and nothing yet checks that what lands in
 `app-debug.apk` is signed with the debug key, aligned, and carries the expected
 package, `versionCode` and `minSdk`.
+
+One caveat on how PR #20 went green. It changed no Kotlin source, so
+`gradle/actions/setup-gradle` restored main's build cache and the gate tasks
+came back `UP-TO-DATE`/`FROM-CACHE` — the whole gates job finished in 67s
+against the ~4m of real work PR #19 measured. All four steps did run and each
+reported `BUILD SUCCESSFUL`, so the workflow's wiring (SDK present, task names
+correct, steps ordered) is genuinely proven. But the gate *outcomes* on that run
+were cache hits inherited from main rather than fresh executions. The first PR
+that touches `app/src` is what will exercise them cold.
 
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
