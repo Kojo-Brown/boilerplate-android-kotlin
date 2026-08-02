@@ -60,10 +60,17 @@ Also still open from item 1: the wrapper has no `distributionSha256Sum`, and
 `README.md` advertises "Retrofit 3 + OkHttp 5" while the catalog pins Retrofit
 2.11.0 / OkHttp 4.12.0 — a real migration, not a doc typo.
 
-The four gates run in `.github/workflows/gates.yml`, deliberately separate from
-`ci.yml`: promoting `workflow-templates/ci.yml` is item 3, and that template also
-carries the `assembleDebug`/APK job that item 4 covers. Folding `gates.yml` into
-`ci.yml` belongs to item 3.
+The four gates now run in `.github/workflows/ci.yml`, which item 3 promoted from
+`workflow-templates/ci.yml` with `gates.yml` folded into it and the template
+directory removed. The template had never been runnable: it set up no Android
+SDK, and it called the variant-less `lint`/`test` tasks instead of the
+`lintDebug`/`testDebugUnitTest` that CLAUDE.md specifies.
+
+Item 3 also brought in the template's `assembleDebug` job, so the task is now
+observed in CI. Item 4 is the part that job does not cover: exit code 0 is not
+the same claim as an installable APK, and nothing yet checks that what lands in
+`app-debug.apk` is signed with the debug key, aligned, and carries the expected
+package, `versionCode` and `minSdk`.
 
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
