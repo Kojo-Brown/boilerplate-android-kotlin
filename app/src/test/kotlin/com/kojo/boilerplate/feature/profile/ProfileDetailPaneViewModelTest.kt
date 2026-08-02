@@ -7,10 +7,12 @@ import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
@@ -50,6 +52,29 @@ class ProfileDetailPaneViewModelTest {
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 
+    /**
+     * uiState is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream
+     * does not run until something collects it. Reading .value with no subscriber returns
+     * the initial Loading value forever — which is why every assertion below used to fail
+     * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
+     * the state hot for the test and runTest tears it down automatically.
+     *
+     * Both dispatchers are pinned to the test's own scheduler so there is a single clock.
+     */
+    private fun TestScope.createSubscribedViewModel(
+        userId: String = testUser.id,
+    ): ProfileDetailPaneViewModel {
+        val viewModel = ProfileDetailPaneViewModel(
+            userId = userId,
+            userRepository = userRepository,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect { }
+        }
+        return viewModel
+    }
+
     @Test
     fun `initial uiState is Loading`() {
         assertEquals(ProfileUiState.Loading, createViewModel().uiState.value)
@@ -57,7 +82,7 @@ class ProfileDetailPaneViewModelTest {
 
     @Test
     fun `uiState emits Success when user exists`() = runTest {
-        val viewModel = createViewModel()
+        val viewModel = createSubscribedViewModel()
 
         val state = viewModel.uiState.value
 
@@ -72,7 +97,7 @@ class ProfileDetailPaneViewModelTest {
     fun `uiState emits Error when user is not found`() = runTest {
         every { userRepository.getUser("nonexistent-id") } returns flowOf(null)
 
-        val viewModel = createViewModel(userId = "nonexistent-id")
+        val viewModel = createSubscribedViewModel(userId = "nonexistent-id")
 
         val state = viewModel.uiState.value
         assertTrue(state is ProfileUiState.Error)
@@ -83,7 +108,7 @@ class ProfileDetailPaneViewModelTest {
     fun `uiState emits Error when repository throws`() = runTest {
         every { userRepository.getUser(testUser.id) } returns flow { throw IOException("database error") }
 
-        val viewModel = createViewModel()
+        val viewModel = createSubscribedViewModel()
 
         val state = viewModel.uiState.value
         assertEquals("database error", (state as ProfileUiState.Error).message)
@@ -92,7 +117,7 @@ class ProfileDetailPaneViewModelTest {
     @Test
     fun `retry recovers from error state`() = runTest {
         every { userRepository.getUser(testUser.id) } returns flow { throw IOException("transient error") }
-        val viewModel = createViewModel()
+        val viewModel = createSubscribedViewModel()
 
         assertTrue(viewModel.uiState.value is ProfileUiState.Error)
 
@@ -108,7 +133,7 @@ class ProfileDetailPaneViewModelTest {
         val userFlow = MutableStateFlow<User?>(testUser)
         every { userRepository.getUser(testUser.id) } returns userFlow
 
-        val viewModel = createViewModel()
+        val viewModel = createSubscribedViewModel()
         assertTrue(viewModel.uiState.value is ProfileUiState.Success)
 
         val updatedUser = testUser.copy(displayName = "Alice Updated")

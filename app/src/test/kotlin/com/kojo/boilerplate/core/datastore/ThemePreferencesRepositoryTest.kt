@@ -2,11 +2,13 @@ package com.kojo.boilerplate.core.datastore
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.kojo.boilerplate.ui.theme.ThemeMode
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -14,63 +16,79 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-@OptIn(ExperimentalCoroutinesApi::class)
+/**
+ * Like [DataStoreTokenProviderTest], this drives a real DataStore on real dispatchers.
+ *
+ * The previous version built the DataStore on the same TestScope it ran `runTest` on.
+ * DataStore keeps a long-lived actor coroutine alive in whatever scope it is given, and
+ * `runTest` will not finish while a coroutine in its scope is still running — so every
+ * case here died with `UncompletedCoroutinesError` after the timeout, having asserted
+ * nothing about theme persistence at all.
+ *
+ * Giving the DataStore its own scope, cancelled in tearDown, removes the conflict.
+ * Nothing needs nudging for determinism: `setThemeMode` suspends until `DataStore.edit`
+ * has committed, so the read that follows always observes the write.
+ */
 class ThemePreferencesRepositoryTest {
 
-    private val testDispatcher = UnconfinedTestDispatcher()
-    private val testScope = TestScope(testDispatcher)
     private val tempDir: File = Files.createTempDirectory("theme_datastore_test").toFile()
 
-    private fun createDataStore() = PreferenceDataStoreFactory.create(
-        scope = testScope,
-        produceFile = { File(tempDir, "test_theme_preferences.preferences_pb") },
-    )
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private lateinit var repository: ThemePreferencesRepository
 
     @Before
     fun setUp() {
-        repository = ThemePreferencesRepository(dataStore = createDataStore())
+        repository = ThemePreferencesRepository(
+            dataStore = PreferenceDataStoreFactory.create(
+                scope = scope,
+                produceFile = { File(tempDir, "test_theme_preferences.preferences_pb") },
+            ),
+        )
     }
 
     @After
     fun tearDown() {
+        scope.cancel()
         tempDir.deleteRecursively()
     }
 
     @Test
-    fun `initial theme mode defaults to System`() = testScope.runTest {
-        val mode = repository.themeMode.first()
-        assertEquals(ThemeMode.System, mode)
+    fun `initial theme mode defaults to System`() = runBlocking {
+        assertEquals(ThemeMode.System, readThemeMode())
     }
 
     @Test
-    fun `setThemeMode to Light persists Light`() = testScope.runTest {
+    fun `setThemeMode to Light persists Light`() = runBlocking {
         repository.setThemeMode(ThemeMode.Light)
-        val mode = repository.themeMode.first()
-        assertEquals(ThemeMode.Light, mode)
+        assertEquals(ThemeMode.Light, readThemeMode())
     }
 
     @Test
-    fun `setThemeMode to Dark persists Dark`() = testScope.runTest {
+    fun `setThemeMode to Dark persists Dark`() = runBlocking {
         repository.setThemeMode(ThemeMode.Dark)
-        val mode = repository.themeMode.first()
-        assertEquals(ThemeMode.Dark, mode)
+        assertEquals(ThemeMode.Dark, readThemeMode())
     }
 
     @Test
-    fun `setThemeMode to System persists System`() = testScope.runTest {
+    fun `setThemeMode to System persists System`() = runBlocking {
         repository.setThemeMode(ThemeMode.Dark)
         repository.setThemeMode(ThemeMode.System)
-        val mode = repository.themeMode.first()
-        assertEquals(ThemeMode.System, mode)
+        assertEquals(ThemeMode.System, readThemeMode())
     }
 
     @Test
-    fun `setThemeMode overwrites previous selection`() = testScope.runTest {
+    fun `setThemeMode overwrites previous selection`() = runBlocking {
         repository.setThemeMode(ThemeMode.Light)
         repository.setThemeMode(ThemeMode.Dark)
-        val mode = repository.themeMode.first()
-        assertEquals(ThemeMode.Dark, mode)
+        assertEquals(ThemeMode.Dark, readThemeMode())
+    }
+
+    /** Bounded so a stuck DataStore fails this test rather than hanging the whole task. */
+    private suspend fun readThemeMode(): ThemeMode =
+        withTimeout(TIMEOUT_MS) { repository.themeMode.first() }
+
+    private companion object {
+        const val TIMEOUT_MS = 10_000L
     }
 }
