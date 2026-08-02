@@ -6,7 +6,7 @@
 - [x] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists — every version resolves; the blockers were structural, not versions (PR #18)
 - [x] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally — all four green in CI; six stacked failures behind them, from detekt never being configured to a test suite that deadlocked rather than failed (PR #19)
 - [x] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR — promoted with `gates.yml` folded in and `workflow-templates/` removed; the template had never been runnable (PR #20)
-- [ ] Confirm `assembleDebug` produces an installable APK in CI
+- [x] Confirm `assembleDebug` produces an installable APK in CI — the APK is now checked, not just built: well-formed archive, 4-byte aligned, debug-signed under a v2+ scheme across API 26–35, carrying the package, versionCode, versionName, minSdk and targetSdk the build declares, with a launchable activity and the debuggable flag (PR #21)
 
 Item 1 complete as of PR #18 (2026-07-31). `dependency-resolution.yml` resolved
 31 configurations / 2309 module nodes with 0 failures in 1m41s, so every version
@@ -83,6 +83,50 @@ reported `BUILD SUCCESSFUL`, so the workflow's wiring (SDK present, task names
 correct, steps ordered) is genuinely proven. But the gate *outcomes* on that run
 were cache hits inherited from main rather than fresh executions. The first PR
 that touches `app/src` is what will exercise them cold.
+
+**Phase 0 complete as of PR #21 (2026-08-02).** `scripts/verify-apk.sh` now runs
+in the `build` job and checks what `assembleDebug`'s exit code never could: the
+archive is readable and carries `AndroidManifest.xml`, 16 `classes*.dex` files
+and `resources.arsc`; uncompressed entries are 4-byte aligned; `apksigner
+verify` passes across API 26–35 under an APK Signature Scheme v2 with the
+Android debug certificate; the package, `versionCode`, `versionName`, `minSdk`
+and `targetSdk` match the build; and there is a launchable
+`com.kojo.boilerplate.MainActivity` in a debuggable APK. All of it green against
+a real 86,387,904-byte APK.
+
+The expected identity is not a second copy of those values.
+`:app:writeDebugApkIdentity` writes them out of the build DSL, so changing
+`defaultConfig` moves the expectation with it and the check keeps proving AGP
+propagated the declared values into the artifact rather than comparing two
+hand-maintained lists.
+
+**The verifier is itself tested.** `scripts/verify-apk.test.sh` (27 cases)
+drives the script against stub build-tools so each check is shown to fail when
+it should and only when it should. It needs nothing but bash — no SDK, no APK,
+no network — which is the only reason any of this could be verified in the
+scheduled agent's environment at all, where `dl.google.com` is still 403 on
+CONNECT and no Gradle gate runs.
+
+Two of the three CI rounds this item took were spent on the runner's
+build-tools being **37.0.0**, well ahead of the 35.0.0 AGP builds against, and
+its output having moved: `aapt2` emits `minSdkVersion:'26'` where older versions
+emit `sdkVersion:'26'`, and `apksigner` prints `V2 Signer: certificate DN: C=US,
+O=Android, CN=Android Debug` — scheme-prefixed, and with the RDN components in
+the opposite order. Both spellings are now matched on the parts that do not vary
+and both are pinned by tests, rather than pinning a build-tools version in the
+script: the verifier runs on whatever SDK the machine has, and pinning would
+only move the failure somewhere less visible than CI. Both parse paths now dump
+the tool output they were reading, so the next format change says what it
+changed to in the run that catches it.
+
+Known gaps carried into Phase 1: the APK is never installed on an emulator — an
+`adb install` is the literal reading of "installable", but it puts a slow,
+KVM-dependent, historically flaky job on a merge-on-green gate — and alignment
+is checked at 4 bytes rather than the 16 KB page alignment Android 15+ wants for
+native libraries, which MLKit ships. `zipalign -c -P 16` needs build-tools 35+
+and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
+2.9.x) remains the largest open item from PR #19, and the wrapper still has no
+`distributionSha256Sum`.
 
 ## Phase 1 — Foundation
 - [x] Kotlin 2.1 + Gradle 8 (KTS) + Android API 26+ min, API 35 target
