@@ -1,0 +1,83 @@
+name: Gates
+
+# Phase 0 item 2: the four gates CLAUDE.md requires — compileDebugKotlin,
+# lintDebug, detekt and testDebugUnitTest.
+#
+# Why these live in their own workflow rather than in ci.yml: promoting
+# workflow-templates/ci.yml is Phase 0 item 3, and that template also carries
+# the assembleDebug/APK-artifact job that item 4 covers. Folding these gates
+# into ci.yml is item 3's job. Until then this workflow is what actually
+# observes them, because nothing in the repository did.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: compile · lint · detekt · test
+    runs-on: ubuntu-latest
+    # KSP runs twice (Hilt and Room) on a cold Gradle cache, and the first run on
+    # a branch also downloads the compileSdk 35 platform. Twenty minutes is well
+    # clear of that; beyond it the job is stuck and should fail rather than hold
+    # a runner for the six-hour default.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Every gate below runs even when an earlier one fails, so a single run
+      # reports all four results instead of stopping at the first. `!cancelled()`
+      # rather than `always()`: a cancelled run should stop, and any failed step
+      # still fails the job, so this reports more without gating less.
+      - name: compileDebugKotlin
+        id: compile
+        run: ./gradlew compileDebugKotlin --stacktrace
+
+      - name: lintDebug
+        id: lint
+        if: ${{ !cancelled() }}
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: detekt
+        id: detekt
+        if: ${{ !cancelled() }}
+        run: ./gradlew detekt --stacktrace
+
+      - name: testDebugUnitTest
+        id: test
+        if: ${{ !cancelled() }}
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reports
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/detekt/
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

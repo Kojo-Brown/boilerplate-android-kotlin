@@ -1,0 +1,87 @@
+# Detekt configuration — deltas only.
+#
+# `buildUponDefaultConfig = true` in app/build.gradle.kts keeps detekt's bundled
+# ruleset active, so everything absent from this file runs at its default setting
+# and a detekt upgrade brings new rules with it. Every entry below is a
+# deliberate decision, and each one says why it is here.
+#
+# The recurring theme is Jetpack Compose. Several detekt defaults encode
+# conventions that predate Compose and that Compose deliberately inverts —
+# @Composable functions are PascalCase, they take long parameter lists by
+# design, and they carry layout constants inline. Those are exempted by
+# annotation (`ignoreAnnotated: ['Composable']`) rather than by disabling the
+# rule, so the same rule still applies at full strength to ordinary Kotlin.
+
+build:
+  # Any finding fails the build. Detekt's own default is 0 too; it is restated
+  # here so that raising it later has to be an explicit edit to this line.
+  maxIssues: 0
+
+complexity:
+  LongParameterList:
+    # Compose's own guidance is an explicit parameter per piece of hoisted
+    # state, which is what makes a composable previewable and testable.
+    # Collapsing that into a parameter object to satisfy a counter would make
+    # the API worse, so composables are measured by the Compose convention.
+    ignoreAnnotated: ['Composable', 'Preview']
+    # Constructor injection with Hilt: the count is the module's dependency
+    # count, and hiding it behind a holder object hides the coupling instead of
+    # removing it.
+    ignoreDefaultParameters: true
+
+  TooManyFunctions:
+    # DAOs, API interfaces and repositories are flat lists of operations; a
+    # count threshold measures surface area, not complexity.
+    ignoreAnnotated: ['Dao', 'Module']
+    ignorePrivate: true
+    ignoreOverridden: true
+
+naming:
+  FunctionNaming:
+    # @Composable functions are PascalCase by Compose convention — this is the
+    # single most common detekt/Compose collision.
+    ignoreAnnotated: ['Composable']
+
+  TopLevelPropertyNaming:
+    # Compose files declare private top-level layout constants (padding, sizes)
+    # in camelCase alongside PascalCase composables; detekt's default insists on
+    # SCREAMING_SNAKE_CASE for every top-level val.
+    constantPattern: '[A-Za-z][_A-Za-z0-9]*'
+
+style:
+  MagicNumber:
+    # dp/sp literals, alpha values and animation durations are the units of the
+    # layout itself. Naming each one produces a wall of single-use constants
+    # that reads worse than the literal at the call site.
+    ignoreAnnotated: ['Composable', 'Preview']
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotation: true
+    ignoreEnums: true
+
+  ReturnCount:
+    # Guard-clause style: early returns for the invalid cases, then the happy
+    # path unindented. Forcing a single exit re-nests the whole function.
+    max: 4
+    excludeGuardClauses: true
+
+  MaxLineLength:
+    # 120 is the ktlint/Android default and matches the Kotlin style guide.
+    maxLineLength: 120
+    excludeCommentStatements: false
+
+  UnusedPrivateMember:
+    # @Preview composables are called by the IDE and the Compose tooling, never
+    # from source, so detekt cannot see a caller for them.
+    ignoreAnnotated: ['Preview', 'PreviewParameter']
+
+exceptions:
+  TooGenericExceptionCaught:
+    # `safeCall` in core/common/Result.kt exists precisely to catch everything
+    # at the I/O boundary and turn it into a typed Result. That is the rule's
+    # intended exception, not a violation of it.
+    excludeGuardClauses: true
+    allowedExceptionNameRegex: '_|(ignore|expected).*'
+
+  SwallowedException:
+    allowedExceptionNameRegex: '_|(ignore|expected).*'

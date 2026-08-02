@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -61,6 +62,35 @@ android {
 // extension, so this block has to sit outside `android { }`.
 room {
     schemaDirectory("$projectDir/schemas")
+}
+
+detekt {
+    // `detekt` on its own analyses src/*/java and src/*/kotlin across every source set,
+    // which is what CLAUDE.md's gate invokes. The per-variant `detektMain`/`detektTest`
+    // tasks the Android plugin would add need type resolution and a full compile first;
+    // this repo gates on the compile task directly instead, so plain `detekt` is the
+    // right granularity and stays fast.
+    source.setFrom(files("src/main/kotlin", "src/test/kotlin", "src/androidTest/kotlin"))
+    parallel = true
+    // The bundled default ruleset stays active; config/detekt/detekt.yml only carries
+    // the deltas, so a detekt upgrade brings its new rules in rather than silently
+    // inheriting a frozen snapshot.
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    basePath = rootDir.absolutePath
+}
+
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    // Detekt forks its own JVM analysis and defaults to the Gradle daemon's target,
+    // which is 21 here. Pin it to the module's target so the two never disagree.
+    jvmTarget = JavaVersion.VERSION_17.toString()
+    reports {
+        html.required.set(true)
+        sarif.required.set(true)
+        xml.required.set(false)
+        txt.required.set(false)
+        md.required.set(false)
+    }
 }
 
 dependencies {
