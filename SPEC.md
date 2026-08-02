@@ -4,7 +4,7 @@
 
 ## Phase 0 — Green Baseline (blocks all feature work)
 - [x] Confirm the Gradle build resolves: verify every version in `libs.versions.toml` actually exists — every version resolves; the blockers were structural, not versions (PR #18)
-- [ ] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally
+- [x] Get `compileDebugKotlin`, `lintDebug`, `detekt`, and `testDebugUnitTest` passing locally — all four green in CI; six stacked failures behind them, from detekt never being configured to a test suite that deadlocked rather than failed (PR #19)
 - [ ] Promote `workflow-templates/ci.yml` to `.github/workflows/ci.yml` and confirm it runs green on a PR
 - [ ] Confirm `assembleDebug` produces an installable APK in CI
 
@@ -25,6 +25,19 @@ not configured anywhere in the build, so item 2 has to add it. The wrapper has
 no `distributionSha256Sum`. `README.md` still advertises "Retrofit 3 + OkHttp 5"
 while the catalog pins Retrofit 2.11.0 / OkHttp 4.12.0 — a real migration, not a
 doc typo. None of the gates in CLAUDE.md beyond `./gradlew --version` have run.
+
+Item 2 complete as of PR #19 (2026-08-02). `compileDebugKotlin` (74s),
+`lintDebug` (73s), `detekt` (8s) and `testDebugUnitTest` (107 tests, 0 failures,
+17s) all green. That is the first time any of the four has produced a result:
+92 Kotlin files / ~6,300 lines had never been compiled, linted or tested.
+
+**Every gate was verified in CI, not locally, and that is not a shortcut taken
+by choice.** `dl.google.com` is blocked by the scheduled agent's egress policy
+(403 on CONNECT), and that one host is both the Android SDK download and — via
+the `maven.google.com` redirect — Google's Maven repository. AGP itself does
+not resolve there, so `./gradlew --version` is the only gate in CLAUDE.md that
+can run in that environment. Future runs should expect the same and treat the
+PR checks as the source of truth.
 
 Known gaps carried out of item 2 (PR #19):
 
