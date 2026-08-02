@@ -67,7 +67,7 @@ class FlowExtTest {
     @Test
     fun `onSuccess invokes action for successful emissions only`() = runTest {
         val collected = mutableListOf<Int>()
-        flow<Int> { emit(1); emit(2); throw RuntimeException("boom") }
+        flow<Int> { emit(1); emit(2); error("boom") }
             .asResult()
             .onSuccess { collected.add(it) }
             .toList()
@@ -78,7 +78,7 @@ class FlowExtTest {
     @Test
     fun `onFailure invokes action for failure emissions only`() = runTest {
         val errors = mutableListOf<Throwable>()
-        flow<Int> { emit(1); throw RuntimeException("boom") }
+        flow<Int> { emit(1); error("boom") }
             .asResult()
             .onFailure { errors.add(it) }
             .toList()

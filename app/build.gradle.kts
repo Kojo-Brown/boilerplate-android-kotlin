@@ -1,3 +1,8 @@
+// Imported rather than written as java.time.Duration inline: inside a Kotlin DSL build
+// script `java` resolves to the JavaPluginExtension accessor, which shadows the package
+// and fails with "Unresolved reference: time".
+import java.time.Duration
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +11,7 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -52,6 +58,14 @@ android {
         unitTests {
             all { test ->
                 test.useJUnitPlatform()
+                // A deadlocked test should fail this task, not sit until the CI job's own
+                // timeout kills the run and leaves no test report behind — which is exactly
+                // what DataStoreTokenProviderTest did before it was fixed. Gradle's task
+                // timeout covers both engines here; a JUnit 5 default timeout would not,
+                // since the suite still runs JUnit 4 classes through the vintage engine.
+                // Ten minutes is far above the suite's real runtime and only ever trips on
+                // something genuinely stuck.
+                test.timeout.set(Duration.ofMinutes(10))
             }
         }
     }
@@ -61,6 +75,35 @@ android {
 // extension, so this block has to sit outside `android { }`.
 room {
     schemaDirectory("$projectDir/schemas")
+}
+
+detekt {
+    // `detekt` on its own analyses src/*/java and src/*/kotlin across every source set,
+    // which is what CLAUDE.md's gate invokes. The per-variant `detektMain`/`detektTest`
+    // tasks the Android plugin would add need type resolution and a full compile first;
+    // this repo gates on the compile task directly instead, so plain `detekt` is the
+    // right granularity and stays fast.
+    source.setFrom(files("src/main/kotlin", "src/test/kotlin", "src/androidTest/kotlin"))
+    parallel = true
+    // The bundled default ruleset stays active; config/detekt/detekt.yml only carries
+    // the deltas, so a detekt upgrade brings its new rules in rather than silently
+    // inheriting a frozen snapshot.
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    basePath = rootDir.absolutePath
+}
+
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    // Detekt forks its own JVM analysis and defaults to the Gradle daemon's target,
+    // which is 21 here. Pin it to the module's target so the two never disagree.
+    jvmTarget = JavaVersion.VERSION_17.toString()
+    reports {
+        html.required.set(true)
+        sarif.required.set(true)
+        xml.required.set(false)
+        txt.required.set(false)
+        md.required.set(false)
+    }
 }
 
 dependencies {

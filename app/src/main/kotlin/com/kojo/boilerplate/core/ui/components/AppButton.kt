@@ -19,8 +19,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-enum class AppButtonVariant { Primary, Outlined }
-
 @Composable
 fun AppButton(
     text: String,

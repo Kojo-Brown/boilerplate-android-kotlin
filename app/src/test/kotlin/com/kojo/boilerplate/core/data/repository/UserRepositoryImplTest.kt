@@ -3,6 +3,8 @@ package com.kojo.boilerplate.core.data.repository
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.database.dao.FakeUserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
+import com.kojo.boilerplate.core.network.api.UserApi
+import io.mockk.mockk
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -24,7 +26,13 @@ class UserRepositoryImplTest {
                 UserEntity(id = "3", displayName = "Carol White", email = "carol@example.com", avatarUrl = null),
             ),
         )
-        repository = UserRepositoryImpl(userDao)
+        // Deliberately an unstubbed strict mock. Every case in this class exercises
+        // the DAO-backed reads and writes, none of which touch the network, so any
+        // call that reaches UserApi here means the test drifted onto the sync path
+        // and should fail loudly rather than quietly succeed against a fake.
+        // The network path has its own coverage in UserRepositoryImplSyncTest,
+        // which drives a real Retrofit client against MockWebServer.
+        repository = UserRepositoryImpl(userDao, mockk<UserApi>())
     }
 
     @Test

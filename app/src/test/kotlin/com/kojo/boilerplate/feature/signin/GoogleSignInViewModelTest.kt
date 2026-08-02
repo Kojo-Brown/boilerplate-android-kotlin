@@ -11,6 +11,7 @@ import io.mockk.coEvery
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -77,15 +78,25 @@ class GoogleSignInViewModelTest {
 
     @Test
     fun `signIn is debounced while already loading`() = runTest {
+        // The gate is what makes this test mean anything. Previously the fake returned
+        // before signIn() handed control back, so uiState was already Success by the
+        // second call, the Loading guard never fired, and all three calls went through —
+        // the assertion below failed against a call count of 3. Holding the first call
+        // in flight is the only way the guard it is checking can be reached.
+        val gate = CompletableDeferred<Unit>()
         val fakeRepo = FakeGoogleAuthRepository(
             signInResult = Result.success(fakeGoogleUser()),
+            signInGate = gate,
         )
         val viewModel = GoogleSignInViewModel(fakeRepo)
 
-        viewModel.signIn(fakeContext)
-        viewModel.signIn(fakeContext)
-        viewModel.signIn(fakeContext)
+        viewModel.signIn(fakeContext) // enters, parks on the gate, uiState stays Loading
+        viewModel.signIn(fakeContext) // rejected by the Loading guard
+        viewModel.signIn(fakeContext) // rejected by the Loading guard
 
+        assertEquals(1, fakeRepo.signInCallCount)
+
+        gate.complete(Unit)
         viewModel.uiState.first { it is GoogleSignInUiState.Success }
         assertEquals(1, fakeRepo.signInCallCount)
     }

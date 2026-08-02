@@ -7,11 +7,14 @@ import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -46,6 +49,26 @@ class HomeViewModelTest {
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 
+    /**
+     * uiState is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream
+     * does not run until something collects it. Reading .value with no subscriber returns
+     * the initial Loading value forever — which is why every assertion below used to fail
+     * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
+     * the state hot for the test and runTest tears it down automatically.
+     *
+     * Both dispatchers are pinned to the test's own scheduler so there is a single clock.
+     */
+    private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
+        val viewModel = HomeViewModel(
+            userRepository = userRepository,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect { }
+        }
+        return viewModel
+    }
+
     @Test
     fun `uiState initial value is Loading`() {
         assertEquals(HomeUiState.Loading, buildViewModel().uiState.value)
@@ -53,7 +76,7 @@ class HomeViewModelTest {
 
     @Test
     fun `uiState emits Success with all users when search query is empty`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
         val state = viewModel.uiState.value
 
         assertTrue(state is HomeUiState.Success)
@@ -65,7 +88,7 @@ class HomeViewModelTest {
 
     @Test
     fun `updateSearchQuery filters users by display name`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         viewModel.updateSearchQuery("alice")
 
@@ -76,7 +99,7 @@ class HomeViewModelTest {
 
     @Test
     fun `updateSearchQuery filters users by email`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         viewModel.updateSearchQuery("bob@")
 
@@ -87,7 +110,7 @@ class HomeViewModelTest {
 
     @Test
     fun `updateSearchQuery is case insensitive`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         viewModel.updateSearchQuery("CAROL")
 
@@ -98,7 +121,7 @@ class HomeViewModelTest {
 
     @Test
     fun `updateSearchQuery returns empty list when no match`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         viewModel.updateSearchQuery("xyz-no-match")
 
@@ -108,7 +131,7 @@ class HomeViewModelTest {
 
     @Test
     fun `clearing search query restores full list`() = runTest {
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         viewModel.updateSearchQuery("alice")
         viewModel.updateSearchQuery("")
@@ -120,7 +143,7 @@ class HomeViewModelTest {
     fun `uiState reflects repository updates reactively`() = runTest {
         val usersFlow = MutableStateFlow(testUsers)
         every { userRepository.getUsers() } returns usersFlow
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         assertTrue(viewModel.uiState.value is HomeUiState.Success)
 
@@ -133,9 +156,9 @@ class HomeViewModelTest {
 
     @Test
     fun `uiState emits Error when repository throws`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw RuntimeException("network error") }
+        every { userRepository.getUsers() } returns flow { throw IOException("network error") }
 
-        val viewModel = buildViewModel()
+        val viewModel = buildSubscribedViewModel()
 
         val state = viewModel.uiState.value
         assertTrue(state is HomeUiState.Error)
@@ -144,8 +167,8 @@ class HomeViewModelTest {
 
     @Test
     fun `retry triggers new collection after error`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw RuntimeException("transient error") }
-        val viewModel = buildViewModel()
+        every { userRepository.getUsers() } returns flow { throw IOException("transient error") }
+        val viewModel = buildSubscribedViewModel()
 
         assertTrue(viewModel.uiState.value is HomeUiState.Error)
 

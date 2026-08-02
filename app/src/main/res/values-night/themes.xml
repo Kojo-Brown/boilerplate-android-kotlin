@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      Dark counterpart of values/themes.xml. See that file for why the parent is
+      a platform theme rather than Theme.Material3.DayNight.NoActionBar.
+
+      This only covers the window beneath Compose. Which color scheme the app
+      itself draws is decided by BoilerplateTheme from the persisted ThemeMode,
+      which can override the system setting — so the two can legitimately
+      disagree for the first frame, and the window background is deliberately a
+      neutral surface rather than an exact match for either scheme.
+    -->
+    <style name="Theme.BoilerplateAndroidKotlin" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+</resources>
