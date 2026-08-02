@@ -170,17 +170,38 @@ else
     printf '%s\n' "$signer_output" | grep -E '^Verified using' >&2 || true
 fi
 
-# apksigner labels the certificate differently depending on version and on whether the
-# signing key has a rotation lineage: `Signer #1 certificate DN:` and
-# `Signer (minSdkVersion=..., maxSdkVersion=...) certificate DN:` are both in the wild.
-# Match on the parts that do not vary, and check every DN printed rather than the first,
-# so an unexpected second signer cannot hide behind a correct one.
-signer_dns="$(printf '%s\n' "$signer_output" | sed -n 's/^Signer[^:]*certificate DN: //p')"
+# apksigner labels the certificate line differently across versions: build-tools 37 prints
+# `V2 Signer: certificate DN:`, older ones `Signer #1 certificate DN:`, and a key carrying
+# a rotation lineage `Signer (minSdkVersion=..., maxSdkVersion=...) certificate DN:`. Only
+# `certificate DN: ` is common to all three, and no other line in the output carries that
+# text. Every DN printed is checked rather than just the first, so an unexpected second
+# signer cannot hide behind a correct one.
+signer_dns="$(printf '%s\n' "$signer_output" | sed -n 's/.*certificate DN: //p')"
+
+# The same certificate prints as `CN=Android Debug, O=Android, C=US` on some versions and
+# `C=US, O=Android, CN=Android Debug` on others — RDN order is a formatting choice, not
+# part of the identity — so compare the components as a set. This is enough for the fixed
+# debug DN; a DN with an escaped comma inside a component would need real parsing.
+normalize_dn() {
+    printf '%s' "$1" | tr ',' '\n' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort | paste -sd ',' -
+}
+
 if [ -z "$signer_dns" ]; then
     fail "apksigner printed no signer certificate DN"
     dump "apksigner verify --print-certs output" "$signer_output"
 else
-    unexpected_dn="$(printf '%s\n' "$signer_dns" | grep -vxF "$DEBUG_CERT_DN" | head -n 1 || true)"
+    expected_dn="$(normalize_dn "$DEBUG_CERT_DN")"
+    unexpected_dn=""
+    while IFS= read -r dn; do
+        [ -n "$dn" ] || continue
+        if [ "$(normalize_dn "$dn")" != "$expected_dn" ]; then
+            unexpected_dn="$dn"
+            break
+        fi
+    done <<EOF
+$signer_dns
+EOF
     if [ -n "$unexpected_dn" ]; then
         fail "signer DN is '$unexpected_dn', expected '$DEBUG_CERT_DN'"
     else

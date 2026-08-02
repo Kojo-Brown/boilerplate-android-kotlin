@@ -69,21 +69,28 @@ resources.arsc
 META-INF/CERT.SF
 EOF
 
+# Copied from what build-tools 37.0.0 actually printed for this project's debug APK in CI,
+# rather than from memory — note the `V2 Signer:` prefix and the reversed RDN order, both
+# of which differ from older build-tools and both of which broke a first attempt at this.
 cat >"$BASELINE/apksigner.out" <<'EOF'
 Verifies
 Verified using v1 scheme (JAR signing): false
 Verified using v2 scheme (APK Signature Scheme v2): true
-Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v3.2 scheme (APK Signature Scheme v3.2): false
 Verified using v4 scheme (APK Signature Scheme v4): false
 Verified for SourceStamp: false
 Number of signers: 1
-Signer #1 certificate DN: CN=Android Debug, O=Android, C=US
-Signer #1 certificate SHA-256 digest: 0000000000000000000000000000000000000000000000000000000000000000
+V2 Signer: certificate DN: C=US, O=Android, CN=Android Debug
+V2 Signer: certificate SHA-256 digest: 0000000000000000000000000000000000000000000000000000000000000000
+V2 Signer: key algorithm: RSA
+V2 Signer: key size (bits): 2048
 EOF
 
 cat >"$BASELINE/aapt2.out" <<'EOF'
 package: name='com.kojo.boilerplate' versionCode='1' versionName='1.0.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
-sdkVersion:'26'
+minSdkVersion:'26'
 targetSdkVersion:'35'
 uses-permission: name='android.permission.CAMERA'
 application-label:'Boilerplate'
@@ -152,30 +159,39 @@ expect 'a wrong versionCode is caught' 1 "versionCode is '2'" \
 expect 'a wrong versionName is caught' 1 "versionName is '9.9.9'" \
     "sed -i \"s/versionName='1.0.0'/versionName='9.9.9'/\" aapt2.out"
 expect 'a wrong minSdk is caught' 1 "minSdk is '21'" \
-    "sed -i \"s/sdkVersion:'26'/sdkVersion:'21'/\" aapt2.out"
+    "sed -i \"s/minSdkVersion:'26'/minSdkVersion:'21'/\" aapt2.out"
 expect 'a wrong targetSdk is caught' 1 "targetSdk is '34'" \
     "sed -i \"s/targetSdkVersion:'35'/targetSdkVersion:'34'/\" aapt2.out"
 
-# build-tools 37 is what the CI runner ships, and its output differs from the older
-# format in both of these places. Both spellings have to keep working: the script is run
-# by whatever SDK the machine has, and pinning one here would only move the problem.
-expect "build-tools 37's minSdkVersion badging line is accepted" 0 "minSdk is '26'" \
-    "sed -i \"s/^sdkVersion:'26'/minSdkVersion:'26'/\" aapt2.out"
-expect 'a rotation-style signer line is accepted' 0 'signed with the Android debug key' \
-    "sed -i 's/^Signer #1 certificate DN: /Signer (minSdkVersion=26, maxSdkVersion=35) certificate DN: /' apksigner.out"
-expect 'a wrong minSdk is still caught in the newer badging format' 1 "minSdk is '21'" \
-    "sed -i \"s/^sdkVersion:'26'/minSdkVersion:'21'/\" aapt2.out"
-expect 'an unexpected second signer is caught' 1 "signer DN is 'CN=Someone Else, O=X, C=US'" \
-    "printf 'Signer #2 certificate DN: CN=Someone Else, O=X, C=US\n' >>apksigner.out"
+# The baseline is build-tools 37 because that is what the CI runner ships, but the script
+# is run by whatever SDK the machine has, so the older spellings have to keep working too.
+# Pinning a build-tools version in the script would only move this problem somewhere less
+# visible. Each of these three formats broke a real run before it was handled.
+expect "the older aapt2 'sdkVersion' badging line is accepted" 0 "minSdk is '26'" \
+    "sed -i \"s/^minSdkVersion:'26'/sdkVersion:'26'/\" aapt2.out"
+expect "the older 'Signer #1' certificate line is accepted" 0 'signed with the Android debug key' \
+    "sed -i 's/^V2 Signer: certificate DN: .*/Signer #1 certificate DN: CN=Android Debug, O=Android, C=US/' apksigner.out"
+expect 'a rotation-lineage signer line is accepted' 0 'signed with the Android debug key' \
+    "sed -i 's/^V2 Signer: certificate DN: /Signer (minSdkVersion=26, maxSdkVersion=35) certificate DN: /' apksigner.out"
+# RDN order is a formatting choice, not identity: both orderings name the same key.
+expect 'either RDN ordering of the debug DN is accepted' 0 'signed with the Android debug key' \
+    "sed -i 's/^V2 Signer: certificate DN: .*/V2 Signer: certificate DN: CN=Android Debug, O=Android, C=US/' apksigner.out"
 
 expect 'a failed signature check is caught' 1 'apksigner verify failed' \
     'echo 1 >apksigner.exit'
 expect 'a v1-only signature is caught' 1 'no v2+ APK signature scheme verified' \
-    "sed -i 's/(APK Signature Scheme v[23]): true/(APK Signature Scheme v2): false/' apksigner.out"
+    "sed -i 's/(APK Signature Scheme v2): true/(APK Signature Scheme v2): false/' apksigner.out"
 expect 'a non-debug signing key is caught' 1 "signer DN is 'CN=Release, O=Example, C=US'" \
-    "sed -i 's/^Signer #1 certificate DN: .*/Signer #1 certificate DN: CN=Release, O=Example, C=US/' apksigner.out"
+    "sed -i 's/^V2 Signer: certificate DN: .*/V2 Signer: certificate DN: CN=Release, O=Example, C=US/' apksigner.out"
 expect 'a missing signer certificate is caught' 1 'no signer certificate DN' \
-    "sed -i '/^Signer #1 certificate DN: /d' apksigner.out"
+    "sed -i '/certificate DN: /d' apksigner.out"
+# A second signer must not be able to hide behind a correct first one.
+expect 'an unexpected second signer is caught' 1 "signer DN is 'CN=Someone Else, O=X, C=US'" \
+    "printf 'V3 Signer: certificate DN: CN=Someone Else, O=X, C=US\n' >>apksigner.out"
+# A near-miss DN differing only in one component must still fail, or set-comparison would
+# have quietly turned the check into "roughly the debug key".
+expect 'a DN differing in one component is caught' 1 'signer DN is' \
+    "sed -i 's/^V2 Signer: certificate DN: .*/V2 Signer: certificate DN: C=US, O=Android, CN=Android Release/' apksigner.out"
 
 expect 'an unaligned APK is caught' 1 'not 4-byte aligned' \
     'echo 1 >zipalign.exit'
