@@ -1,3 +1,8 @@
+// Imported rather than written as java.time.Duration inline: inside a Kotlin DSL build
+// script `java` resolves to the JavaPluginExtension accessor, which shadows the package
+// and fails with "Unresolved reference: time".
+import java.time.Duration
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -60,7 +65,7 @@ android {
                 // since the suite still runs JUnit 4 classes through the vintage engine.
                 // Ten minutes is far above the suite's real runtime and only ever trips on
                 // something genuinely stuck.
-                test.timeout.set(java.time.Duration.ofMinutes(10))
+                test.timeout.set(Duration.ofMinutes(10))
             }
         }
     }
