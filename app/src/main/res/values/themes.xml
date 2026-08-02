@@ -1,4 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.BoilerplateAndroidKotlin" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <!--
+      The parent used to be Theme.Material3.DayNight.NoActionBar, which is not
+      available here: that style ships in com.google.android.material:material,
+      the View-based Material Components library, and this app has no View-based
+      UI at all — the color scheme and typography are all Compose (see
+      ui/theme/BoilerplateTheme.kt). aapt2 therefore failed to link with
+      "resource style/Theme.Material3.DayNight.NoActionBar not found".
+
+      Adding that dependency would drag Material Components and AppCompat into a
+      pure-Compose app to satisfy one manifest attribute, so this inherits from
+      the platform theme instead. That is all a Compose app needs from a
+      manifest theme: the window background and system-bar treatment shown for
+      the frame before setContent {} composes. Everything after that comes from
+      MaterialTheme.
+
+      Day/night is handled by the values-night/ variant rather than by a
+      DayNight parent — android:Theme.DeviceDefault.DayNight.NoActionBar exists
+      only from API 29 and minSdk here is 26, whereas the -night resource
+      qualifier works on every supported version.
+    -->
+    <style name="Theme.BoilerplateAndroidKotlin" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- enableEdgeToEdge() in MainActivity draws behind the system bars and
+             installs the scrims itself, so the bars stay transparent here. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
 </resources>
