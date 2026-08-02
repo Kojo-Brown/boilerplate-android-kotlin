@@ -53,6 +53,14 @@ android {
         unitTests {
             all { test ->
                 test.useJUnitPlatform()
+                // A deadlocked test should fail this task, not sit until the CI job's own
+                // timeout kills the run and leaves no test report behind — which is exactly
+                // what DataStoreTokenProviderTest did before it was fixed. Gradle's task
+                // timeout covers both engines here; a JUnit 5 default timeout would not,
+                // since the suite still runs JUnit 4 classes through the vintage engine.
+                // Ten minutes is far above the suite's real runtime and only ever trips on
+                // something genuinely stuck.
+                test.timeout.set(java.time.Duration.ofMinutes(10))
             }
         }
     }
