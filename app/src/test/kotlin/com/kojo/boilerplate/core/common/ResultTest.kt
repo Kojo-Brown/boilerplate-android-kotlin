@@ -1,10 +1,17 @@
 package com.kojo.boilerplate.core.common
 
 import com.kojo.boilerplate.core.ui.UiState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -33,6 +40,36 @@ class ResultTest {
         val result = safeCall<Unit> { throw error }
         assertTrue(result.isFailure)
         assertEquals(error, result.exceptionOrNull())
+    }
+
+    @Test
+    fun `safeCall rethrows cancellation instead of wrapping it`() = runTest {
+        val cancellation = CancellationException("navigated away")
+
+        val thrown = runCatching { safeCall<Int> { throw cancellation } }.exceptionOrNull()
+
+        assertSame(cancellation, thrown)
+    }
+
+    @Test
+    fun `safeCall completes as cancelled when its caller is cancelled`() = runTest {
+        val started = CompletableDeferred<Unit>()
+        var result: Result<Int>? = null
+
+        val job = launch {
+            result = safeCall {
+                started.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        started.await()
+        job.cancelAndJoin()
+
+        // Not a Result.failure: a cancelled caller has no one left to show an error to,
+        // and swallowing the cancellation here would leave the parent waiting for a child
+        // that reports success.
+        assertNull(result)
+        assertTrue(job.isCancelled)
     }
 
     // toUiState
