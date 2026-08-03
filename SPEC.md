@@ -163,7 +163,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] GitHub Actions: lint → test → build APK
 
 ## Phase 7 — Coroutines & Concurrency
-- [ ] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup
+- [x] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup — three places turned cancellation into a failure, so a coroutine cancelled mid-call completed *successfully* and its parent never saw the cancellation it was waiting for (PR #22)
 - [ ] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper
 - [ ] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen`
 - [ ] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival
@@ -171,6 +171,41 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
 - [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
 - [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
+
+Item 1 complete as of PR #22 (2026-08-03). Nothing in the repo had used
+`coroutineScope`, `supervisorScope` or `NonCancellable`, and looking for where they
+should have been turned up the same defect in three places: `safeCall` and both
+`GoogleAuthRepositoryImpl` methods wrapped `CancellationException` into a
+`Result.failure` via `runCatching`, so a coroutine cancelled mid-call completed
+successfully, its parent stopped waiting for a cancellation that never arrived, and
+the screen the user had already left was handed an error to render.
+`UserRepositoryImpl` separately dropped an already-fetched user when the caller was
+cancelled mid-write; the request stays cancellable, the write now completes under
+`NonCancellable`.
+
+`core/coroutines/StructuredConcurrency.kt` carries what the language does not
+enforce — a cancelled coroutine cannot suspend, so a suspending cleanup in a
+`finally` block dies at its first suspension point, exactly in the case it exists
+for. The two scope builders are deliberately **not** wrapped: they are designed to
+be used inline, so their contrast lives in `docs/structured-concurrency.md` with
+every claim it makes pinned by a test in `StructuredConcurrencyTest`.
+
+Deliberately left to later items: fan-out with `async`/`awaitAll` and
+partial-failure aggregation is item 7, and the `CoroutineExceptionHandler` that
+answers the documented `supervisorScope` footgun — a failing `launch` child has
+nowhere to report to and reaches the thread's uncaught handler, which on Android is
+a crash — is item 2.
+
+The environment constraint from PR #19 still holds: `dl.google.com` is 403 on
+CONNECT for the scheduled agent, so four of the five gates in CLAUDE.md ran only in
+CI. Maven Central *is* reachable, which is enough to compile and run the pure-Kotlin
+subset of the sources locally against the real Kotlin 2.1.0 / coroutines 1.9.0 with
+stub `androidx.room` annotations, and to run detekt 1.23.8 against the repo config.
+Future runs on this repo should do the same rather than pushing unverified Kotlin:
+41 tests and a detekt finding were caught before the first push. Test-only gotcha
+worth remembering: kotlinx.coroutines copies a throwable as it crosses a coroutine
+boundary, so `assertSame` is wrong for anything caught outside the coroutine that
+threw it.
 
 ## Phase 8 — Architecture & Patterns
 - [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
