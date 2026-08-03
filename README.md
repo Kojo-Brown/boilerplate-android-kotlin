@@ -19,6 +19,11 @@ Modern Android app starter following Google's recommended architecture.
 | Camera | CameraX |
 | Testing | JUnit 5 + MockK + Compose UI Test |
 
+## Docs
+
+- [Structured concurrency](./docs/structured-concurrency.md) — `coroutineScope` vs
+  `supervisorScope`, and the cancellation rules the compiler does not enforce.
+
 ## Quick Start
 
 1. Open in Android Studio Meerkat+
