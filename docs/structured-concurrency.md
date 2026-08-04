@@ -39,7 +39,7 @@ uncaught handler, which on Android is a crash.
 
 Start children you need results from with `async` and `await()` them, which turns the
 failure back into something the caller can act on. Installing a handler is the other half
-of the answer and is a separate spec item.
+of the answer: see [coroutine error handling](./coroutine-errors.md).
 
 ## Cancellation
 
