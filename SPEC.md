@@ -164,7 +164,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 
 ## Phase 7 — Coroutines & Concurrency
 - [x] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup — three places turned cancellation into a failure, so a coroutine cancelled mid-call completed *successfully* and its parent never saw the cancellation it was waiting for (PR #22)
-- [ ] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper
+- [x] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper — nothing installed a handler anywhere, so the `supervisorScope` footgun item 1 documented was still live: a failing `launch` child had nowhere to report to and reached the thread's uncaught handler (PR #23)
 - [ ] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen`
 - [ ] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival
 - [ ] `callbackFlow` + `awaitClose` wrapping a legacy listener API
@@ -206,6 +206,40 @@ Future runs on this repo should do the same rather than pushing unverified Kotli
 worth remembering: kotlinx.coroutines copies a throwable as it crosses a coroutine
 boundary, so `assertSame` is wrong for anything caught outside the coroutine that
 threw it.
+
+Item 2 complete as of PR #23 (2026-08-04). The `safeCall` half of this item had
+already landed in PR #22, so what this added is the handler, its wiring, and
+`docs/coroutine-errors.md` — which frames the pair as one question: *is there still
+a caller?* `safeCall` when there is one and the failure should become a value, the
+handler for what is left over. `AppCoroutineExceptionHandler` reports and stops; by
+the time it runs the coroutine has failed and its scope is cancelled, so anything
+more would pretend the work can still finish. It escalates only `VirtualMachineError`
+and `LinkageError` to the thread's uncaught handler — absorbing an `OutOfMemoryError`
+buys a second, more confusing crash — and deliberately not `AssertionError`, which is
+an ordinary bug. Where a failure *goes* is a `CoroutineFailureReporter` behind one
+`@Binds`; Logcat is the default and is not production-grade on purpose.
+`@ApplicationScope` is where the handler is actually installed, and is the first
+process-lifetime scope in the repo.
+
+The two tests worth having are the ones for when a handler is silently *not*
+consulted: `launch(handler)` nested inside another coroutine, where the parent
+handles the failure, and `async`, where the `Deferred` holds it. Both read as error
+handling and neither is.
+
+The PR #22 environment constraint is unchanged — `dl.google.com` still 403 on
+CONNECT, four of five gates CI-only — and the local-verification habit it recommends
+paid off again: the handler, the reporter and all 12 tests were compiled with
+kotlinc 2.1.0 against coroutines 1.9.0 in a standalone JVM and run green before the
+first push, with an `android.util.Log` stub standing in for the platform. detekt
+1.23.8 also runs fully offline against the repo config. What that harness cannot
+reach is Hilt/KSP codegen, so `CoroutineErrorModule` is still CI's to prove.
+
+Known gaps carried forward: nothing yet *uses* `@ApplicationScope`;
+`LogcatCoroutineFailureReporter` has no unit test, because `android.util.Log` throws
+"not mocked" on the JVM and enabling `returnDefaultValues` for one thin adapter would
+weaken every other test in the module; and the merged branch could not be deleted —
+the git proxy rejects deletes, which is why every merged branch in this repo is still
+on the remote.
 
 ## Phase 8 — Architecture & Patterns
 - [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
