@@ -23,6 +23,9 @@ Modern Android app starter following Google's recommended architecture.
 
 - [Structured concurrency](./docs/structured-concurrency.md) — `coroutineScope` vs
   `supervisorScope`, and the cancellation rules the compiler does not enforce.
+- [Coroutine error handling](./docs/coroutine-errors.md) — `safeCall` for work with a
+  caller, `AppCoroutineExceptionHandler` for work without one, and when a handler is
+  silently not consulted.
 
 ## Quick Start
 
