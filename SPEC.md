@@ -165,7 +165,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 ## Phase 7 — Coroutines & Concurrency
 - [x] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup — three places turned cancellation into a failure, so a coroutine cancelled mid-call completed *successfully* and its parent never saw the cancellation it was waiting for (PR #22)
 - [x] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper — nothing installed a handler anywhere, so the `supervisorScope` footgun item 1 documented was still live: a failing `launch` child had nowhere to report to and reached the thread's uncaught handler (PR #23)
-- [ ] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen`
+- [x] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen` — two of the four were used nowhere: no `retryWhen`, so one dropped connection stranded a screen on an error until the user tapped retry, and no `debounce`, so every keystroke in the search field rebuilt the whole `HomeUiState` (PR #24)
 - [ ] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival
 - [ ] `callbackFlow` + `awaitClose` wrapping a legacy listener API
 - [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
@@ -233,6 +233,52 @@ kotlinc 2.1.0 against coroutines 1.9.0 in a standalone JVM and run green before 
 first push, with an `android.util.Log` stub standing in for the platform. detekt
 1.23.8 also runs fully offline against the repo config. What that harness cannot
 reach is Hilt/KSP codegen, so `CoroutineErrorModule` is still CI's to prove.
+
+Item 3 complete as of PR #24 (2026-08-05). `flatMapLatest` was already in use and
+correct; the other three were the gap. **`retryWhen` was absent entirely**, and a
+`Flow` is over the moment it throws — there is no resuming, so for a screen backed
+by `stateIn` one dropped connection left an error on screen until the user found the
+retry button, for a failure that would have cleared on its own.
+`core/coroutines/FlowRetry.kt` wraps it as `retryWithBackoff` around the three
+checks that make a retry loop safe rather than harmful: not cancellation, transient
+only, capped. The first is the same defect PR #22 found in three other places —
+`catch` and `retryWhen` rethrow a `CancellationException` that is the *current* job's
+cancellation cause, but one raised by upstream code is an ordinary throwable to that
+check and would be retried, swallowing the cancellation its parent waits for.
+`isTransientFailure` draws the second line at `IOException` plus 408/429/5xx: every
+other 4xx is a statement about the request, and retrying it four times only makes
+the user watch a spinner before getting the same answer.
+
+**`debounce` was absent from the one search field in the app** — `_searchQuery` fed
+`combine` directly, so typing `alice` filtered and re-mapped the list five times and
+rendered five states. `asSearchQueries()` is trim → debounce → distinct, applied to
+the *derived* query and never to `searchQuery` itself, because a debounced text
+field reads as a broken keyboard. Its timeout is computed per value so an empty
+query is not rate-limited: a plain `debounce(300)` delays the initial `""` a
+`MutableStateFlow("")` replays on subscription, putting a loading flash in front of
+every cold start.
+
+**`distinctUntilChanged` now sits upstream of the expensive part** in all three
+flow-backed ViewModels. Room invalidates per table, not per row, so any write to
+`users` re-delivers a byte-identical list, and retrying replays the prefix for the
+same reason. The trailing `stateIn` conflates the resulting state either way — but
+only after the filter and the full item mapping had run again, which is the work
+this drops. At the *end* of a pipeline the operator is genuinely redundant, and
+`docs/flow-operators.md` says so rather than implying it always earns its place.
+
+Deliberately left to later items: `WhileSubscribed(5000)` is used here but its
+`StateFlow`/`SharedFlow` trade-off is item 4, and dispatcher injection — which these
+tests lean on heavily to keep the backoff on virtual time — is item 5.
+
+The environment constraint is unchanged again, and the recommended habit caught
+things again: kotlinc found a missing `kotlinx.coroutines.test.currentTime` import
+before the first push, and the 21 new operator tests plus a standalone harness
+reproducing the `HomeViewModel` pipeline verbatim (13 timing assertions — debounce
+collapsing, retry counts, backoff schedule, `flatMapLatest` cancellation) all ran
+green locally. The one gap in that habit is what went red: detekt was *not* run
+before the first push, and CI failed on two `UseCheckOrError` findings that the
+offline detekt reproduces in seconds. Run all three — kotlinc, the JUnit console
+launcher, and detekt — not two of them.
 
 Known gaps carried forward: nothing yet *uses* `@ApplicationScope`;
 `LogcatCoroutineFailureReporter` has no unit test, because `android.util.Log` throws
