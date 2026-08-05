@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.kojo.boilerplate.core.coroutines.IoDispatcher
+import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.data.repository.UserRepository
 import com.kojo.boilerplate.navigation.AppDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -39,7 +41,10 @@ class ProfileViewModel @Inject constructor(
 
     val uiState: StateFlow<ProfileUiState> = _retrySignal
         .flatMapLatest {
+            // Retry first, dedupe second — see HomeViewModel for why this pair belongs together.
             userRepository.getUser(userId)
+                .retryWithBackoff()
+                .distinctUntilChanged()
                 .map { user ->
                     if (user != null) {
                         ProfileUiState.Success(

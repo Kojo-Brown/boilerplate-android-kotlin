@@ -26,6 +26,9 @@ Modern Android app starter following Google's recommended architecture.
 - [Coroutine error handling](./docs/coroutine-errors.md) — `safeCall` for work with a
   caller, `AppCoroutineExceptionHandler` for work without one, and when a handler is
   silently not consulted.
+- [Flow operators](./docs/flow-operators.md) — `flatMapLatest`, `debounce`,
+  `distinctUntilChanged` and `retryWhen`: where each one belongs in a ViewModel pipeline
+  and what goes wrong when it is left out or put in the wrong place.
 
 ## Quick Start
 

@@ -13,8 +13,14 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -56,18 +62,37 @@ class HomeViewModelTest {
      * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
      * the state hot for the test and runTest tears it down automatically.
      *
-     * Both dispatchers are pinned to the test's own scheduler so there is a single clock.
+     * Both dispatchers are pinned to the test's own scheduler so there is a single clock —
+     * the search debounce and the retry backoff are both `delay()` on the io dispatcher, so
+     * they only stay on virtual time while that holds.
+     *
+     * [states] records every state the UI would render, which is what the debounce assertions
+     * are about: `uiState` is a StateFlow and conflates equal consecutive values, so the
+     * intermediate states have to be counted as they go past rather than reconstructed after.
      */
-    private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
+    private fun TestScope.buildSubscribedViewModel(
+        states: MutableList<HomeUiState> = mutableListOf(),
+    ): HomeViewModel {
         val viewModel = HomeViewModel(
             userRepository = userRepository,
             ioDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.uiState.collect { }
+            viewModel.uiState.collect { states += it }
         }
+        runCurrent()
         return viewModel
     }
+
+    /** Types [query] and lets the search debounce elapse. */
+    private fun TestScope.enterQuery(viewModel: HomeViewModel, query: String) {
+        viewModel.updateSearchQuery(query)
+        advanceTimeBy(SETTLE)
+        runCurrent()
+    }
+
+    private fun HomeViewModel.successItemCount(): Int =
+        (uiState.value as HomeUiState.Success).items.size
 
     @Test
     fun `uiState initial value is Loading`() {
@@ -90,7 +115,7 @@ class HomeViewModelTest {
     fun `updateSearchQuery filters users by display name`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("alice")
+        enterQuery(viewModel, "alice")
 
         val success = viewModel.uiState.value as HomeUiState.Success
         assertEquals(1, success.items.size)
@@ -101,7 +126,7 @@ class HomeViewModelTest {
     fun `updateSearchQuery filters users by email`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("bob@")
+        enterQuery(viewModel, "bob@")
 
         val success = viewModel.uiState.value as HomeUiState.Success
         assertEquals(1, success.items.size)
@@ -112,7 +137,7 @@ class HomeViewModelTest {
     fun `updateSearchQuery is case insensitive`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("CAROL")
+        enterQuery(viewModel, "CAROL")
 
         val success = viewModel.uiState.value as HomeUiState.Success
         assertEquals(1, success.items.size)
@@ -123,20 +148,62 @@ class HomeViewModelTest {
     fun `updateSearchQuery returns empty list when no match`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("xyz-no-match")
+        enterQuery(viewModel, "xyz-no-match")
 
-        val success = viewModel.uiState.value as HomeUiState.Success
-        assertEquals(0, success.items.size)
+        assertEquals(0, viewModel.successItemCount())
     }
 
     @Test
     fun `clearing search query restores full list`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("alice")
-        viewModel.updateSearchQuery("")
+        enterQuery(viewModel, "alice")
+        enterQuery(viewModel, "")
 
-        assertEquals(3, (viewModel.uiState.value as HomeUiState.Success).items.size)
+        assertEquals(3, viewModel.successItemCount())
+    }
+
+    @Test
+    fun `searchQuery exposes every keystroke without waiting for the debounce`() = runTest {
+        val viewModel = buildSubscribedViewModel()
+
+        viewModel.updateSearchQuery("ali")
+
+        // The text field is bound to this. Debouncing it would make typing feel broken.
+        assertEquals("ali", viewModel.searchQuery.value)
+    }
+
+    @Test
+    fun `keystrokes typed within the debounce window produce a single filtered state`() = runTest {
+        val states = mutableListOf<HomeUiState>()
+        val viewModel = buildSubscribedViewModel(states)
+
+        listOf("a", "al", "ali", "alic", "alice").forEach { keystroke ->
+            viewModel.updateSearchQuery(keystroke)
+            advanceTimeBy(TYPING_GAP)
+        }
+        advanceTimeBy(SETTLE)
+        runCurrent()
+
+        // Without the debounce every prefix would filter the list and render: "a" alone
+        // matches Alice and Carol, so the intermediate states are visibly different.
+        assertEquals(
+            listOf(3, 1),
+            states.filterIsInstance<HomeUiState.Success>().map { it.items.size },
+        )
+    }
+
+    @Test
+    fun `clearing the query is not held back by the debounce`() = runTest {
+        val viewModel = buildSubscribedViewModel()
+        enterQuery(viewModel, "alice")
+        val clearedAt = currentTime
+
+        viewModel.updateSearchQuery("")
+        runCurrent()
+
+        assertEquals(3, viewModel.successItemCount())
+        assertEquals(clearedAt, currentTime)
     }
 
     @Test
@@ -150,31 +217,104 @@ class HomeViewModelTest {
         val newUser = User(id = "4", displayName = "Dave Brown", email = "dave@example.com")
         usersFlow.value = testUsers + newUser
 
-        val updated = viewModel.uiState.value as HomeUiState.Success
-        assertEquals(4, updated.items.size)
+        assertEquals(4, viewModel.successItemCount())
     }
 
     @Test
-    fun `uiState emits Error when repository throws`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw IOException("network error") }
+    fun `a transient repository failure recovers without the user tapping retry`() = runTest {
+        var subscriptions = 0
+        every { userRepository.getUsers() } returns flow {
+            subscriptions++
+            if (subscriptions == 1) throw IOException("connection reset")
+            emit(testUsers)
+        }
 
         val viewModel = buildSubscribedViewModel()
+
+        // Still Loading rather than Error: the backoff has not elapsed, so the failure has
+        // not been shown to anyone yet.
+        assertEquals(HomeUiState.Loading, viewModel.uiState.value)
+
+        advanceUntilIdle()
+
+        assertEquals(3, viewModel.successItemCount())
+        assertEquals(2, subscriptions)
+    }
+
+    @Test
+    fun `uiState emits Error only once the retries are exhausted`() = runTest {
+        var subscriptions = 0
+        every { userRepository.getUsers() } returns flow {
+            subscriptions++
+            throw IOException("network error")
+        }
+
+        val viewModel = buildSubscribedViewModel()
+        assertEquals(HomeUiState.Loading, viewModel.uiState.value)
+
+        advanceUntilIdle()
 
         val state = viewModel.uiState.value
         assertTrue(state is HomeUiState.Error)
         assertEquals("network error", (state as HomeUiState.Error).message)
+        assertEquals(4, subscriptions) // the first attempt plus three retries
+    }
+
+    @Test
+    fun `a failure that another attempt cannot fix is surfaced immediately`() = runTest {
+        var subscriptions = 0
+        every { userRepository.getUsers() } returns flow {
+            subscriptions++
+            throw IllegalStateException("unparseable row")
+        }
+
+        val viewModel = buildSubscribedViewModel()
+
+        assertTrue(viewModel.uiState.value is HomeUiState.Error)
+        assertEquals(1, subscriptions)
+        assertEquals(0L, currentTime)
     }
 
     @Test
     fun `retry triggers new collection after error`() = runTest {
         every { userRepository.getUsers() } returns flow { throw IOException("transient error") }
         val viewModel = buildSubscribedViewModel()
+        advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value is HomeUiState.Error)
 
         every { userRepository.getUsers() } returns flowOf(testUsers)
         viewModel.retry()
+        advanceUntilIdle()
 
-        assertEquals(3, (viewModel.uiState.value as HomeUiState.Success).items.size)
+        assertEquals(3, viewModel.successItemCount())
+    }
+
+    @Test
+    fun `retry cancels the collection it replaces`() = runTest {
+        val firstCollection = MutableStateFlow(testUsers)
+        every { userRepository.getUsers() } returns firstCollection
+        val viewModel = buildSubscribedViewModel()
+        assertEquals(3, viewModel.successItemCount())
+
+        val secondCollection = MutableStateFlow(emptyList<User>())
+        every { userRepository.getUsers() } returns secondCollection
+        viewModel.retry()
+        advanceUntilIdle()
+
+        // flatMapLatest cancelled the first subscription, so the abandoned flow can no longer
+        // write to uiState. Under flatMapConcat or merge this would race back to three items.
+        firstCollection.value = testUsers.take(2)
+        advanceUntilIdle()
+
+        assertEquals(0, viewModel.successItemCount())
+    }
+
+    private companion object {
+        /** Comfortably past the 300ms search debounce. */
+        val SETTLE: Duration = 400.milliseconds
+
+        /** A gap short enough that the next keystroke supersedes the previous one. */
+        val TYPING_GAP: Duration = 50.milliseconds
     }
 }
