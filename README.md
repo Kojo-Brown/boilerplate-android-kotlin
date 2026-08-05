@@ -29,6 +29,9 @@ Modern Android app starter following Google's recommended architecture.
 - [Flow operators](./docs/flow-operators.md) — `flatMapLatest`, `debounce`,
   `distinctUntilChanged` and `retryWhen`: where each one belongs in a ViewModel pipeline
   and what goes wrong when it is left out or put in the wrong place.
+- [State and events](./docs/state-and-events.md) — `StateFlow` vs `SharedFlow` vs
+  `Channel`, what `WhileSubscribed(5_000)` buys, and why a one-shot event held as state
+  fires again on every configuration change.
 
 ## Quick Start
 
