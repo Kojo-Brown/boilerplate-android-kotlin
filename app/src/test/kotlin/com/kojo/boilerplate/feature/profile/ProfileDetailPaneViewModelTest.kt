@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -105,24 +107,52 @@ class ProfileDetailPaneViewModelTest {
     }
 
     @Test
-    fun `uiState emits Error when repository throws`() = runTest {
-        every { userRepository.getUser(testUser.id) } returns flow { throw IOException("database error") }
+    fun `uiState emits Error once the automatic retries are exhausted`() = runTest {
+        var subscriptions = 0
+        every { userRepository.getUser(testUser.id) } returns flow {
+            subscriptions++
+            throw IOException("database error")
+        }
 
         val viewModel = createSubscribedViewModel()
 
+        // An IOException is transient, so retryWithBackoff holds the screen on Loading while
+        // it tries again rather than showing an error the next attempt might clear.
+        assertEquals(ProfileUiState.Loading, viewModel.uiState.value)
+
+        advanceUntilIdle()
+
         val state = viewModel.uiState.value
         assertEquals("database error", (state as ProfileUiState.Error).message)
+        assertEquals(4, subscriptions) // the first attempt plus three retries
+    }
+
+    @Test
+    fun `a failure that another attempt cannot fix is surfaced immediately`() = runTest {
+        var subscriptions = 0
+        every { userRepository.getUser(testUser.id) } returns flow {
+            subscriptions++
+            error("unparseable row")
+        }
+
+        val viewModel = createSubscribedViewModel()
+
+        assertTrue(viewModel.uiState.value is ProfileUiState.Error)
+        assertEquals(1, subscriptions)
+        assertEquals(0L, currentTime)
     }
 
     @Test
     fun `retry recovers from error state`() = runTest {
         every { userRepository.getUser(testUser.id) } returns flow { throw IOException("transient error") }
         val viewModel = createSubscribedViewModel()
+        advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value is ProfileUiState.Error)
 
         every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
         viewModel.retry()
+        advanceUntilIdle()
 
         val state = viewModel.uiState.value as ProfileUiState.Success
         assertEquals("Alice Johnson", state.profile.displayName)

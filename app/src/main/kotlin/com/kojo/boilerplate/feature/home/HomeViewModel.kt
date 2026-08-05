@@ -3,6 +3,8 @@ package com.kojo.boilerplate.feature.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kojo.boilerplate.core.coroutines.IoDispatcher
+import com.kojo.boilerplate.core.coroutines.asSearchQueries
+import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -30,16 +33,35 @@ class HomeViewModel @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
+    /**
+     * What the text field shows. Undebounced on purpose: the field is bound to this, and a
+     * character that appears 300ms after it is typed reads as a broken keyboard. The debounce
+     * goes on the derived query below, where it saves work instead of costing responsiveness.
+     */
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _retrySignal = MutableStateFlow(0)
 
+    /**
+     * `flatMapLatest` and not `flatMapConcat`/`merge`: a manual retry must *replace* the
+     * previous subscription, and only `flatMapLatest` cancels the inner flow it is switching
+     * away from. With either alternative every tap on retry would leave another live collection
+     * of `getUsers()` behind it, all of them writing to the same state.
+     */
     val uiState: StateFlow<HomeUiState> = _retrySignal
         .flatMapLatest {
             combine<List<User>, String, HomeUiState>(
-                userRepository.getUsers(),
-                _searchQuery,
+                // Retry first, dedupe second. Resubscribing replays whatever the source has
+                // already emitted, and Room invalidates per table rather than per row, so an
+                // unrelated write to `users` re-delivers a byte-identical list. The `stateIn`
+                // at the end would conflate the resulting state anyway — but only after the
+                // filter and the whole item mapping had run over the full list again.
+                // `distinctUntilChanged` drops the duplicate before that work happens.
+                userRepository.getUsers()
+                    .retryWithBackoff()
+                    .distinctUntilChanged(),
+                _searchQuery.asSearchQueries(),
             ) { users, query ->
                 val filtered = if (query.isBlank()) {
                     users
