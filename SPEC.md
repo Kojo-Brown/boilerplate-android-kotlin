@@ -166,7 +166,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] Structured concurrency: `supervisorScope`, `coroutineScope`, and cancellation-safe cleanup — three places turned cancellation into a failure, so a coroutine cancelled mid-call completed *successfully* and its parent never saw the cancellation it was waiting for (PR #22)
 - [x] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper — nothing installed a handler anywhere, so the `supervisorScope` footgun item 1 documented was still live: a failing `launch` child had nowhere to report to and reached the thread's uncaught handler (PR #23)
 - [x] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen` — two of the four were used nowhere: no `retryWhen`, so one dropped connection stranded a screen on an error until the user tapped retry, and no `debounce`, so every keystroke in the search field rebuilt the whole `HomeUiState` (PR #24)
-- [ ] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival
+- [x] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival — the sign-in screen drove navigation *and* its snackbar from `LaunchedEffect(uiState)`, so a rotation mid-snackbar cancelled the `clearError()` that was meant to follow it and the next composition showed the same failure again (PR #25)
 - [ ] `callbackFlow` + `awaitClose` wrapping a legacy listener API
 - [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
 - [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
@@ -279,6 +279,50 @@ green locally. The one gap in that habit is what went red: detekt was *not* run
 before the first push, and CI failed on two `UseCheckOrError` findings that the
 offline detekt reproduces in seconds. Run all three — kotlinc, the JUnit console
 launcher, and detekt — not two of them.
+
+Item 4 complete as of PR #25 (2026-08-05). `WhileSubscribed(5_000)` was already
+correct in all three flow-backed ViewModels; what was wrong was the other half of the
+item. The sign-in screen drove **both** of its side effects from
+`LaunchedEffect(uiState)`, and a `LaunchedEffect` keyed on state runs again every
+time the composition is rebuilt — once per configuration change. The error path is
+where that bites: `showSnackbar` suspends until dismissal, so the `clearError()`
+meant to follow it never ran when a rotation cancelled the effect, `uiState` was
+still `Error`, and the new composition showed the same snackbar from the top. Rotate
+five times, see it five times. The navigation callback had the identical shape and
+escaped only because the destination pops the sign-in entry immediately — correct by
+accident.
+
+`clearError()` was the tell: state that has to be cleared by hand once it has been
+read is an event wearing state's clothes. `GoogleSignInUiState` therefore has no
+`Error` case at all — a failed sign-in leaves the screen at `Idle`, offering the
+button — and the reason is a `GoogleSignInEvent.SignInFailed` delivered once through
+a `Channel(BUFFERED).receiveAsFlow()`. Not the `SharedFlow` the item's title names,
+and `docs/state-and-events.md` argues the choice rather than asserting it:
+`MutableSharedFlow(replay = 0)` drops what it is given while nobody is subscribed and
+`tryEmit` still returns `true` when it does, which on this screen is the ordinary
+path — the credential picker is another Activity, so the screen is stopped for the
+whole time sign-in is happening. `receiveAsFlow` and not `consumeAsFlow`, which would
+close the channel with its first collector and leave a dead event stream after one
+rotation. `core/ui/event/ObserveAsEvents.kt` is the reading half.
+
+`StateAndEventSemanticsTest` pins every claim the guide makes against
+kotlinx.coroutines itself, including the two `WhileSubscribed(5_000)` properties that
+had never been asserted anywhere: a rotation-sized gap does not restart the upstream,
+a longer one does, and the cached value survives either way because
+`replayExpirationMillis` defaults to infinite — which is the property that keeps a
+returning screen from flashing `Loading`, and it is one argument away from being lost.
+
+Deliberately left to later items: the app-wide `SharedFlow` event bus is Phase 8's
+observer-pattern item, so the guide states the rule for it and the code does not
+implement it.
+
+Environment note, and a correction to the habit PR #24 recommended: this run verified
+**only** detekt locally (1.23.8 CLI, repo config, `--build-upon-default-config`, 0
+findings) and did not stand up the kotlinc harness the previous three runs used. It
+cost a round trip — `Flow<*>.collect()` is a top-level extension, not the member
+overload, and the missing import was caught by re-reading rather than by a compiler.
+Detekt runs without type resolution and cannot catch that class of error. Run all
+three: kotlinc, the JUnit console launcher, detekt.
 
 Known gaps carried forward: nothing yet *uses* `@ApplicationScope`;
 `LogcatCoroutineFailureReporter` has no unit test, because `android.util.Log` throws
