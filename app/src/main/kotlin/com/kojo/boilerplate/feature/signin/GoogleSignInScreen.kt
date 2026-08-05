@@ -21,9 +21,9 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kojo.boilerplate.core.auth.GoogleUser
+import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import kotlinx.coroutines.launch
 
 @Composable
 fun GoogleSignInScreen(
@@ -42,17 +44,20 @@ fun GoogleSignInScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(uiState) {
-        if (uiState is GoogleSignInUiState.Success) {
-            onSignedIn((uiState as GoogleSignInUiState.Success).user)
-        }
-    }
-
-    LaunchedEffect(uiState) {
-        if (uiState is GoogleSignInUiState.Error) {
-            snackbarHostState.showSnackbar((uiState as GoogleSignInUiState.Error).message)
-            viewModel.clearError()
+    // Navigation and the snackbar are driven by the event stream, not by uiState. Keyed on a
+    // state, a LaunchedEffect runs again every time the composition is rebuilt — which is once
+    // per rotation — so the same sign-in navigated twice and the same failure was announced
+    // once per configuration change.
+    ObserveAsEvents(viewModel.events) { event ->
+        when (event) {
+            is GoogleSignInEvent.SignedIn -> onSignedIn(event.user)
+            // Launched rather than awaited: the handler returns immediately so a second event
+            // is not held up behind a snackbar, and SnackbarHostState queues the messages.
+            is GoogleSignInEvent.SignInFailed -> scope.launch {
+                snackbarHostState.showSnackbar(event.message)
+            }
         }
     }
 
@@ -78,9 +83,7 @@ fun GoogleSignInScreen(
                     )
                 }
 
-                is GoogleSignInUiState.Idle,
-                is GoogleSignInUiState.Error,
-                -> {
+                is GoogleSignInUiState.Idle -> {
                     SignInContent(
                         onSignInClick = { viewModel.signIn(context) },
                     )
