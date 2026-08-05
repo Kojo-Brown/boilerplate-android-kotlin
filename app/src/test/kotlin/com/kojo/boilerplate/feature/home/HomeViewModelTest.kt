@@ -265,7 +265,7 @@ class HomeViewModelTest {
         var subscriptions = 0
         every { userRepository.getUsers() } returns flow {
             subscriptions++
-            throw IllegalStateException("unparseable row")
+            error("unparseable row")
         }
 
         val viewModel = buildSubscribedViewModel()

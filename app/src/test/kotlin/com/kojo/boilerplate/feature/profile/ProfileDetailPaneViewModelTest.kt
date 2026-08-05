@@ -132,7 +132,7 @@ class ProfileDetailPaneViewModelTest {
         var subscriptions = 0
         every { userRepository.getUser(testUser.id) } returns flow {
             subscriptions++
-            throw IllegalStateException("unparseable row")
+            error("unparseable row")
         }
 
         val viewModel = createSubscribedViewModel()
