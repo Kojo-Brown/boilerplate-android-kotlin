@@ -3,6 +3,8 @@ package com.kojo.boilerplate.feature.home
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.network.connectivity.FakeNetworkMonitor
+import com.kojo.boilerplate.core.network.connectivity.NetworkStatus
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
@@ -50,9 +52,12 @@ class HomeViewModelTest {
         every { userRepository.getUsers() } returns flowOf(testUsers)
     }
 
+    private val networkMonitor = FakeNetworkMonitor()
+
     private fun buildViewModel() = HomeViewModel(
         userRepository = userRepository,
         ioDispatcher = UnconfinedTestDispatcher(),
+        networkMonitor = networkMonitor,
     )
 
     /**
@@ -76,6 +81,7 @@ class HomeViewModelTest {
         val viewModel = HomeViewModel(
             userRepository = userRepository,
             ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            networkMonitor = networkMonitor,
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect { states += it }
@@ -308,6 +314,49 @@ class HomeViewModelTest {
         advanceUntilIdle()
 
         assertEquals(0, viewModel.successItemCount())
+    }
+
+    @Test
+    fun `isOffline stays false with no subscriber rather than reporting a stale offline`() {
+        // Nothing is collected, so the monitor is never subscribed and the platform callback
+        // is never registered. The initial value is what a caller reading .value would see.
+        assertEquals(false, buildViewModel().isOffline.value)
+    }
+
+    @Test
+    fun `isOffline follows the monitor in both directions while subscribed`() = runTest {
+        val viewModel = buildViewModel()
+        val values = mutableListOf<Boolean>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.isOffline.collect { values += it }
+        }
+        runCurrent()
+
+        networkMonitor.emit(NetworkStatus.Offline)
+        runCurrent()
+        networkMonitor.emit(FakeNetworkMonitor.ONLINE)
+        runCurrent()
+
+        // The first `false` is the initial value, which the monitor's own "online" agrees
+        // with and StateFlow therefore conflates away rather than re-emitting.
+        assertEquals(listOf(false, true, false), values)
+    }
+
+    @Test
+    fun `a captive portal counts as online because a retry cannot fix it`() = runTest {
+        val viewModel = buildViewModel()
+        val values = mutableListOf<Boolean>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.isOffline.collect { values += it }
+        }
+        runCurrent()
+
+        // Joined, routable, and every request will come back with a login page. That is not
+        // the same failure as having no network, and the offline banner would be a lie.
+        networkMonitor.emit(NetworkStatus.Online(isValidated = false, isMetered = false))
+        runCurrent()
+
+        assertEquals(listOf(false), values)
     }
 
     private companion object {
