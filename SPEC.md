@@ -167,7 +167,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] Custom `CoroutineExceptionHandler` + a `Result`-returning `safeCall` wrapper — nothing installed a handler anywhere, so the `supervisorScope` footgun item 1 documented was still live: a failing `launch` child had nowhere to report to and reached the thread's uncaught handler (PR #23)
 - [x] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen` — two of the four were used nowhere: no `retryWhen`, so one dropped connection stranded a screen on an error until the user tapped retry, and no `debounce`, so every keystroke in the search field rebuilt the whole `HomeUiState` (PR #24)
 - [x] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival — the sign-in screen drove navigation *and* its snackbar from `LaunchedEffect(uiState)`, so a rotation mid-snackbar cancelled the `clearError()` that was meant to follow it and the next composition showed the same failure again (PR #25)
-- [ ] `callbackFlow` + `awaitClose` wrapping a legacy listener API
+- [x] `callbackFlow` + `awaitClose` wrapping a legacy listener API — neither builder was used anywhere and nothing observed connectivity at all, so `retryWithBackoff` retried a dropped connection blind and the Home screen showed a cached list with no sign it was stale; the wrapper handles the three things a naive one gets wrong — a leaked registration, no initial value, and a wifi→cellular hand-off read as an outage (PR #26)
 - [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
 - [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
 - [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
@@ -330,6 +330,48 @@ Known gaps carried forward: nothing yet *uses* `@ApplicationScope`;
 weaken every other test in the module; and the merged branch could not be deleted —
 the git proxy rejects deletes, which is why every merged branch in this repo is still
 on the remote.
+
+Item 5 complete as of PR #26 (2026-08-07). Neither `callbackFlow` nor `awaitClose`
+appeared anywhere in the repo, and nothing observed connectivity at all — which is
+what left `retryWithBackoff` (item 3) retrying a dropped connection on a blind
+schedule with no idea whether there was a network to retry over, and `HomeScreen`
+rendering a cached list with no indication that it might be stale.
+
+`ConnectivityManagerNetworkMonitor` is the worked example, and the value is in the
+three things a naive wrapper gets wrong, each pinned by a test rather than only by a
+comment. **The leaked registration**: the system holds a strong reference to the
+callback and keeps waking the process on every network change until it is
+unregistered, which nothing about a cancelled coroutine does — `awaitClose` is the
+only place it can go. **No initial value**: a `NetworkCallback` reports transitions
+only, so a collector subscribing while already offline waits for a change that may
+never come; the flow seeds itself, and seeds *after* registering so no transition
+falls into the gap. **The hand-off**: on wifi → cellular the platform announces the
+new default with `onAvailable` *before* the old one with `onLost`, so treating every
+`onLost` as offline goes offline immediately after coming back online and stays
+there.
+
+`NetworkStatus` is not a Boolean on purpose. An unvalidated network is a captive
+portal — requests connect and come back with a login page, which no retry fixes — so
+`HomeViewModel.isOffline` reports it as online and a test says so.
+
+**Every gate ran in CI only, and the environment is why.** `dl.google.com` is still
+403 on CONNECT for the scheduled agent, so Google Maven is unreachable and AGP 8.7.3
+itself does not resolve: `./gradlew compileDebugKotlin` dies at configuration time
+with "Plugin [id: 'com.android.application', version: '8.7.3'] was not found" before
+touching any project code. No Android SDK can be installed either. This run also did
+not stand up the kotlinc/JUnit-console harness the item-1–3 runs used; unlike the
+item-4 run that skipped it, this one cost no round trip — all four gates plus
+`assembleDebug` and the APK verification passed on the first CI attempt.
+
+Known gaps carried forward: `retryWithBackoff` still does not consult the monitor,
+because gating a resubscription on connectivity changes when a flow retries and is a
+design decision worth its own change; the monitor is cold, so two collectors mean two
+platform registrations, and only `HomeViewModel` currently shares one via
+`stateIn(WhileSubscribed(5_000))`; and `BarcodeScannerScreen` still leaks a
+`newSingleThreadExecutor` per composition from inside its `AndroidView` factory — the
+other listener-shaped defect in this repo, left alone here because converting a
+CameraX analyzer means restructuring camera binding and lands in code CI cannot
+exercise, since there is no emulator and `androidTest` never runs.
 
 ## Phase 8 — Architecture & Patterns
 - [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
