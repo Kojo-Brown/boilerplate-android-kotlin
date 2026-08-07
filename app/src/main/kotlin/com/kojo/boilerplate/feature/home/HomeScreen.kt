@@ -26,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
@@ -73,6 +75,9 @@ fun HomeScreen(
         },
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
+            if (isOffline) {
+                OfflineBanner(modifier = Modifier.fillMaxWidth())
+            }
             SearchBar(
                 query = searchQuery,
                 onQueryChange = viewModel::updateSearchQuery,
@@ -86,6 +91,25 @@ fun HomeScreen(
                 onItemClick = { item -> onNavigateToProfile(item.id) },
             )
         }
+    }
+}
+
+/**
+ * Shown while `HomeViewModel.isOffline` is true, above the content rather than in place of it:
+ * the list already loaded is still worth reading, it is just no longer guaranteed current.
+ */
+@Composable
+internal fun OfflineBanner(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Text(
+            text = "You are offline. Showing the last data loaded.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 

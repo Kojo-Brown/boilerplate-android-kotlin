@@ -7,6 +7,7 @@ import com.kojo.boilerplate.core.coroutines.asSearchQueries
 import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.network.connectivity.NetworkMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import javax.inject.Inject
@@ -31,7 +33,32 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    networkMonitor: NetworkMonitor,
 ) : ViewModel() {
+
+    /**
+     * Whether to tell the user the list they are looking at may be stale.
+     *
+     * Separate from [uiState] rather than folded into it, because it answers a different
+     * question. `uiState` says whether the *last load* worked; this says whether a load could
+     * work *now*. A cached list plus "you are offline" is a truthful screen, and turning the
+     * whole thing into an error state because the network dropped would throw away data the
+     * user can still read.
+     *
+     * `WhileSubscribed(5_000)` matches `uiState`: the same rotation that keeps the loaded
+     * list also keeps the network callback registered, instead of tearing it down and putting
+     * it back up again a frame later. Nothing is registered at all while no one is looking.
+     *
+     * The initial value is "online" so a cold start does not flash a banner in the window
+     * before the monitor has reported; the first real status arrives immediately after.
+     */
+    val isOffline: StateFlow<Boolean> = networkMonitor.networkStatus
+        .map { status -> !status.isOnline }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
+            initialValue = false,
+        )
 
     /**
      * What the text field shows. Undebounced on purpose: the field is bound to this, and a
@@ -88,7 +115,7 @@ class HomeViewModel @Inject constructor(
         .flowOn(ioDispatcher)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000L),
+            started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
             initialValue = HomeUiState.Loading,
         )
 
@@ -98,5 +125,14 @@ class HomeViewModel @Inject constructor(
 
     fun retry() {
         _retrySignal.update { it + 1 }
+    }
+
+    private companion object {
+        /**
+         * Long enough to cover a configuration change, short enough that a backgrounded screen
+         * stops costing anything. The standard Android value, and it now governs a platform
+         * callback registration as well as the repository subscription.
+         */
+        const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
     }
 }
