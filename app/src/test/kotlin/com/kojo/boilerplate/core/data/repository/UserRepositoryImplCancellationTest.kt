@@ -5,11 +5,14 @@ import com.kojo.boilerplate.core.database.entity.UserEntity
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,6 +23,7 @@ import org.junit.Test
  * the caller goes away, but a response that has already arrived is committed to the cache
  * rather than dropped half-way through the write.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class UserRepositoryImplCancellationTest {
 
     private val dto = UserDto(
@@ -36,12 +40,22 @@ class UserRepositoryImplCancellationTest {
         avatarUrl = null,
     )
 
+    /**
+     * Unconfined, unlike the other repository suites, because these cases choreograph a
+     * cancellation against a write that is already in flight. The gates below
+     * ([CompletableDeferred] on both sides of `upsert`) are what order this test, and an
+     * unconfined dispatcher keeps the repository's `withContext` hop from inserting a
+     * scheduler round trip between completing a gate and observing its effect. Sharing the
+     * test's scheduler still keeps `delay` on virtual time.
+     */
+    private fun TestScope.ioDispatcher() = UnconfinedTestDispatcher(testScheduler)
+
     @Test
     fun `syncUser completes the cache write after the caller is cancelled`() = runTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto))
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val job = launch { repository.syncUser("1") }
         writeStarted.await()
@@ -60,7 +74,7 @@ class UserRepositoryImplCancellationTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto))
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val job = launch { repository.syncCurrentUser() }
         writeStarted.await()
@@ -77,7 +91,7 @@ class UserRepositoryImplCancellationTest {
         runTest {
             val requestStarted = CompletableDeferred<Unit>()
             val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-            val repository = UserRepositoryImpl(userDao, HangingUserApi(requestStarted))
+            val repository = UserRepositoryImpl(userDao, HangingUserApi(requestStarted), ioDispatcher())
 
             val job = launch { repository.syncUser("1") }
             requestStarted.await()
@@ -92,7 +106,7 @@ class UserRepositoryImplCancellationTest {
     @Test
     fun `syncUser caches the fetched user when it is not cancelled`() = runTest {
         val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto))
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val result = repository.syncUser("1")
 

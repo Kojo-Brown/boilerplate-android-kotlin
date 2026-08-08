@@ -2,7 +2,7 @@ package com.kojo.boilerplate.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kojo.boilerplate.core.coroutines.IoDispatcher
+import com.kojo.boilerplate.core.coroutines.DefaultDispatcher
 import com.kojo.boilerplate.core.coroutines.asSearchQueries
 import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.data.model.User
@@ -32,7 +32,15 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    // Covers the filtering and item mapping in uiState below, and nothing else.
+    //
+    // @DefaultDispatcher and not @IoDispatcher: this was IO while the same flowOn also
+    // covered the repository's row mapping, which the repository now confines itself. What
+    // is left is a scan of the whole user list plus an allocation per surviving row —
+    // CPU-bound, with no I/O anywhere in it. Leaving it on the IO pool would be the mistake
+    // CoroutineErrorModule describes: IO is sized for threads that are parked waiting, so
+    // filling it with work that actually wants a core starves the calls it exists for.
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     networkMonitor: NetworkMonitor,
 ) : ViewModel() {
 
@@ -112,7 +120,10 @@ class HomeViewModel @Inject constructor(
                 emit(HomeUiState.Error(message = throwable.message ?: "Failed to load users"))
             }
         }
-        .flowOn(ioDispatcher)
+        // Covers the combine transform only. The repository's own `flowOn` sits closer to
+        // the source, and the innermost `flowOn` wins for the section it encloses — so the
+        // row mapping stays on IO and this governs the filtering above it.
+        .flowOn(defaultDispatcher)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),

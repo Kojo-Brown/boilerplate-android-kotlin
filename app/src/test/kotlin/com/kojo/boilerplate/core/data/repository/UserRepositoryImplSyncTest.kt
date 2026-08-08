@@ -1,7 +1,9 @@
 package com.kojo.boilerplate.core.data.repository
 
 import com.kojo.boilerplate.core.database.dao.FakeUserDao
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -17,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class UserRepositoryImplSyncTest {
 
     private lateinit var mockWebServer: MockWebServer
@@ -25,6 +28,14 @@ class UserRepositoryImplSyncTest {
     private lateinit var repository: UserRepositoryImpl
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Substituted for the real IO pool so the round trip against [MockWebServer] runs on the
+     * test's own scheduler. The request itself is genuinely blocking and completes on OkHttp's
+     * threads; `runTest` waits out that real time and resumes the continuation here, so the
+     * network is real while the dispatching stays deterministic.
+     */
+    private val testDispatcher = StandardTestDispatcher()
 
     @Before
     fun setUp() {
@@ -39,7 +50,7 @@ class UserRepositoryImplSyncTest {
             .create(UserApi::class.java)
 
         userDao = FakeUserDao()
-        repository = UserRepositoryImpl(userDao, userApi)
+        repository = UserRepositoryImpl(userDao, userApi, testDispatcher)
     }
 
     @After
@@ -48,7 +59,7 @@ class UserRepositoryImplSyncTest {
     }
 
     @Test
-    fun `syncCurrentUser returns success and caches user locally`() = runTest {
+    fun `syncCurrentUser returns success and caches user locally`() = runTest(testDispatcher) {
         mockWebServer.enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -68,7 +79,7 @@ class UserRepositoryImplSyncTest {
     }
 
     @Test
-    fun `syncCurrentUser returns failure on network error`() = runTest {
+    fun `syncCurrentUser returns failure on network error`() = runTest(testDispatcher) {
         mockWebServer.enqueue(MockResponse().setResponseCode(500))
 
         val result = repository.syncCurrentUser()
@@ -77,7 +88,7 @@ class UserRepositoryImplSyncTest {
     }
 
     @Test
-    fun `syncUser returns success and caches user locally`() = runTest {
+    fun `syncUser returns success and caches user locally`() = runTest(testDispatcher) {
         mockWebServer.enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -96,7 +107,7 @@ class UserRepositoryImplSyncTest {
     }
 
     @Test
-    fun `syncUser returns failure on HTTP 404`() = runTest {
+    fun `syncUser returns failure on HTTP 404`() = runTest(testDispatcher) {
         mockWebServer.enqueue(MockResponse().setResponseCode(404))
 
         val result = repository.syncUser("unknown")
@@ -105,7 +116,7 @@ class UserRepositoryImplSyncTest {
     }
 
     @Test
-    fun `syncUser does not cache on failure`() = runTest {
+    fun `syncUser does not cache on failure`() = runTest(testDispatcher) {
         mockWebServer.enqueue(MockResponse().setResponseCode(503))
 
         repository.syncUser("99")
