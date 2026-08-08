@@ -168,7 +168,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] Flow operators in anger: `flatMapLatest`, `debounce`, `distinctUntilChanged`, `retryWhen` — two of the four were used nowhere: no `retryWhen`, so one dropped connection stranded a screen on an error until the user tapped retry, and no `debounce`, so every keystroke in the search field rebuilt the whole `HomeUiState` (PR #24)
 - [x] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival — the sign-in screen drove navigation *and* its snackbar from `LaunchedEffect(uiState)`, so a rotation mid-snackbar cancelled the `clearError()` that was meant to follow it and the next composition showed the same failure again (PR #25)
 - [x] `callbackFlow` + `awaitClose` wrapping a legacy listener API — neither builder was used anywhere and nothing observed connectivity at all, so `retryWithBackoff` retried a dropped connection blind and the Home screen showed a cached list with no sign it was stale; the wrapper handles the three things a naive one gets wrong — a leaked registration, no initial value, and a wifi→cellular hand-off read as an outage (PR #26)
-- [ ] Dispatcher injection for testability + `runTest` with a `TestDispatcher`
+- [x] Dispatcher injection for testability + `runTest` with a `TestDispatcher` — the qualifiers and their module had existed since Phase 3, so the gap was ownership, not wiring: `UserRepositoryImpl` declared no threading contract, and because `Flow` operators are context-preserving its row mapping ran in the collector's context — the main thread — while three view models each appended `.flowOn(ioDispatcher)` to compensate and nothing could test any of the three (PR #27)
 - [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
 - [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
 
@@ -372,6 +372,72 @@ platform registrations, and only `HomeViewModel` currently shares one via
 other listener-shaped defect in this repo, left alone here because converting a
 CameraX analyzer means restructuring camera binding and lands in code CI cannot
 exercise, since there is no emulator and `androidTest` never runs.
+
+Item 6 complete as of PR #27 (2026-08-08). `@IoDispatcher`, `@DefaultDispatcher` and
+`@MainDispatcher` plus `CoroutineDispatchersModule` had been in place since Phase 3,
+so this item was never about adding wiring. It was that the layer doing the work did
+not own the decision, and that nothing could test the decision it did not own.
+
+`UserRepositoryImpl` declared no threading contract at all, and the reason that
+survived five phases is worth writing down: **Room's generated suspend DAOs and
+Retrofit's suspend calls dispatch their own work**, so a repository with no `flowOn`
+and no `withContext` still returns entirely correct results. Nothing about the
+results distinguishes the confined version from the unconfined one. What is left on
+the caller's thread is the code *between* the library calls — `toDomain()` over every
+row of a query result, `toEntity()` on every write — and `Flow` operators are
+context-preserving, so `.map { }` runs in the **collector's** context. For a view
+model collecting into `viewModelScope`, that is the main thread.
+
+Three view models compensated by appending `.flowOn(ioDispatcher)` to the repository
+call and injecting a dispatcher in order to: one decision written three times, and a
+fourth caller that forgot would have had nothing to fail. The repository now confines
+itself and the callers stop compensating. Both profile view models take no dispatcher
+at all — what is left in them is a null check and one allocation per emission, and the
+thread hand-off would cost more than the work it protects. `HomeViewModel` keeps one
+and it becomes `@DefaultDispatcher`: its remaining work is a scan of the whole user
+list, which is CPU-bound, and the IO pool is sized for threads that are parked
+waiting. Nested `flowOn` resolves this correctly — the innermost wins for the section
+it encloses, so the row mapping stays on IO.
+
+The dispatcher parameter deliberately has **no default value**. A default would let a
+caller construct the repository without one, and every test that did would silently
+run against the real IO pool.
+
+`UserRepositoryImplDispatcherTest` is what the injection is *for*, and the reason this
+is a fix rather than a tidy-up: a `CoroutineDispatcher` **is** the
+`ContinuationInterceptor` in a coroutine's context, so a fake DAO recording
+`currentCoroutineContext()[ContinuationInterceptor]` reports which dispatcher its
+caller had installed. Two `StandardTestDispatcher`s over one `TestCoroutineScheduler`
+give one virtual clock where the only difference is identity. `StandardTestDispatcher`
+and **not** `UnconfinedTestDispatcher`: unconfined never actually dispatches, so a
+missing `flowOn` would pass exactly as happily as a present one — which is the trap
+this whole item is about. The suite carries the control that the caller was not
+already on the io dispatcher, without which a bug making the two the same object would
+turn the file green. One case pins that `withContext(NonCancellable)` **inherits** the
+dispatcher rather than replacing it: `NonCancellable` is a `Job` and nothing else, and
+if it were a full context switch the cache write would land back on the caller's
+thread with nothing else noticing.
+
+**Process note, and this run got it wrong.** The environment constraint is unchanged —
+`dl.google.com` is still 403 on CONNECT, AGP 8.7.3 does not resolve, and
+`./gradlew compileDebugKotlin` dies at plugin resolution before reading any source, so
+all five gates were CI-only again. But the item-1–3 runs left explicit advice above:
+Maven Central *is* reachable, which is enough to compile and run the pure-Kotlin
+subset locally under kotlinc against the real Kotlin 2.1.0 / coroutines 1.9.0 with
+stub `androidx.room` annotations, and to run detekt offline. **This run did not stand
+that harness up and pushed unverified Kotlin.** It passed on the first CI attempt, but
+that was luck rather than method, and every gate here was reachable by that harness
+except the Hilt/KSP codegen. Future runs should build it before the first push.
+
+Known gaps carried forward: `GoogleAuthRepositoryImpl` and `ThemePreferencesRepository`
+still take no dispatcher, deliberately — Credential Manager and DataStore dispatch
+their own work and neither has meaningful mapping around the call, so a dispatcher
+there would be cargo cult. `ObserveAsEvents` still hardcodes `Dispatchers.Main.immediate`,
+which is correct for a composable. `ProfileViewModel` still has no test of its own, a
+pre-existing gap this item did not close. And there is still no `@TestInstallIn` module
+replacing the dispatchers for Hilt instrumented tests, which belongs with Phase 12's
+"Hilt test modules with fake bindings" rather than here.
+
 
 ## Phase 8 — Architecture & Patterns
 - [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
