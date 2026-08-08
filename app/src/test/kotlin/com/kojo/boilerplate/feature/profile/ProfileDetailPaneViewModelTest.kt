@@ -51,7 +51,6 @@ class ProfileDetailPaneViewModelTest {
     private fun createViewModel(userId: String = testUser.id) = ProfileDetailPaneViewModel(
         userId = userId,
         userRepository = userRepository,
-        ioDispatcher = UnconfinedTestDispatcher(),
     )
 
     /**
@@ -61,7 +60,10 @@ class ProfileDetailPaneViewModelTest {
      * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
      * the state hot for the test and runTest tears it down automatically.
      *
-     * Both dispatchers are pinned to the test's own scheduler so there is a single clock.
+     * The collector is pinned to the test's own scheduler so there is a single clock. The
+     * view model no longer takes a dispatcher of its own: its upstream runs in
+     * `viewModelScope`, which the extension above has already pointed at that scheduler,
+     * so the retry backoff stays on virtual time.
      */
     private fun TestScope.createSubscribedViewModel(
         userId: String = testUser.id,
@@ -69,7 +71,6 @@ class ProfileDetailPaneViewModelTest {
         val viewModel = ProfileDetailPaneViewModel(
             userId = userId,
             userRepository = userRepository,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect { }

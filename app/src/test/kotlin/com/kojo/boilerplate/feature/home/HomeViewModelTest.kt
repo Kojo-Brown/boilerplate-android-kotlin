@@ -56,7 +56,7 @@ class HomeViewModelTest {
 
     private fun buildViewModel() = HomeViewModel(
         userRepository = userRepository,
-        ioDispatcher = UnconfinedTestDispatcher(),
+        defaultDispatcher = UnconfinedTestDispatcher(),
         networkMonitor = networkMonitor,
     )
 
@@ -68,8 +68,8 @@ class HomeViewModelTest {
      * the state hot for the test and runTest tears it down automatically.
      *
      * Both dispatchers are pinned to the test's own scheduler so there is a single clock —
-     * the search debounce and the retry backoff are both `delay()` on the io dispatcher, so
-     * they only stay on virtual time while that holds.
+     * the search debounce and the retry backoff are both `delay()` upstream of the view
+     * model's own `flowOn`, so they only stay on virtual time while that holds.
      *
      * [states] records every state the UI would render, which is what the debounce assertions
      * are about: `uiState` is a StateFlow and conflates equal consecutive values, so the
@@ -80,7 +80,7 @@ class HomeViewModelTest {
     ): HomeViewModel {
         val viewModel = HomeViewModel(
             userRepository = userRepository,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            defaultDispatcher = UnconfinedTestDispatcher(testScheduler),
             networkMonitor = networkMonitor,
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {

@@ -32,6 +32,10 @@ Modern Android app starter following Google's recommended architecture.
 - [State and events](./docs/state-and-events.md) — `StateFlow` vs `SharedFlow` vs
   `Channel`, what `WhileSubscribed(5_000)` buys, and why a one-shot event held as state
   fires again on every configuration change.
+- [Dispatchers](./docs/dispatchers.md) — which layer owns the thread its work runs on,
+  why Room and Retrofit dispatching internally is what makes this easy to get wrong, and
+  how `runTest` plus an injected `TestDispatcher` turns "does it confine?" into an
+  assertion.
 
 ## Quick Start
 
