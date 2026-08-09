@@ -169,7 +169,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] `StateFlow` vs `SharedFlow` decision guide with `WhileSubscribed(5000)` and config-change survival — the sign-in screen drove navigation *and* its snackbar from `LaunchedEffect(uiState)`, so a rotation mid-snackbar cancelled the `clearError()` that was meant to follow it and the next composition showed the same failure again (PR #25)
 - [x] `callbackFlow` + `awaitClose` wrapping a legacy listener API — neither builder was used anywhere and nothing observed connectivity at all, so `retryWithBackoff` retried a dropped connection blind and the Home screen showed a cached list with no sign it was stale; the wrapper handles the three things a naive one gets wrong — a leaked registration, no initial value, and a wifi→cellular hand-off read as an outage (PR #26)
 - [x] Dispatcher injection for testability + `runTest` with a `TestDispatcher` — the qualifiers and their module had existed since Phase 3, so the gap was ownership, not wiring: `UserRepositoryImpl` declared no threading contract, and because `Flow` operators are context-preserving its row mapping ran in the collector's context — the main thread — while three view models each appended `.flowOn(ioDispatcher)` to compensate and nothing could test any of the three (PR #27)
-- [ ] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling
+- [x] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling — `syncCurrentUser` and `syncUser` had no caller outside their own tests, so the app could display a list of users indefinitely without ever refetching one: there was no refresh to write concurrently (PR #28)
 - [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
 
 Item 1 complete as of PR #22 (2026-08-03). Nothing in the repo had used
@@ -437,6 +437,72 @@ which is correct for a composable. `ProfileViewModel` still has no test of its o
 pre-existing gap this item did not close. And there is still no `@TestInstallIn` module
 replacing the dispatchers for Hilt instrumented tests, which belongs with Phase 12's
 "Hilt test modules with fake bindings" rather than here.
+
+Item 7 complete as of PR #28 (2026-08-09). The pattern had no representation in the
+repo, and the gap it left was not stylistic: **`syncCurrentUser` and `syncUser` had no
+caller anywhere outside their own tests.** Home served its list from Room, and its
+"Retry" button resubscribed to that query — the fix for a failed *read*, which cannot
+make data newer. So the app could display a list indefinitely without asking the
+network for it again, and there was no refresh to write concurrently because there was
+no refresh.
+
+`core/coroutines/FanOut.kt` carries both halves. `mapConcurrently` is all-or-nothing:
+`awaitAll` inside `coroutineScope`, so the first failure cancels the siblings still
+working towards a result nobody can use, and does not return until they have finished
+cancelling. `mapConcurrentlyCatching` returns a `FanOutResult` with each failure
+carrying the *input* that produced it, so a caller can retry exactly the ones that did
+not land — a bare list of throwables answers "how badly did that go?" but not "which
+ones do I retry?".
+
+Three decisions are the substance, and each has a wrong answer that still compiles:
+
+1. **Concurrency is bounded by a `Semaphore`, and the permit is taken inside each
+   child.** `map { async { } }` starts as many requests as the list happens to be long
+   — a herd sized by data rather than by design, with the tail queued behind OkHttp's
+   five-per-host limit anyway. Taking the permit inside the child is what makes
+   `withPermit`'s `finally` release it on the failure path; a permit released only on
+   success runs at full speed until the first outage and then deadlocks.
+2. **`supervisorScope` is not what delivers a partial result**, which is the trap this
+   item exists to document, because the obvious reading of item 1's own doc says it is.
+   Scope policy does not help when `awaitAll` rethrows the first failure regardless —
+   and once it throws, every `Deferred` left un-awaited takes its exception to the
+   grave. Catching *inside each child, as a value*, is what works: no child ever fails,
+   so there is nothing for a scope policy to arbitrate.
+3. **Cancellation stays cancellation**, via the `rethrowIfCancellation` from item 1.
+   `runCatching` would record it as element N's failure and hand the caller a tidy
+   report of a fan-out that had been told to stop — completing *normally*, with a
+   partial result, for a screen the user has already left.
+
+`UserRepositoryImpl.syncUsers` is the first caller (the API has no bulk endpoint, so a
+list refresh is genuinely N independent requests) and dedupes its ids first: the same
+id twice is the same request twice, and duplicates would make "8 refreshed" mean either
+eight users or five. `HomeViewModel.refresh()` wires it to the app bar. The outcome
+lives beside `HomeUiState` rather than inside it, for the same reason the offline
+banner does — a failed refresh should not replace a readable list with an error page —
+and a CAS on that state doubles as the in-flight lock, so a double tap is one fan-out.
+Successes get no UI path at all: they land in Room and the list observing it re-renders,
+so the only thing the fan-out reports is the shortfall.
+
+**Process note: the harness item 6 asked for was built, but only partway.**
+`dl.google.com` is still 403 on CONNECT and AGP 8.7.3 still does not resolve, so all
+five gates were CI-only again. This run did stand up kotlinc 2.1.0 from Maven Central
+and compiled `FanOut.kt` + `StructuredConcurrency.kt` + `FanOutTest.kt` against the
+real coroutines 1.9.0 — clean, and all 20 tests passed locally before the first push.
+What it did *not* do is add the stub `androidx.room`/`androidx.lifecycle` annotations
+that would have covered `UserRepositoryImplSyncUsersTest` and `HomeViewModelRefreshTest`,
+or run detekt offline. Those three gates were still pushed unverified. They passed
+first time, but the next run should extend the stub set rather than repeat the gamble.
+Where an API could not be exercised it was at least confirmed by `javap` against the
+exact pinned jar rather than from memory — `MockWebServer.dispatcher`/`requestCount`,
+`RecordedRequest.path`, `Semaphore`/`withPermit`, and `MockKStubScope.coAnswers`, the
+last of which decided whether an import was required or a compile error.
+
+Known gaps carried forward: nothing uses `mapConcurrently` (the all-or-nothing half) in
+production yet — it is tested but not called, which is the same shape of gap this item
+found in `syncUser`, and the first screen needing two independent fetches should be its
+caller. `syncCurrentUser` still has no caller. The refresh covers only the users
+currently on screen, so refreshing under an active search leaves the rest untouched by
+design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuilt.
 
 
 ## Phase 8 — Architecture & Patterns
