@@ -25,7 +25,9 @@ half an answer, and continuing to fetch it after permissions failed only wastes 
 
 `supervisorScope` is for the case where the parts stand alone — refreshing four independent
 dashboard cards, or uploading a batch where three successes and one failure is a real
-outcome you intend to report.
+outcome you intend to report. For the specific shape of running one operation over many
+inputs, [concurrent fan-out](./fan-out.md) covers why `supervisorScope` on its own still
+does not hand you those three successes.
 
 Neither is a way to *avoid* waiting. `supervisorScope` isolates failures; it does not
 abandon children. It still does not return until the slowest of them has finished.
