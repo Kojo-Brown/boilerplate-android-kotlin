@@ -1,7 +1,9 @@
 package com.kojo.boilerplate.core.data.repository
 
 import com.kojo.boilerplate.core.common.safeCall
+import com.kojo.boilerplate.core.coroutines.FanOutResult
 import com.kojo.boilerplate.core.coroutines.IoDispatcher
+import com.kojo.boilerplate.core.coroutines.mapConcurrentlyCatching
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.database.dao.UserDao
 import com.kojo.boilerplate.core.database.entity.toDomain
@@ -64,6 +66,30 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun syncUser(id: String): Result<User> = withContext(ioDispatcher) {
         safeCall { cache(userApi.getUser(id).toDomain()) }
     }
+
+    /**
+     * `distinct()` before the fan-out, because the same id twice is the same request twice.
+     * Nothing upstream guarantees the caller deduplicated — a list built from two sources,
+     * or a screen that shows a user in both a "recent" and an "all" section, produces
+     * duplicates without anyone deciding to — and each one would cost a round trip and a
+     * redundant write to arrive at the byte-identical row. It also keeps [FanOutResult]
+     * honest: with duplicates in, "8 refreshed" could mean eight users or five.
+     *
+     * `mapConcurrentlyCatching` and not a `supervisorScope` here: this is the shape that
+     * keeps each failure attached to the id that caused it, which is what a caller needs to
+     * retry only the ones that did not land. See `docs/fan-out.md`.
+     *
+     * The whole fan-out runs inside one `withContext(ioDispatcher)` rather than one per
+     * child. `withContext` is a suspension and a possible thread hand-off each time it is
+     * entered; the children inherit this context, so paying for it once at the top is the
+     * same confinement for a fraction of the dispatches.
+     */
+    override suspend fun syncUsers(ids: List<String>): FanOutResult<String, User> =
+        withContext(ioDispatcher) {
+            ids.distinct().mapConcurrentlyCatching { id ->
+                cache(userApi.getUser(id).toDomain())
+            }
+        }
 
     /**
      * Commits a freshly fetched [user] to the local cache and returns it.

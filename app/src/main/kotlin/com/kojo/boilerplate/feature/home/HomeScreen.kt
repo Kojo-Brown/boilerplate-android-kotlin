@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,11 +51,20 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
+    val refreshState by viewModel.refreshState.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(title = { Text("Home") })
+            TopAppBar(
+                title = { Text("Home") },
+                actions = {
+                    RefreshAction(
+                        inProgress = refreshState is RefreshState.InProgress,
+                        onRefresh = viewModel::refresh,
+                    )
+                },
+            )
         },
         floatingActionButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -78,6 +89,11 @@ fun HomeScreen(
             if (isOffline) {
                 OfflineBanner(modifier = Modifier.fillMaxWidth())
             }
+            RefreshOutcomeBanner(
+                refreshState = refreshState,
+                onDismiss = viewModel::dismissRefreshResult,
+                modifier = Modifier.fillMaxWidth(),
+            )
             SearchBar(
                 query = searchQuery,
                 onQueryChange = viewModel::updateSearchQuery,
@@ -92,6 +108,99 @@ fun HomeScreen(
             )
         }
     }
+}
+
+/**
+ * The refresh control, which is a spinner while the fan-out is in flight and a button
+ * otherwise.
+ *
+ * Swapping the button out rather than disabling it in place is what stops a second tap from
+ * queueing behind the first — the view model rejects one anyway, but a button that looks
+ * pressable and does nothing reads as a bug. The spinner keeps the app bar's slot width, so
+ * the transition does not shift the title.
+ */
+@Composable
+internal fun RefreshAction(
+    inProgress: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (inProgress) {
+        Box(
+            // The IconButton's own minimum touch target, so swapping the two does not
+            // resize the app bar's action slot mid-refresh.
+            modifier = modifier.size(48.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+            )
+        }
+    } else {
+        IconButton(onClick = onRefresh, modifier = modifier) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh users",
+            )
+        }
+    }
+}
+
+/**
+ * Reports what a finished refresh could not do, and stays out of the way otherwise.
+ *
+ * Nothing is rendered for a clean refresh: the rows that changed are already visible, and
+ * "everything worked" is a message the user has to dismiss to get their screen back. What
+ * is worth a banner is the gap between what they asked for and what arrived — a complete
+ * failure, or a partial one where the list looks refreshed but some of it is not.
+ *
+ * A refresh that had nothing to refresh (an empty or fully filtered list) reports nothing
+ * either: zero of zero users failed.
+ */
+@Composable
+internal fun RefreshOutcomeBanner(
+    refreshState: RefreshState,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val finished = refreshState as? RefreshState.Finished ?: return
+    if (finished.failed == 0) return
+
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = refreshFailureMessage(
+                    refreshed = finished.refreshed,
+                    failed = finished.failed,
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+/**
+ * Says which users are stale, not how many requests failed.
+ *
+ * "2 of 10 failed" describes the fan-out; the user is looking at a list and wants to know
+ * how much of it to trust. The complete-failure case gets its own sentence because "0 users
+ * updated" reads as a successful no-op rather than as a failure.
+ */
+private fun refreshFailureMessage(refreshed: Int, failed: Int): String = when (refreshed) {
+    0 -> "Could not refresh. Showing the last data loaded."
+    else -> "Refreshed $refreshed of ${refreshed + failed} users. The rest may be out of date."
 }
 
 /**

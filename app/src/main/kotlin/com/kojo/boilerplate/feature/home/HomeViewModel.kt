@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // flatMapLatest is still @ExperimentalCoroutinesApi in coroutines 1.9.0. The
@@ -77,6 +78,14 @@ class HomeViewModel @Inject constructor(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _retrySignal = MutableStateFlow(0)
+
+    /**
+     * Plain [MutableStateFlow] rather than a `stateIn` pipeline: this is not derived from
+     * anything, it is written by [refresh] and read by the screen. It is also the refresh's
+     * own in-flight lock — see the CAS in [refresh].
+     */
+    private val _refreshState = MutableStateFlow<RefreshState>(RefreshState.Idle)
+    val refreshState: StateFlow<RefreshState> = _refreshState.asStateFlow()
 
     /**
      * `flatMapLatest` and not `flatMapConcat`/`merge`: a manual retry must *replace* the
@@ -136,6 +145,50 @@ class HomeViewModel @Inject constructor(
 
     fun retry() {
         _retrySignal.update { it + 1 }
+    }
+
+    /**
+     * Re-fetches the users currently on screen from the network, all at once.
+     *
+     * [retry] and this are different operations that a user would describe with the same
+     * word. `retry` resubscribes to the database query, which is the fix for a *read* that
+     * failed; it cannot make the data newer, because nothing in this screen ever asked the
+     * network for it. This is the one that does, and until it existed
+     * [UserRepository.syncUser] had no caller outside its own tests — the app could display
+     * users indefinitely without ever refetching one.
+     *
+     * The ids come from [uiState], so a refresh under an active search covers what the user
+     * is looking at rather than the whole table. That is both the cheaper request and the
+     * one they asked for; clearing the search and refreshing again covers the rest.
+     *
+     * Nothing is done with the successes here. They were written to the database by the
+     * repository, and [uiState] observes the database, so the rows update themselves — the
+     * only thing this has to report is the shortfall.
+     */
+    fun refresh() {
+        // Read once, then claim with a CAS. Read-check-write is not enough: two taps landing
+        // in the same frame both read Idle, both pass the check, and both launch a fan-out —
+        // doubling the requests and racing to write the result. Under the CAS the loser
+        // fails to claim and becomes a no-op. It is also why the in-flight flag is this
+        // StateFlow rather than a separate Boolean: one atomic value cannot disagree with
+        // itself about whether a refresh is running.
+        val claimed = _refreshState.value
+        if (claimed is RefreshState.InProgress) return
+        if (!_refreshState.compareAndSet(claimed, RefreshState.InProgress)) return
+
+        viewModelScope.launch {
+            val ids = (uiState.value as? HomeUiState.Success)?.items?.map { it.id }.orEmpty()
+            val outcome = userRepository.syncUsers(ids)
+            _refreshState.value = RefreshState.Finished(
+                refreshed = outcome.successes.size,
+                failed = outcome.failures.size,
+            )
+        }
+    }
+
+    /** Dismisses the outcome of the last refresh, returning the screen to [RefreshState.Idle]. */
+    fun dismissRefreshResult() {
+        _refreshState.value = RefreshState.Idle
     }
 
     private companion object {
