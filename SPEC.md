@@ -170,7 +170,7 @@ and is worth its own item. Raising AGP off 8.7.3 (with `lifecycle` restored to
 - [x] `callbackFlow` + `awaitClose` wrapping a legacy listener API — neither builder was used anywhere and nothing observed connectivity at all, so `retryWithBackoff` retried a dropped connection blind and the Home screen showed a cached list with no sign it was stale; the wrapper handles the three things a naive one gets wrong — a leaked registration, no initial value, and a wifi→cellular hand-off read as an outage (PR #26)
 - [x] Dispatcher injection for testability + `runTest` with a `TestDispatcher` — the qualifiers and their module had existed since Phase 3, so the gap was ownership, not wiring: `UserRepositoryImpl` declared no threading contract, and because `Flow` operators are context-preserving its row mapping ran in the collector's context — the main thread — while three view models each appended `.flowOn(ioDispatcher)` to compensate and nothing could test any of the three (PR #27)
 - [x] Concurrent request fan-out with `async`/`awaitAll` and partial-failure handling — `syncCurrentUser` and `syncUser` had no caller outside their own tests, so the app could display a list of users indefinitely without ever refetching one: there was no refresh to write concurrently (PR #28)
-- [ ] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections
+- [x] Immutability: `data class` + `@Immutable`/`@Stable` annotations and persistent collections — nothing in the app carried either annotation, and the two state classes holding collections held them as `List`, which is a read-only interface over what is usually an `ArrayList` and so makes the class unstable; strong skipping then falls back to instance comparison, and both producers allocate a fresh list per emission (Room invalidates per table, so any row write rebuilds the whole home list; the ML Kit analyzer rebuilds its blocks once per camera frame), so neither ever compared equal and both panes recomposed regardless. `StabilityContractTest` is what keeps it fixed: `@Immutable` is an unchecked promise the compiler skips recomposition on, so the audit discovers every ViewModel from the compiled output, walks the graph reachable from each `StateFlow`, and fails the build on a missing annotation, a `var`, or a `kotlin.collections` property type (PR #29)
 
 Item 1 complete as of PR #22 (2026-08-03). Nothing in the repo had used
 `coroutineScope`, `supervisorScope` or `NonCancellable`, and looking for where they
@@ -547,3 +547,33 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 - [ ] Screenshot tests with Paparazzi + a CI diff gate
 - [ ] Instrumented tests on an emulator matrix in CI
 - [ ] Hilt test modules with fake bindings replacing network and DB
+
+Phase 7 item 8 complete as of PR #29 (2026-08-10). All four checks green:
+dependency resolution, `compileDebugKotlin` / `lintDebug` / `detekt` /
+`testDebugUnitTest`, `assembleDebug` + APK verification, and GitGuardian.
+
+`kotlinx-collections-immutable` is pinned at **0.3.8**, not 0.4.0 or 0.5.1.
+0.5.x is built on kotlin-stdlib 2.3.0, whose metadata Kotlin 2.1.0 cannot read;
+0.4.0 is on 2.1.20, which reads but drags the stdlib ahead of the compiler and
+makes every compile task warn that the runtime JARs are newer than the API
+version. The same pin question that broke Phase 0 item 1 elsewhere, answered by
+reading the POMs rather than by picking the newest number.
+
+The environment constraint from PR #19 still holds and should be assumed by
+every future run: `dl.google.com` is 403 on CONNECT for the scheduled agent, so
+AGP itself is unfetchable and Gradle cannot even configure the project — zero of
+the five gates in CLAUDE.md can run locally. What *was* run locally this time,
+and is worth repeating: the Kotlin 2.1.0 compiler is on **Maven Central**, which
+is reachable, so `app/src` can be parse-checked for syntax errors, and a
+self-contained test like `StabilityContractTest` can be compiled and executed
+against stand-ins — here against a deliberately broken hierarchy (it reported all
+four defect classes) and against the real state types (clean). That is not a
+substitute for CI, but it is a great deal better than pushing blind.
+
+Known gaps carried forward: instrumented tests still run nowhere, so
+`HomeScreenTest`'s move to `persistentListOf` is compile-checked only. The
+Compose compiler's own stability *metrics* are not wired into the build — the
+audit checks the contract at the source level, which is where the fix lives, but
+it does not read back what the compiler actually inferred. `ImageVector` is
+trusted to carry its upstream `@Immutable` rather than being listed by hand;
+CI confirms that trust is well placed today.
