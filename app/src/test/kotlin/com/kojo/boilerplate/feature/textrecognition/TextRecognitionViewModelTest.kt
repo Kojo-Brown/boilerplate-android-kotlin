@@ -2,6 +2,7 @@ package com.kojo.boilerplate.feature.textrecognition
 
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import io.mockk.junit5.MockKExtension
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -45,7 +46,7 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `onTextDetected transitions to TextDetected state`() = runTest {
-        val blocks = listOf(RecognizedTextBlock("Hello World", 0.95f))
+        val blocks = persistentListOf(RecognizedTextBlock("Hello World", 0.95f))
         viewModel.onTextDetected("Hello World", blocks)
 
         val state = viewModel.uiState.first()
@@ -59,8 +60,8 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `onTextDetected is ignored when paused`() = runTest {
-        val firstBlocks = listOf(RecognizedTextBlock("First", 0.9f))
-        val secondBlocks = listOf(RecognizedTextBlock("Second", 0.8f))
+        val firstBlocks = persistentListOf(RecognizedTextBlock("First", 0.9f))
+        val secondBlocks = persistentListOf(RecognizedTextBlock("Second", 0.8f))
         viewModel.onTextDetected("First", firstBlocks)
         viewModel.onTextDetected("Second", secondBlocks)
 
@@ -70,7 +71,7 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `onTextDetected sets isPaused to true`() = runTest {
-        viewModel.onTextDetected("Hello", emptyList())
+        viewModel.onTextDetected("Hello", persistentListOf())
         assertTrue(viewModel.isPaused.first())
     }
 
@@ -94,7 +95,7 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `resumeScanning resets uiState to Scanning`() = runTest {
-        viewModel.onTextDetected("Some text", emptyList())
+        viewModel.onTextDetected("Some text", persistentListOf())
         viewModel.resumeScanning()
 
         assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
@@ -102,7 +103,7 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `resumeScanning resets isPaused to false`() = runTest {
-        viewModel.onTextDetected("Some text", emptyList())
+        viewModel.onTextDetected("Some text", persistentListOf())
         viewModel.resumeScanning()
 
         assertFalse(viewModel.isPaused.first())
@@ -131,7 +132,7 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `text blocks are stored with correct confidence`() = runTest {
-        val blocks = listOf(
+        val blocks = persistentListOf(
             RecognizedTextBlock("Line one", 0.98f),
             RecognizedTextBlock("Line two", 0.75f),
             RecognizedTextBlock("Line three", -1f),
@@ -147,9 +148,9 @@ class TextRecognitionViewModelTest {
 
     @Test
     fun `can scan again after previous result`() = runTest {
-        viewModel.onTextDetected("First scan", emptyList())
+        viewModel.onTextDetected("First scan", persistentListOf())
         viewModel.resumeScanning()
-        viewModel.onTextDetected("Second scan", emptyList())
+        viewModel.onTextDetected("Second scan", persistentListOf())
 
         val state = viewModel.uiState.first() as TextRecognitionUiState.TextDetected
         assertEquals("Second scan", state.fullText)

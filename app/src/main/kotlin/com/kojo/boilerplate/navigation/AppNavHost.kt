@@ -23,6 +23,7 @@ import com.kojo.boilerplate.feature.profile.ProfileScreen
 import com.kojo.boilerplate.feature.scanner.BarcodeScannerScreen
 import com.kojo.boilerplate.feature.signin.GoogleSignInScreen
 import com.kojo.boilerplate.feature.textrecognition.TextRecognitionScreen
+import kotlinx.collections.immutable.persistentListOf
 
 @Composable
 fun AppNavHost(
@@ -126,7 +127,7 @@ private fun MainNavScaffold(
     currentTopLevel: TopLevelDestination,
     content: @Composable () -> Unit,
 ) {
-    val navItems = listOf(
+    val navItems = persistentListOf(
         AdaptiveNavItem(
             label = "Home",
             icon = Icons.Default.Home,

@@ -64,6 +64,8 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.Executors
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -165,7 +167,7 @@ fun TextRecognitionScreen(
 @Composable
 private fun TextRecognitionCameraPreview(
     isFlashEnabled: Boolean,
-    onTextDetected: (fullText: String, blocks: List<RecognizedTextBlock>) -> Unit,
+    onTextDetected: (fullText: String, blocks: ImmutableList<RecognizedTextBlock>) -> Unit,
     onError: (message: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -432,7 +434,7 @@ private fun ErrorContent(
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 private class MlKitTextAnalyzer(
-    private val onTextDetected: (fullText: String, blocks: List<RecognizedTextBlock>) -> Unit,
+    private val onTextDetected: (fullText: String, blocks: ImmutableList<RecognizedTextBlock>) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -448,17 +450,23 @@ private class MlKitTextAnalyzer(
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
                 if (visionText.text.isNotBlank()) {
-                    val blocks = visionText.textBlocks.map { block ->
-                        RecognizedTextBlock(
-                            text = block.text,
-                            confidence = block.lines
-                                .mapNotNull { it.confidence }
-                                .let { confidences ->
-                                    if (confidences.isEmpty()) -1f
-                                    else confidences.average().toFloat()
-                                },
-                        )
-                    }
+                    // Built straight into a persistent list: this runs once per analysed
+                    // frame, and the view model's state type is what consumes it, so
+                    // producing a `List` here only to convert it there would copy the
+                    // whole thing again on the camera thread.
+                    val blocks = visionText.textBlocks
+                        .mapTo(persistentListOf<RecognizedTextBlock>().builder()) { block ->
+                            RecognizedTextBlock(
+                                text = block.text,
+                                confidence = block.lines
+                                    .mapNotNull { it.confidence }
+                                    .let { confidences ->
+                                        if (confidences.isEmpty()) -1f
+                                        else confidences.average().toFloat()
+                                    },
+                            )
+                        }
+                        .build()
                     onTextDetected(visionText.text, blocks)
                 }
             }

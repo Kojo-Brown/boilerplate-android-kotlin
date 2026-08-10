@@ -2,6 +2,7 @@ package com.kojo.boilerplate.feature.textrecognition
 
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +20,7 @@ class TextRecognitionViewModel @Inject constructor() : ViewModel() {
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
-    fun onTextDetected(fullText: String, blocks: List<RecognizedTextBlock>) {
+    fun onTextDetected(fullText: String, blocks: ImmutableList<RecognizedTextBlock>) {
         if (_uiState.value is TextRecognitionUiState.Scanning && !_isPaused.value) {
             _uiState.value = TextRecognitionUiState.TextDetected(fullText, blocks)
             _isPaused.value = true

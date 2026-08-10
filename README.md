@@ -39,6 +39,9 @@ Modern Android app starter following Google's recommended architecture.
   why Room and Retrofit dispatching internally is what makes this easy to get wrong, and
   how `runTest` plus an injected `TestDispatcher` turns "does it confine?" into an
   assertion.
+- [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
+  costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
+  `@Immutable` promises the compiler that nothing verifies.
 
 ## Quick Start
 

@@ -9,6 +9,7 @@ import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
 import com.kojo.boilerplate.core.network.connectivity.NetworkMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,13 +117,19 @@ class HomeViewModel @Inject constructor(
                     }
                 }
                 HomeUiState.Success(
-                    items = filtered.map { user ->
+                    // Mapped straight into a persistent-list builder rather than through
+                    // `map { }.toImmutableList()`. The latter fills an ArrayList and then
+                    // copies all of it into the persistent trie; the builder writes the trie
+                    // once and `build()` hands over its root without copying. One list-sized
+                    // allocation per emission instead of two, on a path that runs on every
+                    // keystroke after the debounce.
+                    items = filtered.mapTo(persistentListOf<HomeItem>().builder()) { user ->
                         HomeItem(
                             id = user.id,
                             title = user.displayName,
                             description = user.email,
                         )
-                    },
+                    }.build(),
                     greeting = "Boilerplate Android",
                 )
             }.catch { throwable ->

@@ -1,19 +1,38 @@
 package com.kojo.boilerplate.feature.home
 
+import androidx.compose.runtime.Immutable
+import kotlinx.collections.immutable.ImmutableList
+
+@Immutable
 data class HomeItem(
     val id: String,
     val title: String,
     val description: String,
 )
 
+@Immutable
 sealed class HomeUiState {
     data object Loading : HomeUiState()
 
+    /**
+     * [items] is an [ImmutableList] rather than a `List` because `List` is an interface and
+     * `HomeContent` is called on every frame of a scroll.
+     *
+     * A `List`-typed property makes the whole class unstable to the Compose compiler: it
+     * cannot see the implementation, and `ArrayList` behind that interface is mutable. Under
+     * strong skipping the composable is still skippable, but only by *instance* comparison —
+     * so the list this view model rebuilds on every upstream emission is a new object every
+     * time and never compares equal, even when the users are unchanged. `ImmutableList` is
+     * in the Compose compiler's known-stable set, which puts the class back on structural
+     * equality and lets an identical refresh skip the recomposition entirely.
+     */
+    @Immutable
     data class Success(
-        val items: List<HomeItem>,
+        val items: ImmutableList<HomeItem>,
         val greeting: String,
     ) : HomeUiState()
 
+    @Immutable
     data class Error(val message: String) : HomeUiState()
 }
 
@@ -30,6 +49,7 @@ sealed class HomeUiState {
  * the list observing it re-renders. What [Finished] carries is the part the list cannot
  * show, which is what did *not* arrive.
  */
+@Immutable
 sealed interface RefreshState {
 
     /** No refresh has run, or the last result has been dismissed. */
@@ -42,6 +62,7 @@ sealed interface RefreshState {
      * A fan-out completed. [refreshed] and [failed] together account for every user the
      * refresh attempted, so `refreshed + failed == 0` means there was nothing to refresh.
      */
+    @Immutable
     data class Finished(
         val refreshed: Int,
         val failed: Int,
