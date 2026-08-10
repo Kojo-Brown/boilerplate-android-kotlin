@@ -5,10 +5,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import kotlinx.collections.immutable.ImmutableList
 
+/**
+ * [items] is an [ImmutableList] so this composable is skippable. It sits above every screen
+ * in the app, so a recomposition it cannot skip recomposes the whole navigation surface —
+ * and its caller rebuilds the item list on each pass to re-evaluate `selected`.
+ */
 @Composable
 fun AdaptiveNavigationScaffold(
-    items: List<AdaptiveNavItem>,
+    items: ImmutableList<AdaptiveNavItem>,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {

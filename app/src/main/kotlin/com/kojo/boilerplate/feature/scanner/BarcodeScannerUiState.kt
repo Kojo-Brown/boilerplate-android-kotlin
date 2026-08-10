@@ -1,18 +1,28 @@
 package com.kojo.boilerplate.feature.scanner
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 sealed class BarcodeScannerUiState {
     data object Scanning : BarcodeScannerUiState()
 
+    @Immutable
     data class BarcodeDetected(
         val rawValue: String,
         val format: BarcodeFormat,
     ) : BarcodeScannerUiState()
 
+    @Immutable
     data class PermissionDenied(val message: String) : BarcodeScannerUiState()
 
+    @Immutable
     data class Error(val message: String) : BarcodeScannerUiState()
 }
 
+/**
+ * Carries no annotation on purpose: the Compose compiler treats every enum as stable, and
+ * `displayName` is a `val` fixed at class-initialisation time.
+ */
 enum class BarcodeFormat(val displayName: String) {
     QR_CODE("QR Code"),
     EAN_13("EAN-13"),

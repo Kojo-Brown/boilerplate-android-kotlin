@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.kojo.boilerplate.ui.theme.BoilerplateTheme
+import kotlinx.collections.immutable.persistentListOf
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -93,7 +94,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = listOf(
+                        items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
                         greeting = "Boilerplate Android",
@@ -112,7 +113,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = listOf(
+                        items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
                         greeting = "Boilerplate Android",
@@ -131,7 +132,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = listOf(
+                        items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
                         greeting = "Boilerplate Android",
@@ -150,7 +151,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = listOf(
+                        items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                             HomeItem(id = "2", title = "Bob", description = "bob@example.com"),
                         ),
@@ -173,7 +174,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = listOf(item),
+                        items = persistentListOf(item),
                         greeting = "Boilerplate Android",
                     ),
                     onRetry = {},
@@ -192,7 +193,7 @@ class HomeScreenTest {
             BoilerplateTheme {
                 HomeContent(
                     uiState = HomeUiState.Success(
-                        items = emptyList(),
+                        items = persistentListOf(),
                         greeting = "Boilerplate Android",
                     ),
                     onRetry = {},

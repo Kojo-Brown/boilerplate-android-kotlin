@@ -207,6 +207,9 @@ dependencies {
     // Kotlin Serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // Immutable / persistent collections
+    implementation(libs.kotlinx.collections.immutable)
+
     // CameraX
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
@@ -232,6 +235,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // Testing
+    testImplementation(libs.kotlin.reflect)
     testImplementation(libs.junit)
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
