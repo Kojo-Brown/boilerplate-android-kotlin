@@ -42,6 +42,10 @@ Modern Android app starter following Google's recommended architecture.
 - [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
   costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
   `@Immutable` promises the compiler that nothing verifies.
+- [SOLID in the repository layer](./docs/solid.md) — an audit of the abstractions the data
+  flows through: where each principle holds, the eight places it does not, and why the
+  application policy currently duplicated across two ViewModels is the finding the rest of
+  Phase 8 is built around.
 
 ## Quick Start
 
