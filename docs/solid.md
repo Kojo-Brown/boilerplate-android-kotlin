@@ -145,8 +145,9 @@ contract test run against both implementations could, and that needs Room, which
 | `syncCurrentUser()` | none |
 | `syncUser(id)` | none |
 
-Half the interface has no caller at all. `syncCurrentUser` has never had one;
-`syncUser` lost its last one when `HomeViewModel.refresh()` moved to the fan-out. That
+Half the interface has no caller at all, and neither of the sync methods ever had one:
+`HomeViewModel.refresh()` was written to give `syncUser` a caller and ended up needing the
+fan-out instead, so `syncUsers` is the only one of the three that is reachable. That
 surface is not free: `FakeUserRepository` implements all six regardless, so the two profile
 view models — which between them call exactly one method — are tested through a double that
 has to model the whole thing, and a seventh method would enlarge every one of those tests
