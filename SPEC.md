@@ -506,7 +506,7 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 
 
 ## Phase 8 — Architecture & Patterns
-- [ ] SOLID audit of the repository/use-case layers documented in `docs/solid.md`
+- [x] SOLID audit of the repository/use-case layers documented in `docs/solid.md` — the headline is what is missing: there is no use-case layer, so application policy sits in the ViewModels and `ProfileViewModel`/`ProfileDetailPaneViewModel` already hold the same observe-retry-map-or-not-found policy verbatim; eight findings recorded, three of them with no later item to pick them up, and `SolidContractTest` pins the structural half as equalities so a *fix* fails it too and the page cannot describe a problem that is gone (PR #30)
 - [ ] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule
 - [ ] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding
 - [ ] Decorator pattern: repository wrappers adding cache, retry, and telemetry
