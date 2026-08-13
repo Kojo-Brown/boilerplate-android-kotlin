@@ -507,7 +507,7 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 
 ## Phase 8 — Architecture & Patterns
 - [x] SOLID audit of the repository/use-case layers documented in `docs/solid.md` — the headline is what is missing: there is no use-case layer, so application policy sits in the ViewModels and `ProfileViewModel`/`ProfileDetailPaneViewModel` already hold the same observe-retry-map-or-not-found policy verbatim; eight findings recorded, three of them with no later item to pick them up, and `SolidContractTest` pins the structural half as equalities so a *fix* fails it too and the page cannot describe a problem that is gone (PR #30)
-- [ ] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule
+- [x] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule — `ObserveUserProfileUseCase` and `RefreshVisibleUsersUseCase` take the policy finding 1 found duplicated verbatim across the two profile view models; enforced twice, by a `ForbiddenImport` rule scoped to `**/core/domain/**` and by `DomainLayerContractTest` reading the compiled constant pool, because the linter reads import directives and a fully-qualified reference has none. The interesting failure: the Compose compiler plugin stamps `@StabilityInferred` on *every* class in the module, so "no androidx in the domain layer" is not literally achievable in a single-module Compose app — exempted by full name, and modularisation is what deletes the exemption (PR #31)
 - [ ] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding
 - [ ] Decorator pattern: repository wrappers adding cache, retry, and telemetry
 - [ ] Observer pattern: app-wide event bus on `SharedFlow`
