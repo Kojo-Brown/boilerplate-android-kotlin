@@ -3,6 +3,7 @@ package com.kojo.boilerplate.feature.profile
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
@@ -50,7 +51,7 @@ class ProfileDetailPaneViewModelTest {
 
     private fun createViewModel(userId: String = testUser.id) = ProfileDetailPaneViewModel(
         userId = userId,
-        userRepository = userRepository,
+        observeUserProfile = ObserveUserProfileUseCase(userRepository),
     )
 
     /**
@@ -70,7 +71,7 @@ class ProfileDetailPaneViewModelTest {
     ): ProfileDetailPaneViewModel {
         val viewModel = ProfileDetailPaneViewModel(
             userId = userId,
-            userRepository = userRepository,
+            observeUserProfile = ObserveUserProfileUseCase(userRepository),
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect { }

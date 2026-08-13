@@ -72,17 +72,27 @@ class SolidContractTest {
     }
 
     /**
-     * The audit's headline finding: no use-case layer exists, so application policy sits in
-     * the `ViewModel`s and has already been duplicated between the two profile ones. The
-     * next Phase 8 item introduces the layer, and is expected to fail this.
+     * The audit's headline finding, now in its repaired form.
+     *
+     * This assertion used to be `emptyList()` — "no use-case layer exists" — with a note that
+     * the next Phase 8 item would introduce the layer and was expected to fail it. That item
+     * landed, so this is the edit it forced, which is exactly what failing on a repair is for.
+     *
+     * What is checked is app-wide rather than scoped to `core.domain`, and that is the point
+     * of keeping it here alongside `DomainLayerContractTest`. The `ForbiddenImport` rule in
+     * `config/detekt/detekt.yml` is scoped by path, so a use case declared anywhere else —
+     * `feature/home/RefreshUseCase.kt` being the obvious way it would happen — is outside the
+     * rule's reach and would carry no framework guarantee at all. This is what notices.
      */
     @Test
-    fun `the use-case layer does not exist yet`() {
+    fun `every use case lives in the domain layer, and is one the audit describes`() {
         assertEquals(
-            emptyList<String>(),
+            AUDITED_USE_CASES,
             typesInRole(USE_CASE_SUFFIX).map { it.name }.sorted(),
-            "A use-case layer has appeared. docs/solid.md is written around its absence — " +
-                "rewrite the sections that assume ViewModels talk to repositories directly.",
+            "The use-case roster changed. A use case outside $DOMAIN_PACKAGE is not covered " +
+                "by the ForbiddenImport rule in config/detekt/detekt.yml and can import the " +
+                "framework freely — move it there. If the roster itself changed, docs/solid.md " +
+                "finding 1 and docs/clean-architecture.md both describe the list on the left.",
         )
     }
 
@@ -222,9 +232,19 @@ class SolidContractTest {
 
     private companion object {
         const val APP_PACKAGE = "com.kojo.boilerplate"
+        const val DOMAIN_PACKAGE = "com.kojo.boilerplate.core.domain"
         const val REPOSITORY_SUFFIX = "Repository"
         const val USE_CASE_SUFFIX = "UseCase"
         const val IMPL_SUFFIX = "Impl"
+
+        /**
+         * Finding 1's fix, asserted whole and by fully-qualified name — so a use case that
+         * moves out of the domain package fails this even though its simple name is unchanged.
+         */
+        val AUDITED_USE_CASES = listOf(
+            "$DOMAIN_PACKAGE.usecase.ObserveUserProfileUseCase",
+            "$DOMAIN_PACKAGE.usecase.RefreshVisibleUsersUseCase",
+        )
 
         /** Alphabetical, and asserted whole: a repository that disappears changes the audit too. */
         val AUDITED_REPOSITORIES = listOf(

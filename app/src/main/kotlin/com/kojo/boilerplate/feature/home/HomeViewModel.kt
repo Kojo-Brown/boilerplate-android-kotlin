@@ -7,6 +7,7 @@ import com.kojo.boilerplate.core.coroutines.asSearchQueries
 import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase
 import com.kojo.boilerplate.core.network.connectivity.NetworkMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.persistentListOf
@@ -33,7 +34,13 @@ import javax.inject.Inject
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    // Still the repository and not a use case for the read path. `getUsers()` is observed and
+    // rendered with no policy in between, and a use case that forwards one method to one
+    // repository is a hop that buys nothing — the argument docs/solid.md makes for why the
+    // missing layer was defensible at this size. The refresh is the opposite case: three
+    // decisions with wrong answers, which is why that one moved.
     private val userRepository: UserRepository,
+    private val refreshVisibleUsers: RefreshVisibleUsersUseCase,
     // Covers the filtering and item mapping in uiState below, and nothing else.
     //
     // @DefaultDispatcher and not @IoDispatcher: this was IO while the same flowOn also
@@ -185,10 +192,10 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             val ids = (uiState.value as? HomeUiState.Success)?.items?.map { it.id }.orEmpty()
-            val outcome = userRepository.syncUsers(ids)
+            val outcome = refreshVisibleUsers(ids)
             _refreshState.value = RefreshState.Finished(
-                refreshed = outcome.successes.size,
-                failed = outcome.failures.size,
+                refreshed = outcome.refreshed,
+                failed = outcome.failed,
             )
         }
     }

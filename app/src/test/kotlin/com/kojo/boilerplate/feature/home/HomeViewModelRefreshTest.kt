@@ -5,6 +5,7 @@ import com.kojo.boilerplate.core.coroutines.FanOutResult
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase
 import com.kojo.boilerplate.core.network.connectivity.FakeNetworkMonitor
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -77,6 +78,7 @@ class HomeViewModelRefreshTest {
     private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
         val viewModel = HomeViewModel(
             userRepository = userRepository,
+            refreshVisibleUsers = RefreshVisibleUsersUseCase(userRepository),
             defaultDispatcher = UnconfinedTestDispatcher(testScheduler),
             networkMonitor = networkMonitor,
         )

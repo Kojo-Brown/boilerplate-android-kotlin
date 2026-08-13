@@ -8,7 +8,11 @@ Every structural claim on this page is pinned by
 [`SolidContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/architecture/SolidContractTest.kt),
 which reads the compiled output rather than the source and fails `testDebugUnitTest` when
 the shape it finds stops matching the shape described here — including when a finding is
-*fixed*, so a repair cannot quietly leave this page describing a problem that is gone.
+*fixed*, so a repair cannot quietly leave this page describing a problem that is gone. That
+is not hypothetical: finding 1 has since been repaired, the assertion that the use-case layer
+did not exist failed exactly as its own KDoc predicted, and this page was edited in the same
+change. The domain layer that repair introduced has its own pinned page,
+[`clean-architecture.md`](./clean-architecture.md).
 
 ## The surface that was audited
 
@@ -28,7 +32,38 @@ but they sit outside the pinned set, which keys on the `Repository`/`UseCase` su
 abstraction introduced under some third name — `…DataSource`, `…Client`, `…Store` — is
 invisible to the check and would need this page revisited by hand.
 
-## The use-case layer does not exist
+## The use-case layer — the finding, and its repair
+
+**This section described a gap when it was written. Finding 1 has since been fixed, and the
+original text is kept below the line because the argument for *why* the layer was worth adding
+is the part worth keeping.**
+
+`core.domain.usecase` now holds two use cases, and
+[`clean-architecture.md`](./clean-architecture.md) is the page about them:
+
+| Use case | The policy it took out of the `ViewModel`s |
+| --- | --- |
+| `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" |
+| `RefreshVisibleUsersUseCase` | Empty selection makes no request; ids are deduped; a partial failure is a partial success |
+
+Both profile view models are now one `flatMapLatest` over `ObserveUserProfileUseCase` plus a
+`when` that turns the outcome into strings, and the `when` itself is shared as
+`UserProfile.toUiState()` rather than written twice. `HomeViewModel` keeps its direct
+`userRepository.getUsers()` call, for the reason the original text gives: a use case that
+forwards one method to one repository buys nothing.
+
+The layer is held framework-free by a `ForbiddenImport` rule scoped to `**/core/domain/**` and
+by `DomainLayerContractTest`, which reads the compiled constant pool and so also catches the
+fully-qualified references an import rule cannot see.
+
+**What has not changed:** the two divergences in `FakeUserRepository` (finding 5) are still
+there, and `ObserveUserProfileUseCaseTest` uses a hand-written double rather than that fake.
+`syncUser` and `syncCurrentUser` still have no production caller — extracting the use cases
+moved the callers of `syncUsers`, it did not create any (finding 6).
+
+---
+
+*Original text, as written for the audit:*
 
 There is no type in this app whose name ends in `UseCase`, and nothing that plays the part
 under another name. Every `ViewModel` depends on a repository directly.
@@ -72,8 +107,11 @@ production caller. The synchronous half exists because OkHttp's `Interceptor` an
 `AtomicReference` cache; the flow half is what a reactive consumer would want. One class
 answering to both is the reason a token-storage change has to be reasoned about twice.
 
-**The `ViewModel`s — do not hold**, for the reason above: they own presentation *and* the
-policy a use case should own.
+**The `ViewModel`s — now hold, for the two that did not.** The profile pair and
+`HomeViewModel.refresh()` owned presentation *and* application policy; the policy moved to
+`core.domain.usecase` and what is left in each is a state pipeline and a mapping to strings.
+`HomeViewModel` is still the largest class here — search debouncing, the offline banner and
+the in-flight CAS lock are all genuinely presentation, and all genuinely its.
 
 ## Open/closed
 
@@ -139,8 +177,8 @@ contract test run against both implementations could, and that needs Room, which
 | Method | Production callers |
 | --- | --- |
 | `getUsers()` | `HomeViewModel` |
-| `getUser(id)` | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
-| `syncUsers(ids)` | `HomeViewModel` |
+| `getUser(id)` | `ObserveUserProfileUseCase` |
+| `syncUsers(ids)` | `RefreshVisibleUsersUseCase` |
 | `saveUser(user)` | none |
 | `syncCurrentUser()` | none |
 | `syncUser(id)` | none |
@@ -153,10 +191,16 @@ view models — which between them call exactly one method — are tested throug
 has to model the whole thing, and a seventh method would enlarge every one of those tests
 without any of them wanting it.
 
-The profile view models are the sharpest case. Each needs `(String) -> Flow<User?>` and
-nothing else, and today each depends on a six-method interface to get it. A single-method
-use case is the segregation, which is the same conclusion the section on the missing layer
-reaches from the other direction.
+The profile view models were the sharpest case: each needed `(String) -> Flow<User?>` and
+nothing else, and each depended on a six-method interface to get it. Both now depend on
+`ObserveUserProfileUseCase`, which is the single-method surface they wanted.
+
+The finding is *moved rather than closed*, and it is worth being exact about how much was
+bought. There is now one type depending on the six-method interface for `getUser` instead of
+two, and `ObserveUserProfileUseCaseTest` has to hand-write a double declaring all six to test
+a use case that calls one — the same cost, one layer down and paid once. What did change is
+that the two `ViewModel` tests no longer pay it at all, and a seventh method would now
+enlarge one double instead of three.
 
 `UserDao` has the milder version of this: `delete` is called from `UserDaoTest` and nowhere
 else. A DAO is generated surface rather than a hand-designed abstraction, so the cost is
@@ -204,16 +248,30 @@ with no default is the same principle applied to the thread pool.
 
 ## Findings
 
-| # | Principle | Finding | Fixed by |
+| # | Principle | Finding | Status |
 | --- | --- | --- | --- |
-| 1 | SRP / DRY | The profile-loading policy is duplicated across `ProfileViewModel` and `ProfileDetailPaneViewModel` | Clean Architecture use-cases (next item) |
-| 2 | DIP | `GoogleAuthRepository.signIn` takes an `android.content.Context`, and the leak reaches `GoogleSignInViewModel` | Clean Architecture use-cases + the layering lint rule |
+| 1 | SRP / DRY | The profile-loading policy is duplicated across `ProfileViewModel` and `ProfileDetailPaneViewModel` | **Fixed** — `ObserveUserProfileUseCase` / `RefreshVisibleUsersUseCase` |
+| 2 | DIP | `GoogleAuthRepository.signIn` takes an `android.content.Context`, and the leak reaches `GoogleSignInViewModel` | Open |
 | 3 | DIP | `ThemePreferencesRepository` has no interface and `MainActivity` depends on the concrete type | Open |
-| 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | The layering lint rule |
+| 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | Open |
 | 5 | LSP | `FakeUserRepository.syncUser`/`syncCurrentUser` do not cache, and unknown ids succeed with a fabricated user | Open |
-| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Use-cases; the dead methods go with the decorators |
+| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — the dead methods go with the decorators |
 | 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | `SyncStrategy` multibinding + repository decorators |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
+
+**Findings 2 and 4 were originally attributed to the layering lint rule, and that was
+optimistic.** The rule as landed is scoped to `**/core/domain/**`, which is the scope the item
+asked for and the only one that does not need a long exemption list — so neither finding is in
+its path:
+
+- **Finding 2** is about `core.auth`. The `Context` on `GoogleAuthRepository.signIn` is
+  untouched, and `GoogleSignInViewModel` still takes the same parameter. The fix is the
+  inversion the dependency-inversion section describes — an interface this app owns that
+  yields the presentation context — not a lint rule, which can only report the leak.
+- **Finding 4** is about `core.datastore`, and closing it means moving `ThemeMode` out of
+  `ui.theme` first. Only once it has somewhere framework-free to live does a rule have
+  anything to enforce. See the closing section of
+  [`clean-architecture.md`](./clean-architecture.md).
 
 Findings 3, 5 and 8 have no item in this phase that will pick them up. They are recorded
 rather than fixed because an audit that quietly repaired what it found would leave nothing
