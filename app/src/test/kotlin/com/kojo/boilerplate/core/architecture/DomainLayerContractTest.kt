@@ -170,31 +170,51 @@ class DomainLayerContractTest {
      * `SolidContractTest` uses, for the same reason: a hand-written list omits the class
      * added next month.
      *
-     * Nested and synthetic classes are kept, unlike in `SolidContractTest`. There the question
-     * is which types the *author* declared; here it is what the compiler actually emitted, and
-     * a lambda that captures a `Context` is exactly the leak this is looking for.
+     * **Compiler-generated classes are kept; annotation-processor-generated ones are not.**
+     * That line is finer than `SolidContractTest`'s and is drawn where it is on purpose:
+     *
+     * - A `$` class — a lambda, a nested type, a suspend continuation — is the compiler's
+     *   rendering of source in this file. A lambda that captures a `Context` is exactly the
+     *   leak this is looking for, so those are scanned.
+     * - A `_` class is KSP's or Dagger's, generated into this package from a template nobody
+     *   here wrote: `ObserveUserProfileUseCase_Factory` and its kin. Its imports are not a
+     *   statement about this layer's dependencies, it is invisible to the `ForbiddenImport`
+     *   rule for the same reason, and no edit to `core.domain` could fix a finding in it.
+     *   Holding the layer to what a processor emits would make this test a report on Dagger's
+     *   codegen rather than on the architecture.
+     *
+     * This is why the test passes on a plain `kotlinc` build of these sources and has to be
+     * told about the difference under AGP, where KSP and Hilt both run.
      */
     private fun domainClassFiles(): Map<String, ByteArray> {
         val root = File(
             ObserveUserProfileUseCase::class.java.protectionDomain.codeSource.location.toURI(),
         )
-        val prefix = "$DOMAIN_PACKAGE."
         return if (root.isDirectory) {
             root.walkTopDown()
                 .filter { it.isFile && it.extension == "class" }
                 .map { it.relativeTo(root).invariantSeparatorsPath.toBinaryName() to it.readBytes() }
-                .filter { (name, _) -> name.startsWith(prefix) }
+                .filter { (name, _) -> name.isScannableDomainClass() }
                 .toMap()
         } else {
             JarFile(root).use { archive ->
                 archive.entries().asSequence()
                     .filter { !it.isDirectory && it.name.endsWith(".class") }
                     .map { it.name.toBinaryName() to archive.getInputStream(it).readBytes() }
-                    .filter { (name, _) -> name.startsWith(prefix) }
+                    .filter { (name, _) -> name.isScannableDomainClass() }
                     .toMap()
             }
         }
     }
+
+    /**
+     * In `core.domain`, and written here rather than generated into it by an annotation
+     * processor. `_` is the marker: every KSP/Dagger name carries one
+     * (`ObserveUserProfileUseCase_Factory`), and no hand-written declaration in this app does.
+     * `$` is deliberately *not* excluded — see [domainClassFiles].
+     */
+    private fun String.isScannableDomainClass(): Boolean =
+        startsWith("$DOMAIN_PACKAGE.") && !substringAfterLast('.').contains('_')
 
     private fun String.toBinaryName(): String = removeSuffix(".class").replace('/', '.')
 

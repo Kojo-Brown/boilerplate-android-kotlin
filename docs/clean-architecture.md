@@ -110,6 +110,19 @@ The two checks are deliberately redundant and deliberately different. The linter
 precise about *where*, and blind to non-imports. The test is slower, coarser about location,
 and blind to nothing.
 
+**What it scans, and what it does not.** Compiler-generated classes are in scope: a `$`
+lambda, a nested type or a suspend continuation is the compiler's rendering of source someone
+here wrote, and a lambda capturing a `Context` is precisely the leak being hunted.
+Annotation-processor output is not: KSP and Hilt generate `ObserveUserProfileUseCase_Factory`
+and its kin *into this package* from a template nobody here wrote, its references are not a
+statement about this layer's dependencies, and no edit to `core.domain` could fix a finding in
+it. `_` is the marker — every generated name carries one and no hand-written declaration in
+this app does, the same heuristic `SolidContractTest` uses.
+
+That distinction is why the test passes against a plain `kotlinc` build of these sources and
+had to be taught about AGP, where KSP and Hilt both run and put classes in the package the
+scan walks.
+
 It also pins two things that a rule alone cannot:
 
 - **The layer is not empty.** A path-scoped rule over a package that has been deleted passes
