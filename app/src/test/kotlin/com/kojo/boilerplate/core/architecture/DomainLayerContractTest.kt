@@ -99,9 +99,14 @@ class DomainLayerContractTest {
      * is how every class reference in a descriptor, a signature and the `Class` entries is
      * encoded — the dotted form appears only inside string literals, where a domain class
      * mentioning "android" in prose is not a dependency on it.
+     *
+     * [COMPOSE_STABILITY_STAMP] is the one exemption, and it is not a concession — see the
+     * constant.
      */
-    private fun String.containsFrameworkReference(): Boolean =
-        contains("android/") || contains("androidx/")
+    private fun String.containsFrameworkReference(): Boolean {
+        if (contains(COMPOSE_STABILITY_STAMP)) return false
+        return contains("android/") || contains("androidx/")
+    }
 
     // Class-file reading
 
@@ -183,8 +188,10 @@ class DomainLayerContractTest {
      *   Holding the layer to what a processor emits would make this test a report on Dagger's
      *   codegen rather than on the architecture.
      *
-     * This is why the test passes on a plain `kotlinc` build of these sources and has to be
-     * told about the difference under AGP, where KSP and Hilt both run.
+     * The `_` half is a precaution rather than a diagnosis: no generated factory has actually
+     * been observed carrying a framework reference. The difference between a plain `kotlinc`
+     * build of these sources and the AGP one turned out to be the Compose compiler plugin
+     * instead — see [COMPOSE_STABILITY_STAMP].
      */
     private fun domainClassFiles(): Map<String, ByteArray> {
         val root = File(
@@ -221,6 +228,27 @@ class DomainLayerContractTest {
     private companion object {
         const val DOMAIN_PACKAGE = "com.kojo.boilerplate.core.domain"
         const val USE_CASE_SUFFIX = "UseCase"
+
+        /**
+         * The one androidx reference this scan forgives, and the reason is the most useful
+         * thing it has found.
+         *
+         * The Compose compiler plugin is applied to this module, and it stamps
+         * `@StabilityInferred` onto **every** class it compiles — not just composables and
+         * not just UI types. `RefreshOutcome`, all three `UserProfile` arms and both use
+         * cases came back carrying it. So in a single-module Compose app, "no androidx in
+         * the domain layer" is not literally true at the bytecode level and cannot be made
+         * true by any edit to these files: the annotation is the toolchain's, applied
+         * module-wide, and it encodes nothing about what this code depends on. Nothing reads
+         * it outside Compose's own runtime, and no domain type is passed to a composable.
+         *
+         * What would actually remove it is the modularisation item later in this phase: a
+         * `:core:domain` Gradle module is a plain Kotlin/JVM library with no Compose plugin
+         * on it, and this exemption should be deleted the day that lands. Until then it is
+         * the honest boundary — narrow, named in full, and load-bearing for exactly one
+         * annotation rather than a relaxed prefix that would let real leaks through.
+         */
+        const val COMPOSE_STABILITY_STAMP = "androidx/compose/runtime/internal/StabilityInferred"
 
         val DOCUMENTED_USE_CASES = listOf(
             "com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase",

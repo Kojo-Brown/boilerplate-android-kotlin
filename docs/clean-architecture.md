@@ -119,9 +119,29 @@ statement about this layer's dependencies, and no edit to `core.domain` could fi
 it. `_` is the marker — every generated name carries one and no hand-written declaration in
 this app does, the same heuristic `SolidContractTest` uses.
 
-That distinction is why the test passes against a plain `kotlinc` build of these sources and
-had to be taught about AGP, where KSP and Hilt both run and put classes in the package the
-scan walks.
+### The one exemption, and what it tells you
+
+`androidx.compose.runtime.internal.StabilityInferred` is forgiven, and finding out why was
+the most useful thing this test has done.
+
+The Compose compiler plugin is applied to this module, and it stamps `@StabilityInferred`
+onto **every** class it compiles — not just composables, not just UI types. `RefreshOutcome`,
+all three `UserProfile` arms and both use cases all came back carrying it on the first CI run.
+
+So the honest version of this page's headline is narrower than "no androidx in the domain
+layer": **in a single-module Compose app that is not achievable at the bytecode level**, and
+no edit to these files could achieve it. The annotation is the toolchain's, applied
+module-wide, and encodes nothing about what the code depends on.
+
+What removes it is [modularisation](./solid.md) — the later Phase 8 item. A `:core:domain`
+Gradle module is a plain Kotlin/JVM library with no Compose plugin applied to it, and the
+exemption should be deleted the day that lands. That is the concrete, mechanical argument for
+splitting the modules, and it is worth more than the general one about build times: right now
+the layering is a convention this test polices, and a module boundary would make it a fact
+the compiler enforces.
+
+The exemption is one fully-named annotation rather than a relaxed prefix, so a real
+`androidx.compose.runtime.Immutable` on a domain type still fails.
 
 It also pins two things that a rule alone cannot:
 
