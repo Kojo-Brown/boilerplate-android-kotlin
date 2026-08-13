@@ -44,8 +44,11 @@ Modern Android app starter following Google's recommended architecture.
   `@Immutable` promises the compiler that nothing verifies.
 - [SOLID in the repository layer](./docs/solid.md) — an audit of the abstractions the data
   flows through: where each principle holds, the eight places it does not, and why the
-  application policy currently duplicated across two ViewModels is the finding the rest of
+  application policy that was duplicated across two ViewModels is the finding the rest of
   Phase 8 is built around.
+- [The domain layer](./docs/clean-architecture.md) — what earns a place in `core.domain`
+  (duplicated policy, not "business logic"), why the framework ban is enforced twice, and
+  what a lint rule scoped to one package still cannot tell you.
 
 ## Quick Start
 

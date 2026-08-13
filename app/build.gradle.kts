@@ -1,6 +1,7 @@
 // Imported rather than written as java.time.Duration inline: inside a Kotlin DSL build
 // script `java` resolves to the JavaPluginExtension accessor, which shadows the package
 // and fails with "Unresolved reference: time".
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import java.time.Duration
 
 plugins {
@@ -66,6 +67,24 @@ android {
                 // Ten minutes is far above the suite's real runtime and only ever trips on
                 // something genuinely stuck.
                 test.timeout.set(Duration.ofMinutes(10))
+
+                // Put the failure message in the console, not only in the HTML report.
+                //
+                // Gradle's default prints `AssertionFailedError at SomeTest.kt:50` and keeps
+                // the expected/actual values for the report — so a CI log tells you which
+                // assertion broke but not what it saw, and reading further means downloading
+                // the gate-reports artifact. That is a round trip at best and impossible from
+                // a network that cannot reach the artifact host at all, which is how a
+                // one-line assertion turned into a blind fix on this branch.
+                //
+                // Scoped to failures: passing tests stay silent, so the log does not grow by
+                // 259 lines to make one of them legible.
+                test.testLogging {
+                    events("failed")
+                    exceptionFormat = TestExceptionFormat.FULL
+                    showStackTraces = true
+                    showCauses = true
+                }
             }
         }
     }

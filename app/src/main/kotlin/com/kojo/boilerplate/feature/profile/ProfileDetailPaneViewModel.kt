@@ -2,8 +2,7 @@ package com.kojo.boilerplate.feature.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kojo.boilerplate.core.coroutines.retryWithBackoff
-import com.kojo.boilerplate.core.data.repository.UserRepository
+import com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -12,8 +11,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -26,7 +23,7 @@ import kotlinx.coroutines.flow.update
 @HiltViewModel(assistedFactory = ProfileDetailPaneViewModel.Factory::class)
 class ProfileDetailPaneViewModel @AssistedInject constructor(
     @Assisted private val userId: String,
-    private val userRepository: UserRepository,
+    private val observeUserProfile: ObserveUserProfileUseCase,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -37,45 +34,26 @@ class ProfileDetailPaneViewModel @AssistedInject constructor(
     private val _retrySignal = MutableStateFlow(0)
 
     /**
-     * No `flowOn` and no injected dispatcher, deliberately.
-     *
-     * The repository confines its own I/O and row mapping, so everything left here is one
-     * null check and one [ProfileData] allocation per emission. That is cheaper than the
-     * thread hand-off a `flowOn` would add to pay for it, and running it on the main thread
-     * is the correct answer rather than a tolerated one. A dispatcher belongs here only if
-     * this transform grows real work — see `docs/dispatchers.md`.
+     * Identical to `ProfileViewModel.uiState`, and that is now the whole story rather than a
+     * problem: both are one `flatMapLatest` over the same use case, and the policy they used
+     * to hold two copies of lives in [ObserveUserProfileUseCase]. The only difference between
+     * the two screens is where [userId] comes from — an `@Assisted` parameter here, a
+     * `SavedStateHandle` route there — which is the difference that is actually real.
      */
     val uiState: StateFlow<ProfileUiState> = _retrySignal
-        .flatMapLatest {
-            // Retry first, dedupe second — see HomeViewModel for why this pair belongs together.
-            userRepository.getUser(userId)
-                .retryWithBackoff()
-                .distinctUntilChanged()
-                .map { user ->
-                    if (user != null) {
-                        ProfileUiState.Success(
-                            profile = ProfileData(
-                                userId = user.id,
-                                displayName = user.displayName,
-                                email = user.email,
-                                avatarUrl = user.avatarUrl,
-                            ),
-                        )
-                    } else {
-                        ProfileUiState.Error(message = "User $userId not found")
-                    }
-                }
-                .catch { throwable ->
-                    emit(ProfileUiState.Error(message = throwable.message ?: "Failed to load profile"))
-                }
-        }
+        .flatMapLatest { observeUserProfile(userId).map { profile -> profile.toUiState() } }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000L),
+            started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
             initialValue = ProfileUiState.Loading,
         )
 
     fun retry() {
         _retrySignal.update { it + 1 }
+    }
+
+    private companion object {
+        /** Matches `ProfileViewModel` and `HomeViewModel`; see the note there. */
+        const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
     }
 }

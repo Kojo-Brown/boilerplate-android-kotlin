@@ -68,6 +68,34 @@ naming:
     constantPattern: '[A-Za-z][_A-Za-z0-9]*'
 
 style:
+  ForbiddenImport:
+    # The Clean Architecture layering rule: nothing under core/domain may import the
+    # Android framework.
+    #
+    # This is the enforcement half of the use-case layer. A domain use case that reaches
+    # for a Context, a Bundle or a LiveData is no longer a policy object — it is a second
+    # presentation layer that happens to be filed elsewhere, and the duplication the layer
+    # was extracted to remove comes straight back with it. Keeping the framework out is
+    # also what makes these types testable on a plain JVM, and what would let them move to
+    # a platform-independent Gradle module when the modularisation item lands.
+    #
+    # Scoped by `includes` rather than applied globally, because everywhere else in this
+    # app importing androidx is correct — ViewModels, composables, Room entities and the
+    # DAO all should. A blanket ban would have to be un-banned in more places than it
+    # banned.
+    #
+    # `dagger.hilt.android` is on the list and plain `dagger`/`javax.inject` is not, on
+    # purpose: `@Inject` on a constructor is an annotation the domain layer can carry
+    # anywhere, while `@HiltViewModel` and `@AndroidEntryPoint` name Android components.
+    #
+    # Known blind spot: this reads import directives, so a fully-qualified reference
+    # written inline (`android.os.Build.VERSION`) never appears as an import and passes.
+    # `DomainLayerContractTest` covers that half by reading the compiled constant pool —
+    # see docs/clean-architecture.md.
+    active: true
+    includes: ['**/core/domain/**']
+    forbiddenPatterns: '^(android|androidx|com\.google\.android|dagger\.hilt\.android|kotlinx\.coroutines\.android)\.'
+
   MagicNumber:
     # dp/sp literals, alpha values and animation durations are the units of the
     # layout itself. Naming each one produces a wall of single-use constants
