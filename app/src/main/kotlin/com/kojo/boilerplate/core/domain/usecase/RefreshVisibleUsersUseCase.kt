@@ -1,18 +1,36 @@
 package com.kojo.boilerplate.core.domain.usecase
 
-import com.kojo.boilerplate.core.data.repository.UserRepository
 import com.kojo.boilerplate.core.domain.model.RefreshOutcome
+import com.kojo.boilerplate.core.domain.sync.SyncMode
+import com.kojo.boilerplate.core.domain.sync.SyncStrategy
+import com.kojo.boilerplate.core.domain.sync.SyncStrategyFactory
 import javax.inject.Inject
 
 /**
- * Re-fetches a set of users from the network and reports what did not arrive.
+ * Re-fetches the users a screen is showing and reports what did not arrive.
  *
  * The other half of finding 1 in `docs/solid.md`. `HomeViewModel.refresh()` held three
  * decisions that are application policy rather than presentation — what a partial failure
  * means, how the outcome is counted, and what an empty selection does — inside a class that
- * also owns search debouncing, the offline banner and the in-flight lock. They are here now,
- * where they can be exercised without a `ViewModel`, a `Dispatchers.Main` substitute or a
+ * also owns search debouncing, the offline banner and the in-flight lock. They are out of the
+ * `ViewModel` now, where they can be exercised without a `Dispatchers.Main` substitute or a
  * `stateIn` subscriber.
+ *
+ * ### What this owns after the strategies landed
+ *
+ * The three decisions themselves moved one level down, into
+ * [com.kojo.boilerplate.core.domain.sync.VisibleUsersSyncStrategy], because they are decisions
+ * about *that way of syncing*: [SyncMode.CURRENT_USER] answers all three differently. What is
+ * left here is not a hop — it is the choice of mode, which is policy in its own right:
+ *
+ * > **A user-initiated refresh from a list screen covers what that screen is showing.**
+ *
+ * That is the decision a second list screen would otherwise make again, and could get a
+ * different answer to — the test `docs/clean-architecture.md` sets for whether something
+ * belongs in this layer. Reaching for a cheaper mode because the connection is metered, or a
+ * broader one because a worker rather than a person asked, is the same decision made
+ * differently, and this is where it would be made. A caller injecting
+ * [SyncStrategyFactory] directly would be re-deciding it at every call site.
  *
  * ### What stays with the caller
  *
@@ -21,37 +39,12 @@ import javax.inject.Inject
  * user is looking at rather than the whole table — and a use case that reached for them
  * itself would have to know about search state to get it right.
  *
- * ### What is policy, and lives here
- *
- * 1. **An empty selection makes no request.** Nothing on screen means nothing to refresh, and
- *    the fan-out is skipped entirely rather than being handed an empty list to iterate. The
- *    repository would return an empty [com.kojo.boilerplate.core.coroutines.FanOutResult]
- *    either way, so this is not about correctness — it is about not opening a coroutine scope
- *    and a database transaction to discover that.
- * 2. **Ids are deduped, and the counts are per distinct user.** The same id twice is the same
- *    request twice, and without this "8 refreshed" could mean either eight users or five.
- *    `UserRepositoryImpl.syncUsers` also dedupes, so this is not the only guard — but it is
- *    the one that makes [RefreshOutcome.attempted] equal to the number of users the caller
- *    asked about, which is what the count is read as.
- * 3. **A partial failure is a partial success.** The successes are already written to the
- *    database and the observing list re-renders itself, so they need no return path; the
- *    shortfall is the whole report. Collapsing the fan-out into a single pass/fail would
- *    either throw away the users that did arrive or hide that part of the screen is stale.
- *
- * Cancellation is untouched: `syncUsers` propagates it, and nothing here catches.
+ * Cancellation is untouched: [SyncStrategy.sync] propagates it, and nothing here catches.
  */
 class RefreshVisibleUsersUseCase @Inject constructor(
-    private val userRepository: UserRepository,
+    private val syncStrategies: SyncStrategyFactory,
 ) {
 
-    suspend operator fun invoke(visibleUserIds: List<String>): RefreshOutcome {
-        val distinctIds = visibleUserIds.distinct()
-        if (distinctIds.isEmpty()) return RefreshOutcome.NOTHING_TO_REFRESH
-
-        val result = userRepository.syncUsers(distinctIds)
-        return RefreshOutcome(
-            refreshed = result.successes.size,
-            failed = result.failures.size,
-        )
-    }
+    suspend operator fun invoke(visibleUserIds: List<String>): RefreshOutcome =
+        syncStrategies.create(SyncMode.VISIBLE_USERS).sync(visibleUserIds)
 }

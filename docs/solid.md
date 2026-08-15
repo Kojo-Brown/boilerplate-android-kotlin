@@ -44,7 +44,7 @@ is the part worth keeping.**
 | Use case | The policy it took out of the `ViewModel`s |
 | --- | --- |
 | `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" |
-| `RefreshVisibleUsersUseCase` | Empty selection makes no request; ids are deduped; a partial failure is a partial success |
+| `RefreshVisibleUsersUseCase` | Which sync a list refresh performs — the three decisions it originally took (empty selection, dedupe, partial failure) moved on into `VisibleUsersSyncStrategy`, see [`sync-strategy.md`](./sync-strategy.md) |
 
 Both profile view models are now one `flatMapLatest` over `ObserveUserProfileUseCase` plus a
 `when` that turns the outcome into strings, and the `when` itself is shared as
@@ -59,7 +59,9 @@ fully-qualified references an import rule cannot see.
 **What has not changed:** the two divergences in `FakeUserRepository` (finding 5) are still
 there, and `ObserveUserProfileUseCaseTest` uses a hand-written double rather than that fake.
 `syncUser` and `syncCurrentUser` still have no production caller — extracting the use cases
-moved the callers of `syncUsers`, it did not create any (finding 6).
+moved the callers of `syncUsers`, it did not create any (finding 6). `syncCurrentUser` gained
+one later in this phase, in `CurrentUserSyncStrategy`, though nothing in the UI selects that
+strategy yet.
 
 ---
 
@@ -178,14 +180,18 @@ contract test run against both implementations could, and that needs Room, which
 | --- | --- |
 | `getUsers()` | `HomeViewModel` |
 | `getUser(id)` | `ObserveUserProfileUseCase` |
-| `syncUsers(ids)` | `RefreshVisibleUsersUseCase` |
+| `syncUsers(ids)` | `VisibleUsersSyncStrategy` |
 | `saveUser(user)` | none |
-| `syncCurrentUser()` | none |
+| `syncCurrentUser()` | `CurrentUserSyncStrategy` — which nothing selects yet |
 | `syncUser(id)` | none |
 
-Half the interface has no caller at all, and neither of the sync methods ever had one:
-`HomeViewModel.refresh()` was written to give `syncUser` a caller and ended up needing the
-fan-out instead, so `syncUsers` is the only one of the three that is reachable. That
+The count above is as of the Factory + Strategy item. Before it, half the interface had no
+caller at all and neither of the sync methods ever had one: `HomeViewModel.refresh()` was
+written to give `syncUser` a caller and ended up needing the fan-out instead, so `syncUsers`
+was the only one of the three that was reachable. `CurrentUserSyncStrategy` is the first
+caller `syncCurrentUser` has had — but it is bound into the strategy map without anything
+selecting `SyncMode.CURRENT_USER`, so the method is reachable from production code and not
+yet from a screen. That
 surface is not free: `FakeUserRepository` implements all six regardless, so the two profile
 view models — which between them call exactly one method — are tested through a double that
 has to model the whole thing, and a seventh method would enlarge every one of those tests
@@ -255,7 +261,7 @@ with no default is the same principle applied to the thread pool.
 | 3 | DIP | `ThemePreferencesRepository` has no interface and `MainActivity` depends on the concrete type | Open |
 | 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | Open |
 | 5 | LSP | `FakeUserRepository.syncUser`/`syncCurrentUser` do not cache, and unknown ids succeed with a fabricated user | Open |
-| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — the dead methods go with the decorators |
+| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — down to two (`saveUser`, `syncUser`) since `CurrentUserSyncStrategy`; the rest go with the decorators |
 | 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | `SyncStrategy` multibinding + repository decorators |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
 

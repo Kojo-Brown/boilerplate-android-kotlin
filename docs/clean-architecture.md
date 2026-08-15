@@ -31,9 +31,17 @@ Two things passed that test:
 | Use case | The policy it owns | Was duplicated in |
 | --- | --- | --- |
 | `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
-| `RefreshVisibleUsersUseCase` | Empty selection makes no request; ids are deduped; a partial failure is a partial success | `HomeViewModel.refresh()` |
+| `RefreshVisibleUsersUseCase` | Which sync a list refresh performs: a person tapping refresh covers what the screen is showing | `HomeViewModel.refresh()` |
 
 `getUsers()` did not, and is still called on the repository directly.
+
+`RefreshVisibleUsersUseCase` owned three more decisions — empty selection makes no request,
+ids are deduped, a partial failure is a partial success — until the Factory + Strategy item
+later in this phase. Those turned out to be decisions about *one way of syncing* rather than
+about refreshing in general, and they moved into `VisibleUsersSyncStrategy` with it;
+`SyncMode.CURRENT_USER` answers all three differently. What is left in the use case is the
+choice of mode, and that is the decision a second list screen would have to make again — see
+[`sync-strategy.md`](./sync-strategy.md).
 
 ## What the layer may and may not depend on
 

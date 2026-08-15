@@ -49,6 +49,9 @@ Modern Android app starter following Google's recommended architecture.
 - [The domain layer](./docs/clean-architecture.md) — what earns a place in `core.domain`
   (duplicated policy, not "business logic"), why the framework ban is enforced twice, and
   what a lint rule scoped to one package still cannot tell you.
+- [Sync strategies](./docs/sync-strategy.md) — Factory + Strategy over a Dagger
+  multibinding: why the map beats a `when`, why it holds `Provider`s, and the two wiring
+  mistakes Dagger cannot catch that a contract test and a runtime check do.
 
 ## Quick Start
 
