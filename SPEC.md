@@ -509,10 +509,39 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 - [x] SOLID audit of the repository/use-case layers documented in `docs/solid.md` — the headline is what is missing: there is no use-case layer, so application policy sits in the ViewModels and `ProfileViewModel`/`ProfileDetailPaneViewModel` already hold the same observe-retry-map-or-not-found policy verbatim; eight findings recorded, three of them with no later item to pick them up, and `SolidContractTest` pins the structural half as equalities so a *fix* fails it too and the page cannot describe a problem that is gone (PR #30)
 - [x] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule — `ObserveUserProfileUseCase` and `RefreshVisibleUsersUseCase` take the policy finding 1 found duplicated verbatim across the two profile view models; enforced twice, by a `ForbiddenImport` rule scoped to `**/core/domain/**` and by `DomainLayerContractTest` reading the compiled constant pool, because the linter reads import directives and a fully-qualified reference has none. The interesting failure: the Compose compiler plugin stamps `@StabilityInferred` on *every* class in the module, so "no androidx in the domain layer" is not literally achievable in a single-module Compose app — exempted by full name, and modularisation is what deletes the exemption (PR #31)
 - [x] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding — `VisibleUsersSyncStrategy` is the old `RefreshVisibleUsersUseCase` body moved down (its three decisions turned out to be about *that* way of syncing; `CURRENT_USER` answers all three differently), and the use case keeps the one decision that is genuinely policy: which mode a user-initiated list refresh means. The interesting part is what Dagger cannot check — a `SyncMode` with **no** binding compiles and throws at first use, and a `@SyncModeKey` naming a different mode than the strategy it sits on is a well-typed lie — so `SyncStrategy.mode` exists to be compared against the key on every resolution, and `SyncStrategyModuleContractTest` reads the module's annotations to pin both. `CURRENT_USER` is bound and tested but nothing selects it yet; it is the first caller `syncCurrentUser` has ever had, and WorkManager is its intended one (PR #32)
-- [ ] Decorator pattern: repository wrappers adding cache, retry, and telemetry
+- [x] Decorator pattern: repository wrappers adding cache, retry, and telemetry — three layers around an unchanged `UserRepositoryImpl`, which is what closes `docs/solid.md` finding 7. The order is the design (`retry` innermost, so everything above sees one logical operation; caching above it, so a hit costs no retry schedule; telemetry outermost, so durations are what the caller waited for) and `UserRepositoryDecoratorTest` walks the assembled chain, because nothing else fails when it is reversed. Three traps, each of which still compiles: the sync methods return failures as **values**, so `runCatching { delegate.syncUser(id) }` never retries anything; a shared in-flight request started with the first caller's `async` is cancelled when that caller leaves, taking down a request a second screen is still awaiting — it is hosted in `@ApplicationScope` instead, the first use that scope has had; and cancellation is not failure at any layer, so it is unretried, uncached and recorded as `Cancelled`. The retry decorator retries only the failed ids of a fan-out and restores request order, and `BackoffPolicy` is extracted so the flow operator and the suspend retry share one schedule (PR #33)
 - [ ] Observer pattern: app-wide event bus on `SharedFlow`
 - [ ] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen
 - [ ] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules
+
+Item 4 complete as of PR #33 (2026-08-18). **The local harness the last three runs kept
+recommending was finally built in full, and it caught things.** The environment is unchanged —
+`dl.google.com` is 403 on CONNECT for the scheduled agent, so Google Maven is unreachable, AGP
+8.7.3 does not resolve and no Android SDK can be installed — but Maven Central is reachable,
+and everything in this change except Hilt/KSP codegen was verifiable without Gradle:
+
+- `kotlin-compiler-2.1.0.jar` run directly as `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler`.
+  Two things are needed that are not obvious: `org.jetbrains:annotations` must be on the
+  *compiler's* classpath (without it the JVM backend dies in `AnnotationCodegen` with a
+  `NoClassDefFoundError` for `Nullable`, reported as "Backend Internal error"), and
+  `-jvm-target 17` is required — the 1.8 default crashes the backend while generating
+  `safeCall`, which is a suspend function returning `Result`.
+- `junit-platform-console-standalone-1.11.4.jar` to run the JUnit 5 suite: 53 tests, including
+  the existing `FlowRetryTest` against the refactored `BackoffPolicy`.
+- `detekt-cli-1.23.8-all.jar` with the repo config and `--build-upon-default-config`: 0 findings.
+
+Only one gate was genuinely out of reach: `SolidContractTest` compiles under the harness but
+cannot run, because it reads the compiled output of the *whole* app and the decorators change
+two of its recorded lists. That, plus Hilt codegen and Lint, was what CI proved. All five
+Gradle gates passed on the first attempt.
+
+**Process note for the next run: the GitHub API served ~45 minutes of stale job status.** The
+gates job finished at 01:20:39 and the API reported it `in_progress` until well past 02:00,
+including reporting `lintDebug` as running 45 minutes after it had passed in 56 seconds. It
+looks exactly like a hung runner and is not one. Read the *steps* array from
+`get_workflow_job` rather than the check-run summary, notice when a step's elapsed time exceeds
+the job's own `timeout-minutes` (30 here) without the job being killed, and treat that as stale
+data — not as a reason to push an empty commit or re-run.
 
 ## Phase 9 — Offline-First & Data
 - [ ] WorkManager background sync with constraints, backoff, and unique work
