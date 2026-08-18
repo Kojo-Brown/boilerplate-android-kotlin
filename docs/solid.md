@@ -16,13 +16,18 @@ change. The domain layer that repair introduced has its own pinned page,
 
 ## The surface that was audited
 
-Five types carry the repository role, and the audit is the whole set:
+Eight types carry the repository role, and the audit is the whole set:
 
 | Type | Abstraction | Implementation | Bound in |
 | --- | --- | --- | --- |
-| `UserRepository` | interface, framework-free | `UserRepositoryImpl` | `RepositoryModule` |
+| `UserRepository` | interface, framework-free | `UserRepositoryImpl`, wrapped by three decorators | `RepositoryModule` |
 | `GoogleAuthRepository` | interface, takes an `android.content.Context` | `GoogleAuthRepositoryImpl` | `GoogleAuthModule` |
 | `ThemePreferencesRepository` | **none — a concrete class** | itself | injected directly |
+
+`CachingUserRepository`, `RetryingUserRepository` and `TelemetryUserRepository` are counted as
+implementations of `UserRepository`, because that is what they are: each one is a repository a
+caller could be handed. Only the assembled stack is bound, and
+[`decorator.md`](./decorator.md) is where the composition is argued.
 
 `TokenProvider`/`DataStoreTokenProvider` and `NetworkMonitor`/`ConnectivityManagerNetworkMonitor`
 are the same shape one package over and both get the pattern right: a framework-free
@@ -124,14 +129,20 @@ is an edit to that class rather than a new type alongside it. The `cache()` help
 `private` and `syncUsers` names `mapConcurrentlyCatching` directly, so there is no seam to
 extend through even from a subclass.
 
-The same closure applies to the cross-cutting behaviour the class does *not* have. Retry
-lives in `retryWithBackoff` at the `ViewModel`'s call site, so a repository call made
-anywhere else is unretried; there is no caching policy, no telemetry, and nowhere to add
-either without opening the class.
+The same closure applied to the cross-cutting behaviour the class does *not* have. Retry
+lived in `retryWithBackoff` at the `ViewModel`'s call site, so a repository call made anywhere
+else was unretried; there was no caching policy, no telemetry, and nowhere to add either
+without opening the class.
 
-Both are named items in this phase — a `SyncStrategy` resolved by Hilt multibinding, and
-repository decorators for cache, retry and telemetry. This section is the argument for why
-they are worth building rather than a description of something broken today.
+**Both halves have since landed, and neither one edited `UserRepositoryImpl`.** The strategy
+half is `SyncStrategy` over a Dagger multibinding ([sync-strategy.md](./sync-strategy.md)); the
+cross-cutting half is three decorators around the same unchanged implementation
+([decorator.md](./decorator.md)). That the class did not have to be reopened for either is the
+whole claim of the principle, and it is the reason this section is kept rather than deleted.
+
+What remains closed is the fetch-and-write body itself: a cache-first read or a write-behind
+edit is still an edit to `UserRepositoryImpl` rather than a type beside it. A decorator can
+suppress a request or repeat one, but it cannot change what the request *does*.
 
 One smaller instance, outside the repositories: `Result.toUiState()` maps every failure to
 `throwable.message`. There is no error taxonomy, so distinguishing "you are offline" from
@@ -248,7 +259,9 @@ is a three-constant enum with no Compose in it — it is a domain concept filed 
 because that is where the theme code lives, and moving it is most of the fix.
 
 **Everything else inverts correctly.** `UserRepository`, `TokenProvider` and `NetworkMonitor`
-are framework-free interfaces with exactly one implementation each, bound through `@Binds`,
+are framework-free interfaces with exactly one implementation that *does* anything — the
+decorators around `UserRepositoryImpl` are implementations too, and each is defined entirely in
+terms of another one — bound through `@Binds` or, where a composition is bound, `@Provides`,
 and each has a hand-written fake. `UserRepositoryImpl` taking `@IoDispatcher CoroutineDispatcher`
 with no default is the same principle applied to the thread pool.
 
@@ -261,8 +274,8 @@ with no default is the same principle applied to the thread pool.
 | 3 | DIP | `ThemePreferencesRepository` has no interface and `MainActivity` depends on the concrete type | Open |
 | 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | Open |
 | 5 | LSP | `FakeUserRepository.syncUser`/`syncCurrentUser` do not cache, and unknown ids succeed with a fabricated user | Open |
-| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — down to two (`saveUser`, `syncUser`) since `CurrentUserSyncStrategy`; the rest go with the decorators |
-| 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | `SyncStrategy` multibinding + repository decorators |
+| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — still two (`saveUser`, `syncUser`). The decorators wrap all six, and wrapping is not calling: they added no caller |
+| 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | **Fixed** for both — `SyncStrategy` multibinding, and `decorateUserRepository` for cache/retry/telemetry. The fetch-and-write body itself is still closed |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
 
 **Findings 2 and 4 were originally attributed to the layering lint rule, and that was
