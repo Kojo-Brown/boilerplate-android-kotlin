@@ -52,6 +52,10 @@ Modern Android app starter following Google's recommended architecture.
 - [Sync strategies](./docs/sync-strategy.md) — Factory + Strategy over a Dagger
   multibinding: why the map beats a `when`, why it holds `Provider`s, and the two wiring
   mistakes Dagger cannot catch that a contract test and a runtime check do.
+- [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
+  an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
+  `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
+  by nobody.
 
 ## Quick Start
 

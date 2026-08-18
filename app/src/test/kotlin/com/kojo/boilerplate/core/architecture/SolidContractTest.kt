@@ -246,12 +246,23 @@ class SolidContractTest {
             "$DOMAIN_PACKAGE.usecase.RefreshVisibleUsersUseCase",
         )
 
-        /** Alphabetical, and asserted whole: a repository that disappears changes the audit too. */
+        /**
+         * Alphabetical, and asserted whole: a repository that disappears changes the audit too.
+         *
+         * The three decorators are repositories by this check's own definition — they carry the
+         * role suffix and implement the interface — and being counted is correct rather than an
+         * accident of naming. Each one is a `UserRepository` that any caller could be given, so
+         * the dependency-inversion and interface-segregation questions this file asks apply to
+         * them exactly as they apply to `UserRepositoryImpl`.
+         */
         val AUDITED_REPOSITORIES = listOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository",
             "com.kojo.boilerplate.core.auth.GoogleAuthRepositoryImpl",
             "com.kojo.boilerplate.core.data.repository.UserRepository",
             "com.kojo.boilerplate.core.data.repository.UserRepositoryImpl",
+            "com.kojo.boilerplate.core.data.repository.decorator.CachingUserRepository",
+            "com.kojo.boilerplate.core.data.repository.decorator.RetryingUserRepository",
+            "com.kojo.boilerplate.core.data.repository.decorator.TelemetryUserRepository",
             "com.kojo.boilerplate.core.datastore.ThemePreferencesRepository",
         )
 
@@ -267,11 +278,23 @@ class SolidContractTest {
             ),
         )
 
+        /**
+         * `UserRepository` now has four implementations and only one of them talks to anything:
+         * the other three are the decorators, each of which is an implementation whose entire
+         * behaviour is "another `UserRepository`, plus one thing". That is the pattern working
+         * rather than the dependency-inversion finding this assertion guards — what the finding
+         * is about is *two implementations a caller might be given by mistake*, and here only
+         * the assembled stack is bound. `UserRepositoryDecoratorTest` pins the assembly itself.
+         */
         val AUDITED_IMPLEMENTATIONS = mapOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository" to
                 listOf("com.kojo.boilerplate.core.auth.GoogleAuthRepositoryImpl"),
-            "com.kojo.boilerplate.core.data.repository.UserRepository" to
-                listOf("com.kojo.boilerplate.core.data.repository.UserRepositoryImpl"),
+            "com.kojo.boilerplate.core.data.repository.UserRepository" to listOf(
+                "com.kojo.boilerplate.core.data.repository.UserRepositoryImpl",
+                "com.kojo.boilerplate.core.data.repository.decorator.CachingUserRepository",
+                "com.kojo.boilerplate.core.data.repository.decorator.RetryingUserRepository",
+                "com.kojo.boilerplate.core.data.repository.decorator.TelemetryUserRepository",
+            ),
         )
 
         /** Finding 3. `MainActivity` injects this by its concrete type. */
