@@ -165,7 +165,8 @@ Two things that follow from it, and both are easy to get wrong:
 3. One-shot events for one screen: `Channel(BUFFERED).receiveAsFlow()`, read with
    `ObserveAsEvents`.
 4. Broadcasts to several independent listeners: `SharedFlow` — and accept that a listener that
-   is not subscribed misses it.
+   is not subscribed misses it. That is `AppEventBus`, and what to do about the listener that
+   cannot afford to miss one is `docs/event-bus.md`.
 5. Flow-backed state: `stateIn(viewModelScope, WhileSubscribed(5_000), <initial>)`, and expose
    `StateFlow`, never the cold flow.
 6. Never navigate from a `LaunchedEffect` keyed on state.
