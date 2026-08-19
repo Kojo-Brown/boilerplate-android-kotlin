@@ -510,7 +510,7 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 - [x] Clean Architecture layering: domain use-cases with no Android imports, enforced by a lint rule — `ObserveUserProfileUseCase` and `RefreshVisibleUsersUseCase` take the policy finding 1 found duplicated verbatim across the two profile view models; enforced twice, by a `ForbiddenImport` rule scoped to `**/core/domain/**` and by `DomainLayerContractTest` reading the compiled constant pool, because the linter reads import directives and a fully-qualified reference has none. The interesting failure: the Compose compiler plugin stamps `@StabilityInferred` on *every* class in the module, so "no androidx in the domain layer" is not literally achievable in a single-module Compose app — exempted by full name, and modularisation is what deletes the exemption (PR #31)
 - [x] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding — `VisibleUsersSyncStrategy` is the old `RefreshVisibleUsersUseCase` body moved down (its three decisions turned out to be about *that* way of syncing; `CURRENT_USER` answers all three differently), and the use case keeps the one decision that is genuinely policy: which mode a user-initiated list refresh means. The interesting part is what Dagger cannot check — a `SyncMode` with **no** binding compiles and throws at first use, and a `@SyncModeKey` naming a different mode than the strategy it sits on is a well-typed lie — so `SyncStrategy.mode` exists to be compared against the key on every resolution, and `SyncStrategyModuleContractTest` reads the module's annotations to pin both. `CURRENT_USER` is bound and tested but nothing selects it yet; it is the first caller `syncCurrentUser` has ever had, and WorkManager is its intended one (PR #32)
 - [x] Decorator pattern: repository wrappers adding cache, retry, and telemetry — three layers around an unchanged `UserRepositoryImpl`, which is what closes `docs/solid.md` finding 7. The order is the design (`retry` innermost, so everything above sees one logical operation; caching above it, so a hit costs no retry schedule; telemetry outermost, so durations are what the caller waited for) and `UserRepositoryDecoratorTest` walks the assembled chain, because nothing else fails when it is reversed. Three traps, each of which still compiles: the sync methods return failures as **values**, so `runCatching { delegate.syncUser(id) }` never retries anything; a shared in-flight request started with the first caller's `async` is cancelled when that caller leaves, taking down a request a second screen is still awaiting — it is hosted in `@ApplicationScope` instead, the first use that scope has had; and cancellation is not failure at any layer, so it is unretried, uncached and recorded as `Cancelled`. The retry decorator retries only the failed ids of a fan-out and restores request order, and `BackoffPolicy` is extracted so the flow operator and the suspend retry share one schedule (PR #33)
-- [ ] Observer pattern: app-wide event bus on `SharedFlow`
+- [x] Observer pattern: app-wide event bus on `SharedFlow` — implements rule 4 of `docs/state-and-events.md`, which had been written without anything behind it because nothing in the app had two independent listeners for one thing. Session expiry does: `TokenAuthenticator` is the only code that can tell a session has died, and it reacted by clearing the tokens and failing one request while nothing else found out — so Credential Manager kept its record of who was authorised and could answer the next sign-in by silently re-authorising the account the server had just ejected. The design is that its two reactions have different lifetimes: clearing the credential state is an `AppEventListener` under `AppEventDispatcher`'s process-lifetime subscription, because a session usually dies with the app backgrounded, and navigating is a composition-scoped `ObserveAsEvents` collector that accepts the miss. A `SharedFlow` reaches both; a `Channel` would have given the event to whichever asked first. Three traps, each verified by mutation rather than by a passing build: `start()` must launch `UNDISPATCHED` or the subscription registers a dispatch late and everything published in between is dropped while `tryEmit` reports success (removing it fails 6 of 16 tests); the dispatcher is a single `collect`, so a listener that throws would cancel it and silently stop *every* reaction for the life of the process (removing the per-listener catch fails 3); and the buffer is `SUSPEND` rather than `DROP_OLDEST`, so a full buffer is a `false` a caller can act on instead of a pending event that evaporates. `AppEvent` has exactly one member on purpose — the admission test is in `docs/event-bus.md`, and connectivity is the near miss it rejects, being state with a current answer that `NetworkMonitor` already publishes (PR #34)
 - [ ] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen
 - [ ] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules
 
@@ -534,6 +534,33 @@ Only one gate was genuinely out of reach: `SolidContractTest` compiles under the
 cannot run, because it reads the compiled output of the *whole* app and the decorators change
 two of its recorded lists. That, plus Hilt codegen and Lint, was what CI proved. All five
 Gradle gates passed on the first attempt.
+
+Item 5 complete as of PR #34 (2026-08-19). All three checks green on the first attempt —
+dependency resolution, the gates job (`compileDebugKotlin`, `lintDebug`, `detekt`,
+`testDebugUnitTest`), and `assembleDebug` + APK verification. The environment is unchanged:
+`dl.google.com` is still 403 on CONNECT (confirmed against
+`$HTTPS_PROXY/__agentproxy/status`, which now names the denial explicitly), so AGP and the
+Android SDK remain unfetchable and none of the five gates in CLAUDE.md can run locally.
+
+**The harness from PR #33 was rebuilt from these notes in about ten minutes, and the notes
+were what made that possible** — the two non-obvious compiler arguments were exactly as
+recorded. Two additions worth carrying forward: `kotlin-stdlib` *and*
+`kotlinx-coroutines-core` must be on the compiler's own `-cp` alongside `annotations`, or the
+compiler dies in `CoreApplicationEnvironment.createApplication` before it reads a single
+source file; and `kotlin-compiler-2.1.0.jar` needs `org.jetbrains.intellij.deps:trove4j` at
+runtime, which is not obvious from the failure (`NoClassDefFoundError:
+gnu/trove/TObjectHashingStrategy`, thrown from source collection). Maven Central answers 429
+under a burst — fetch the jars with backoff rather than in one loop.
+
+What the harness covered this time: 23 JVM-only sources compiled against hand-written
+stand-ins for `android.util.Log`, `android.content.Context` and
+`androidx.compose.runtime.Immutable`; 16 tests through
+`junit-platform-console-standalone`; detekt 1.23.8 with the repo config, 0 findings. What it
+could not: the three Compose/Hilt entry points (`AppNavHost`, `MainActivity`,
+`BoilerplateApp`), Hilt/KSP codegen, Lint, and the contract tests that read the whole app's
+compiled output — all of which CI proved. **The harness is still not checked in**, and the
+argument for doing so is now that it has been rebuilt from prose twice; `scripts/` is where
+it belongs, next to `verify-apk.sh`.
 
 **Process note for the next run: the GitHub API served ~45 minutes of stale job status.** The
 gates job finished at 01:20:39 and the API reported it `in_progress` until well past 02:00,
