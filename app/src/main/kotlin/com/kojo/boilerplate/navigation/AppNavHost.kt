@@ -14,9 +14,11 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.kojo.boilerplate.core.event.AppEvent
 import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavItem
 import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavigationScaffold
 import com.kojo.boilerplate.core.ui.adaptive.useListDetailLayout
+import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
 import com.kojo.boilerplate.feature.home.HomeTwoPaneScreen
 import com.kojo.boilerplate.feature.home.HomeScreen
 import com.kojo.boilerplate.feature.profile.ProfileScreen
@@ -24,13 +26,38 @@ import com.kojo.boilerplate.feature.scanner.BarcodeScannerScreen
 import com.kojo.boilerplate.feature.signin.GoogleSignInScreen
 import com.kojo.boilerplate.feature.textrecognition.TextRecognitionScreen
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.flow.Flow
 
+/**
+ * @param appEvents the app-wide broadcast, collected here for the reactions that are
+ *   navigation's to make. It is a parameter rather than something read from a `@Singleton`
+ *   inside the graph so this function stays a function of its inputs — see `MainActivity`.
+ */
 @Composable
 fun AppNavHost(
+    appEvents: Flow<AppEvent>,
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
     startDestination: AppDestination = AppDestination.SignIn,
 ) {
+    // The UI half of the session-expiry reaction. It is a *reaction to* the event and not the
+    // handling of it: the credential state is cleared by SessionExpiryCredentialListener, which
+    // is subscribed for the life of the process, because a session usually dies with the app in
+    // the background and this collector only runs while a screen is started. A SharedFlow
+    // delivers to both; a Channel would have given the event to whichever asked first.
+    ObserveAsEvents(appEvents) { event ->
+        when (event) {
+            AppEvent.SessionExpired -> navController.navigate(AppDestination.SignIn) {
+                // Everything on the stack was reached as a signed-in user, so none of it
+                // should be behind the back button now. `startDestinationId` is SignIn itself,
+                // and inclusive pops that too — Home's own navigation removes it from the
+                // stack, so popping "up to SignIn" without inclusive would find nothing.
+                popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination,

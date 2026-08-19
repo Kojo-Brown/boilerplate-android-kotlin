@@ -56,6 +56,10 @@ Modern Android app starter following Google's recommended architecture.
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
   by nobody.
+- [The app-wide event bus](./docs/event-bus.md) — Observer on a `SharedFlow`: the three
+  questions an event has to answer to get on it, why a `Channel` cannot do this job and a
+  `replay` cannot fix it, and why the subscription that matters is started in `Application`
+  rather than in a screen.
 
 ## Quick Start
 

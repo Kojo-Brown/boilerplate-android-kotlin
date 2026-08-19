@@ -1,5 +1,7 @@
 package com.kojo.boilerplate.core.network
 
+import com.kojo.boilerplate.core.event.AppEvent
+import com.kojo.boilerplate.core.event.AppEventBus
 import com.kojo.boilerplate.core.network.api.AuthApi
 import com.kojo.boilerplate.core.network.model.RefreshTokenRequest
 import kotlinx.coroutines.runBlocking
@@ -17,10 +19,18 @@ import javax.inject.Inject
  * Inject [AuthApi] lazily via [dagger.Lazy] so NetworkModule can provide
  * both the authenticator and the auth-only Retrofit client without a
  * circular dependency.
+ *
+ * When the refresh itself fails there is no session left, and the rest of the app has to be
+ * told: this is the one place that knows a session has died, and it knows it on an OkHttp
+ * request thread, arbitrarily deep inside whatever call happened to be in flight. Returning
+ * `null` here only fails that one request. [AppEvent.SessionExpired] on the [AppEventBus] is
+ * how the reaction reaches the parts of the app that own it — credential state and
+ * navigation — without this class holding a reference to either.
  */
 class TokenAuthenticator @Inject constructor(
     private val tokenProvider: TokenProvider,
     private val authApi: dagger.Lazy<AuthApi>,
+    private val appEventBus: AppEventBus,
 ) : Authenticator {
 
     override fun authenticate(route: Route?, response: Response): Request? {
@@ -35,6 +45,14 @@ class TokenAuthenticator @Inject constructor(
             }.getOrNull()
         } ?: run {
             tokenProvider.clearTokens()
+            // tryPublish rather than publish: this runs on an OkHttp request thread, which is
+            // not a coroutine, and runBlocking on it to emit would park a request thread
+            // behind whatever the listeners are doing. The return value is deliberately not
+            // treated as "was it delivered" — it cannot be. With no subscriber the event is
+            // dropped and this still returns true, which is why the reactions that must
+            // happen are AppEventListeners under AppEventDispatcher's process-lifetime
+            // subscription rather than collectors in a screen.
+            appEventBus.tryPublish(AppEvent.SessionExpired)
             return null
         }
 
