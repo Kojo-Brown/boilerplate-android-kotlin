@@ -2,9 +2,9 @@ package com.kojo.boilerplate.feature.textrecognition
 
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import io.mockk.junit5.MockKExtension
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,6 +14,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.RegisterExtension
 
+/**
+ * `state.value` is read directly here, with no collector: this view model backs its state with
+ * a plain `MutableStateFlow` rather than a `stateIn` pipeline, so there is no upstream that
+ * needs a subscriber and no `WhileSubscribed` window to fall outside of.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(MockKExtension::class)
 class TextRecognitionViewModelTest {
@@ -29,29 +34,26 @@ class TextRecognitionViewModelTest {
         viewModel = TextRecognitionViewModel()
     }
 
+    private fun detect(
+        fullText: String,
+        blocks: ImmutableList<RecognizedTextBlock> = persistentListOf(),
+    ) = viewModel.onEvent(TextRecognitionUiEvent.TextDetected(fullText, blocks))
+
     @Test
-    fun `initial uiState is Scanning`() = runTest {
-        assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
+    fun `the screen starts scanning, unpaused, with the flash off`() = runTest {
+        assertEquals(TextRecognitionUiState(), viewModel.state.value)
+        assertTrue(viewModel.state.value.scan is TextScanState.Scanning)
+        assertFalse(viewModel.state.value.isFlashEnabled)
+        assertFalse(viewModel.state.value.isPaused)
     }
 
     @Test
-    fun `initial isFlashEnabled is false`() = runTest {
-        assertFalse(viewModel.isFlashEnabled.first())
-    }
+    fun `recognised text is shown`() = runTest {
+        detect("Hello World", persistentListOf(RecognizedTextBlock("Hello World", 0.95f)))
 
-    @Test
-    fun `initial isPaused is false`() = runTest {
-        assertFalse(viewModel.isPaused.first())
-    }
-
-    @Test
-    fun `onTextDetected transitions to TextDetected state`() = runTest {
-        val blocks = persistentListOf(RecognizedTextBlock("Hello World", 0.95f))
-        viewModel.onTextDetected("Hello World", blocks)
-
-        val state = viewModel.uiState.first()
-        assertTrue(state is TextRecognitionUiState.TextDetected)
-        val detected = state as TextRecognitionUiState.TextDetected
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is TextScanState.TextDetected)
+        val detected = scan as TextScanState.TextDetected
         assertEquals("Hello World", detected.fullText)
         assertEquals(1, detected.blocks.size)
         assertEquals("Hello World", detected.blocks.first().text)
@@ -59,100 +61,108 @@ class TextRecognitionViewModelTest {
     }
 
     @Test
-    fun `onTextDetected is ignored when paused`() = runTest {
-        val firstBlocks = persistentListOf(RecognizedTextBlock("First", 0.9f))
-        val secondBlocks = persistentListOf(RecognizedTextBlock("Second", 0.8f))
-        viewModel.onTextDetected("First", firstBlocks)
-        viewModel.onTextDetected("Second", secondBlocks)
+    fun `text recognised while a result is on screen is ignored`() = runTest {
+        detect("First", persistentListOf(RecognizedTextBlock("First", 0.9f)))
+        detect("Second", persistentListOf(RecognizedTextBlock("Second", 0.8f)))
 
-        val state = viewModel.uiState.first() as TextRecognitionUiState.TextDetected
-        assertEquals("First", state.fullText)
+        // ML Kit analyses several frames a second; without the guard the result would be
+        // replaced under the user as fast as the camera can produce one.
+        val scan = viewModel.state.value.scan as TextScanState.TextDetected
+        assertEquals("First", scan.fullText)
+    }
+
+    /**
+     * `isPaused` is derived from the scan state rather than stored beside it. The two were
+     * separate flags kept in step by hand, and the detection guard had to consult both because
+     * neither could be trusted alone.
+     */
+    @Test
+    fun `paused is exactly while a result is on screen`() = runTest {
+        detect("Hello")
+        assertTrue(viewModel.state.value.isPaused)
+
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+        assertFalse(viewModel.state.value.isPaused)
     }
 
     @Test
-    fun `onTextDetected sets isPaused to true`() = runTest {
-        viewModel.onTextDetected("Hello", persistentListOf())
-        assertTrue(viewModel.isPaused.first())
+    fun `a denied permission is explained`() = runTest {
+        viewModel.onEvent(TextRecognitionUiEvent.CameraPermissionDenied)
+
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is TextScanState.PermissionDenied)
+        assertTrue((scan as TextScanState.PermissionDenied).message.isNotBlank())
     }
 
     @Test
-    fun `onPermissionDenied transitions to PermissionDenied state`() = runTest {
-        viewModel.onPermissionDenied()
+    fun `a camera failure carries its message`() = runTest {
+        viewModel.onEvent(TextRecognitionUiEvent.CameraFailed("Camera failed to bind"))
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is TextRecognitionUiState.PermissionDenied)
-        assertTrue((state as TextRecognitionUiState.PermissionDenied).message.isNotBlank())
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is TextScanState.Error)
+        assertEquals("Camera failed to bind", (scan as TextScanState.Error).message)
     }
 
     @Test
-    fun `onError transitions to Error state with message`() = runTest {
-        viewModel.onError("Camera failed to bind")
+    fun `resuming after a result goes back to scanning`() = runTest {
+        detect("Some text")
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is TextRecognitionUiState.Error)
-        assertEquals("Camera failed to bind", (state as TextRecognitionUiState.Error).message)
+        assertTrue(viewModel.state.value.scan is TextScanState.Scanning)
     }
 
     @Test
-    fun `resumeScanning resets uiState to Scanning`() = runTest {
-        viewModel.onTextDetected("Some text", persistentListOf())
-        viewModel.resumeScanning()
+    fun `resuming after an error goes back to scanning`() = runTest {
+        viewModel.onEvent(TextRecognitionUiEvent.CameraFailed("Camera error"))
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
 
-        assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
+        assertTrue(viewModel.state.value.scan is TextScanState.Scanning)
     }
 
     @Test
-    fun `resumeScanning resets isPaused to false`() = runTest {
-        viewModel.onTextDetected("Some text", persistentListOf())
-        viewModel.resumeScanning()
+    fun `the flash toggles on and back off`() = runTest {
+        viewModel.onEvent(TextRecognitionUiEvent.FlashToggled)
+        assertTrue(viewModel.state.value.isFlashEnabled)
 
-        assertFalse(viewModel.isPaused.first())
+        viewModel.onEvent(TextRecognitionUiEvent.FlashToggled)
+        assertFalse(viewModel.state.value.isFlashEnabled)
     }
 
     @Test
-    fun `resumeScanning after error resets to Scanning`() = runTest {
-        viewModel.onError("Camera error")
-        viewModel.resumeScanning()
+    fun `the flash survives a result being shown and dismissed`() = runTest {
+        viewModel.onEvent(TextRecognitionUiEvent.FlashToggled)
+        detect("Some text")
+        assertTrue(viewModel.state.value.isFlashEnabled)
 
-        assertTrue(viewModel.uiState.first() is TextRecognitionUiState.Scanning)
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+        assertTrue(viewModel.state.value.isFlashEnabled)
     }
 
     @Test
-    fun `toggleFlash enables flash when off`() = runTest {
-        viewModel.toggleFlash()
-        assertTrue(viewModel.isFlashEnabled.first())
-    }
-
-    @Test
-    fun `toggleFlash disables flash when on`() = runTest {
-        viewModel.toggleFlash()
-        viewModel.toggleFlash()
-        assertFalse(viewModel.isFlashEnabled.first())
-    }
-
-    @Test
-    fun `text blocks are stored with correct confidence`() = runTest {
+    fun `text blocks are carried through with their confidence`() = runTest {
         val blocks = persistentListOf(
             RecognizedTextBlock("Line one", 0.98f),
             RecognizedTextBlock("Line two", 0.75f),
+            // ML Kit reports -1 when it has no confidence figure for a block, and the screen
+            // has to be able to tell that from a genuinely low one.
             RecognizedTextBlock("Line three", -1f),
         )
-        viewModel.onTextDetected("Line one\nLine two\nLine three", blocks)
+        detect("Line one\nLine two\nLine three", blocks)
 
-        val state = viewModel.uiState.first() as TextRecognitionUiState.TextDetected
-        assertEquals(3, state.blocks.size)
-        assertEquals(0.98f, state.blocks[0].confidence)
-        assertEquals(0.75f, state.blocks[1].confidence)
-        assertEquals(-1f, state.blocks[2].confidence)
+        val scan = viewModel.state.value.scan as TextScanState.TextDetected
+        assertEquals(3, scan.blocks.size)
+        assertEquals(0.98f, scan.blocks[0].confidence)
+        assertEquals(0.75f, scan.blocks[1].confidence)
+        assertEquals(-1f, scan.blocks[2].confidence)
     }
 
     @Test
-    fun `can scan again after previous result`() = runTest {
-        viewModel.onTextDetected("First scan", persistentListOf())
-        viewModel.resumeScanning()
-        viewModel.onTextDetected("Second scan", persistentListOf())
+    fun `scanning again after a result replaces it`() = runTest {
+        detect("First scan")
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+        detect("Second scan")
 
-        val state = viewModel.uiState.first() as TextRecognitionUiState.TextDetected
-        assertEquals("Second scan", state.fullText)
+        val scan = viewModel.state.value.scan as TextScanState.TextDetected
+        assertEquals("Second scan", scan.fullText)
     }
 }

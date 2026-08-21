@@ -35,7 +35,7 @@ fun ProfileScreen(
     onNavigateUp: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -53,8 +53,8 @@ fun ProfileScreen(
         },
     ) { innerPadding ->
         ProfileContent(
-            uiState = uiState,
-            onRetry = viewModel::retry,
+            uiState = state,
+            onRetry = { viewModel.onEvent(ProfileUiEvent.RetryClicked) },
             modifier = Modifier.padding(innerPadding),
         )
     }

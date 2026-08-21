@@ -71,14 +71,13 @@ fun BarcodeScannerScreen(
     onNavigateUp: () -> Unit,
     viewModel: BarcodeScannerViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val isFlashEnabled by viewModel.isFlashEnabled.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (!granted) viewModel.onPermissionDenied()
+        if (!granted) viewModel.onEvent(BarcodeScannerUiEvent.CameraPermissionDenied)
     }
 
     LaunchedEffect(Unit) {
@@ -101,11 +100,21 @@ fun BarcodeScannerScreen(
                     }
                 },
                 actions = {
-                    if (uiState is BarcodeScannerUiState.Scanning) {
-                        IconButton(onClick = viewModel::toggleFlash) {
+                    if (state.scan is BarcodeScanState.Scanning) {
+                        IconButton(
+                            onClick = { viewModel.onEvent(BarcodeScannerUiEvent.FlashToggled) },
+                        ) {
                             Icon(
-                                imageVector = if (isFlashEnabled) Icons.Default.FlashOff else Icons.Default.FlashOn,
-                                contentDescription = if (isFlashEnabled) "Disable flash" else "Enable flash",
+                                imageVector = if (state.isFlashEnabled) {
+                                    Icons.Default.FlashOff
+                                } else {
+                                    Icons.Default.FlashOn
+                                },
+                                contentDescription = if (state.isFlashEnabled) {
+                                    "Disable flash"
+                                } else {
+                                    "Enable flash"
+                                },
                             )
                         }
                     }
@@ -118,42 +127,50 @@ fun BarcodeScannerScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            when (val state = uiState) {
-                is BarcodeScannerUiState.Scanning -> {
+            when (val scan = state.scan) {
+                is BarcodeScanState.Scanning -> {
                     CameraPreview(
-                        isFlashEnabled = isFlashEnabled,
+                        isFlashEnabled = state.isFlashEnabled,
                         onBarcodeDetected = { rawValue, format ->
-                            viewModel.onBarcodeDetected(rawValue, format)
+                            viewModel.onEvent(
+                                BarcodeScannerUiEvent.BarcodeDetected(rawValue, format),
+                            )
                         },
-                        onError = viewModel::onError,
+                        onError = { message ->
+                            viewModel.onEvent(BarcodeScannerUiEvent.CameraFailed(message))
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                     ScannerOverlay(modifier = Modifier.fillMaxSize())
                 }
 
-                is BarcodeScannerUiState.BarcodeDetected -> {
+                is BarcodeScanState.Detected -> {
                     BarcodeResultContent(
-                        state = state,
-                        onResumeScanning = viewModel::resumeScanning,
+                        scan = scan,
+                        onResumeScanning = {
+                            viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
                     )
                 }
 
-                is BarcodeScannerUiState.PermissionDenied -> {
+                is BarcodeScanState.PermissionDenied -> {
                     PermissionDeniedContent(
-                        message = state.message,
+                        message = scan.message,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
                     )
                 }
 
-                is BarcodeScannerUiState.Error -> {
+                is BarcodeScanState.Error -> {
                     ErrorContent(
-                        message = state.message,
-                        onRetry = viewModel::resumeScanning,
+                        message = scan.message,
+                        onRetry = {
+                            viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
@@ -251,7 +268,7 @@ private fun ScannerOverlay(modifier: Modifier = Modifier) {
 
 @Composable
 private fun BarcodeResultContent(
-    state: BarcodeScannerUiState.BarcodeDetected,
+    scan: BarcodeScanState.Detected,
     onResumeScanning: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -276,7 +293,7 @@ private fun BarcodeResultContent(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = state.format.displayName,
+            text = scan.format.displayName,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -291,7 +308,7 @@ private fun BarcodeResultContent(
                 .padding(20.dp),
         ) {
             Text(
-                text = state.rawValue,
+                text = scan.rawValue,
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -301,7 +318,7 @@ private fun BarcodeResultContent(
         Button(
             onClick = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("barcode", state.rawValue))
+                clipboard.setPrimaryClip(ClipData.newPlainText("barcode", scan.rawValue))
             },
             modifier = Modifier.fillMaxWidth(),
         ) {

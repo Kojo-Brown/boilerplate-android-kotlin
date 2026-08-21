@@ -13,8 +13,10 @@ import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -64,22 +66,24 @@ class HomeViewModelTest {
     )
 
     /**
-     * uiState is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream
-     * does not run until something collects it. Reading .value with no subscriber returns
-     * the initial Loading value forever — which is why every assertion below used to fail
-     * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
-     * the state hot for the test and runTest tears it down automatically.
+     * `state` is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream does
+     * not run until something collects it. Reading .value with no subscriber returns the
+     * initial value forever — which is why every assertion below needs a subscriber.
+     * Collecting on backgroundScope keeps the state hot for the test and runTest tears it down
+     * automatically.
      *
      * Both dispatchers are pinned to the test's own scheduler so there is a single clock —
      * the search debounce and the retry backoff are both `delay()` upstream of the view
      * model's own `flowOn`, so they only stay on virtual time while that holds.
      *
-     * [states] records every state the UI would render, which is what the debounce assertions
-     * are about: `uiState` is a StateFlow and conflates equal consecutive values, so the
-     * intermediate states have to be counted as they go past rather than reconstructed after.
+     * [contents] records each time the *list* changed, which is what the debounce assertion is
+     * about. It is deliberately the content and not the whole state: a keystroke changes
+     * `searchQuery` and therefore produces a new `HomeUiState` — that is the text field
+     * updating, which must not be debounced — while leaving the list it was filtering
+     * untouched. `distinctUntilChanged` on the content is exactly "the list changed".
      */
     private fun TestScope.buildSubscribedViewModel(
-        states: MutableList<HomeUiState> = mutableListOf(),
+        contents: MutableList<HomeContent> = mutableListOf(),
     ): HomeViewModel {
         val viewModel = HomeViewModel(
             userRepository = userRepository,
@@ -88,7 +92,7 @@ class HomeViewModelTest {
             networkMonitor = networkMonitor,
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.uiState.collect { states += it }
+            viewModel.state.map { it.content }.distinctUntilChanged().collect { contents += it }
         }
         runCurrent()
         return viewModel
@@ -96,110 +100,111 @@ class HomeViewModelTest {
 
     /** Types [query] and lets the search debounce elapse. */
     private fun TestScope.enterQuery(viewModel: HomeViewModel, query: String) {
-        viewModel.updateSearchQuery(query)
+        viewModel.onEvent(HomeUiEvent.SearchQueryChanged(query))
         advanceTimeBy(SETTLE)
         runCurrent()
     }
 
-    private fun HomeViewModel.successItemCount(): Int =
-        (uiState.value as HomeUiState.Success).items.size
+    private fun HomeViewModel.users(): HomeContent.Users =
+        state.value.content as HomeContent.Users
+
+    private fun HomeViewModel.userCount(): Int = users().items.size
 
     @Test
-    fun `uiState initial value is Loading`() {
-        assertEquals(HomeUiState.Loading, buildViewModel().uiState.value)
+    fun `the initial content is Loading`() {
+        assertEquals(HomeContent.Loading, buildViewModel().state.value.content)
     }
 
     @Test
-    fun `uiState emits Success with all users when search query is empty`() = runTest {
+    fun `every user is listed when the search query is empty`() = runTest {
         val viewModel = buildSubscribedViewModel()
-        val state = viewModel.uiState.value
+        val content = viewModel.state.value.content
 
-        assertTrue(state is HomeUiState.Success)
-        val success = state as HomeUiState.Success
-        assertEquals(3, success.items.size)
-        assertEquals("Alice Johnson", success.items[0].title)
-        assertEquals("alice@example.com", success.items[0].description)
+        assertTrue(content is HomeContent.Users)
+        val users = content as HomeContent.Users
+        assertEquals(3, users.items.size)
+        assertEquals("Alice Johnson", users.items[0].title)
+        assertEquals("alice@example.com", users.items[0].description)
     }
 
     @Test
-    fun `updateSearchQuery filters users by display name`() = runTest {
+    fun `a search query filters users by display name`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
         enterQuery(viewModel, "alice")
 
-        val success = viewModel.uiState.value as HomeUiState.Success
-        assertEquals(1, success.items.size)
-        assertEquals("Alice Johnson", success.items[0].title)
+        assertEquals(1, viewModel.userCount())
+        assertEquals("Alice Johnson", viewModel.users().items[0].title)
     }
 
     @Test
-    fun `updateSearchQuery filters users by email`() = runTest {
+    fun `a search query filters users by email`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
         enterQuery(viewModel, "bob@")
 
-        val success = viewModel.uiState.value as HomeUiState.Success
-        assertEquals(1, success.items.size)
-        assertEquals("Bob Smith", success.items[0].title)
+        assertEquals(1, viewModel.userCount())
+        assertEquals("Bob Smith", viewModel.users().items[0].title)
     }
 
     @Test
-    fun `updateSearchQuery is case insensitive`() = runTest {
+    fun `a search query is case insensitive`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
         enterQuery(viewModel, "CAROL")
 
-        val success = viewModel.uiState.value as HomeUiState.Success
-        assertEquals(1, success.items.size)
-        assertEquals("Carol White", success.items[0].title)
+        assertEquals(1, viewModel.userCount())
+        assertEquals("Carol White", viewModel.users().items[0].title)
     }
 
     @Test
-    fun `updateSearchQuery returns empty list when no match`() = runTest {
+    fun `a search query with no match lists nothing`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
         enterQuery(viewModel, "xyz-no-match")
 
-        assertEquals(0, viewModel.successItemCount())
+        assertEquals(0, viewModel.userCount())
     }
 
     @Test
-    fun `clearing search query restores full list`() = runTest {
+    fun `clearing the search query restores the full list`() = runTest {
         val viewModel = buildSubscribedViewModel()
 
         enterQuery(viewModel, "alice")
         enterQuery(viewModel, "")
 
-        assertEquals(3, viewModel.successItemCount())
+        assertEquals(3, viewModel.userCount())
     }
 
     @Test
-    fun `searchQuery exposes every keystroke without waiting for the debounce`() = runTest {
-        val viewModel = buildSubscribedViewModel()
+    fun `the search query in the state is every keystroke, without waiting for the debounce`() =
+        runTest {
+            val viewModel = buildSubscribedViewModel()
 
-        viewModel.updateSearchQuery("ali")
+            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("ali"))
+            runCurrent()
 
-        // The text field is bound to this. Debouncing it would make typing feel broken.
-        assertEquals("ali", viewModel.searchQuery.value)
-    }
+            // The text field is bound to this. Debouncing it would make typing feel broken.
+            assertEquals("ali", viewModel.state.value.searchQuery)
+        }
 
     @Test
-    fun `keystrokes typed within the debounce window produce a single filtered state`() = runTest {
-        val states = mutableListOf<HomeUiState>()
-        val viewModel = buildSubscribedViewModel(states)
+    fun `keystrokes typed within the debounce window produce a single filtered list`() = runTest {
+        val contents = mutableListOf<HomeContent>()
+        val viewModel = buildSubscribedViewModel(contents)
 
         listOf("a", "al", "ali", "alic", "alice").forEach { keystroke ->
-            viewModel.updateSearchQuery(keystroke)
+            viewModel.onEvent(HomeUiEvent.SearchQueryChanged(keystroke))
             advanceTimeBy(TYPING_GAP)
         }
         advanceTimeBy(SETTLE)
         runCurrent()
 
         // Without the debounce every prefix would filter the list and render: "a" alone
-        // matches Alice and Carol, so the intermediate states are visibly different.
+        // matches Alice and Carol, so the intermediate lists are visibly different.
         assertEquals(
             listOf(3, 1),
-            states.filterIsInstance<HomeUiState.Success>().map { it.items.size },
+            contents.filterIsInstance<HomeContent.Users>().map { it.items.size },
         )
     }
 
@@ -209,25 +214,25 @@ class HomeViewModelTest {
         enterQuery(viewModel, "alice")
         val clearedAt = currentTime
 
-        viewModel.updateSearchQuery("")
+        viewModel.onEvent(HomeUiEvent.SearchQueryChanged(""))
         runCurrent()
 
-        assertEquals(3, viewModel.successItemCount())
+        assertEquals(3, viewModel.userCount())
         assertEquals(clearedAt, currentTime)
     }
 
     @Test
-    fun `uiState reflects repository updates reactively`() = runTest {
+    fun `the list reflects repository updates reactively`() = runTest {
         val usersFlow = MutableStateFlow(testUsers)
         every { userRepository.getUsers() } returns usersFlow
         val viewModel = buildSubscribedViewModel()
 
-        assertTrue(viewModel.uiState.value is HomeUiState.Success)
+        assertTrue(viewModel.state.value.content is HomeContent.Users)
 
         val newUser = User(id = "4", displayName = "Dave Brown", email = "dave@example.com")
         usersFlow.value = testUsers + newUser
 
-        assertEquals(4, viewModel.successItemCount())
+        assertEquals(4, viewModel.userCount())
     }
 
     @Test
@@ -243,16 +248,16 @@ class HomeViewModelTest {
 
         // Still Loading rather than Error: the backoff has not elapsed, so the failure has
         // not been shown to anyone yet.
-        assertEquals(HomeUiState.Loading, viewModel.uiState.value)
+        assertEquals(HomeContent.Loading, viewModel.state.value.content)
 
         advanceUntilIdle()
 
-        assertEquals(3, viewModel.successItemCount())
+        assertEquals(3, viewModel.userCount())
         assertEquals(2, subscriptions)
     }
 
     @Test
-    fun `uiState emits Error only once the retries are exhausted`() = runTest {
+    fun `the error content appears only once the retries are exhausted`() = runTest {
         var subscriptions = 0
         every { userRepository.getUsers() } returns flow {
             subscriptions++
@@ -260,13 +265,13 @@ class HomeViewModelTest {
         }
 
         val viewModel = buildSubscribedViewModel()
-        assertEquals(HomeUiState.Loading, viewModel.uiState.value)
+        assertEquals(HomeContent.Loading, viewModel.state.value.content)
 
         advanceUntilIdle()
 
-        val state = viewModel.uiState.value
-        assertTrue(state is HomeUiState.Error)
-        assertEquals("network error", (state as HomeUiState.Error).message)
+        val content = viewModel.state.value.content
+        assertTrue(content is HomeContent.Error)
+        assertEquals("network error", (content as HomeContent.Error).message)
         assertEquals(4, subscriptions) // the first attempt plus three retries
     }
 
@@ -280,7 +285,7 @@ class HomeViewModelTest {
 
         val viewModel = buildSubscribedViewModel()
 
-        assertTrue(viewModel.uiState.value is HomeUiState.Error)
+        assertTrue(viewModel.state.value.content is HomeContent.Error)
         assertEquals(1, subscriptions)
         assertEquals(0L, currentTime)
     }
@@ -291,13 +296,13 @@ class HomeViewModelTest {
         val viewModel = buildSubscribedViewModel()
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value is HomeUiState.Error)
+        assertTrue(viewModel.state.value.content is HomeContent.Error)
 
         every { userRepository.getUsers() } returns flowOf(testUsers)
-        viewModel.retry()
+        viewModel.onEvent(HomeUiEvent.RetryClicked)
         advanceUntilIdle()
 
-        assertEquals(3, viewModel.successItemCount())
+        assertEquals(3, viewModel.userCount())
     }
 
     @Test
@@ -305,26 +310,26 @@ class HomeViewModelTest {
         val firstCollection = MutableStateFlow(testUsers)
         every { userRepository.getUsers() } returns firstCollection
         val viewModel = buildSubscribedViewModel()
-        assertEquals(3, viewModel.successItemCount())
+        assertEquals(3, viewModel.userCount())
 
         val secondCollection = MutableStateFlow(emptyList<User>())
         every { userRepository.getUsers() } returns secondCollection
-        viewModel.retry()
+        viewModel.onEvent(HomeUiEvent.RetryClicked)
         advanceUntilIdle()
 
         // flatMapLatest cancelled the first subscription, so the abandoned flow can no longer
-        // write to uiState. Under flatMapConcat or merge this would race back to three items.
+        // write to the state. Under flatMapConcat or merge this would race back to three items.
         firstCollection.value = testUsers.take(2)
         advanceUntilIdle()
 
-        assertEquals(0, viewModel.successItemCount())
+        assertEquals(0, viewModel.userCount())
     }
 
     @Test
     fun `isOffline stays false with no subscriber rather than reporting a stale offline`() {
         // Nothing is collected, so the monitor is never subscribed and the platform callback
         // is never registered. The initial value is what a caller reading .value would see.
-        assertEquals(false, buildViewModel().isOffline.value)
+        assertEquals(false, buildViewModel().state.value.isOffline)
     }
 
     @Test
@@ -332,7 +337,7 @@ class HomeViewModelTest {
         val viewModel = buildViewModel()
         val values = mutableListOf<Boolean>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.isOffline.collect { values += it }
+            viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
         }
         runCurrent()
 
@@ -341,8 +346,8 @@ class HomeViewModelTest {
         networkMonitor.emit(FakeNetworkMonitor.ONLINE)
         runCurrent()
 
-        // The first `false` is the initial value, which the monitor's own "online" agrees
-        // with and StateFlow therefore conflates away rather than re-emitting.
+        // The leading `false` is the assumed-online value the state starts at, which the
+        // monitor's own "online" agrees with — so nothing is emitted for it.
         assertEquals(listOf(false, true, false), values)
     }
 
@@ -351,7 +356,7 @@ class HomeViewModelTest {
         val viewModel = buildViewModel()
         val values = mutableListOf<Boolean>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.isOffline.collect { values += it }
+            viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
         }
         runCurrent()
 

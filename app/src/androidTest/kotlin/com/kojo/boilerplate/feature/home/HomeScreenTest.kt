@@ -1,6 +1,7 @@
 package com.kojo.boilerplate.feature.home
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -16,11 +17,11 @@ class HomeScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun homeContent_whenLoading_showsNoTextContent() {
+    fun homeBody_whenLoading_showsNoTextContent() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Loading,
+                HomeBody(
+                    content = HomeContent.Loading,
                     onRetry = {},
                     onItemClick = {},
                 )
@@ -31,11 +32,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenError_showsErrorTitle() {
+    fun homeBody_whenError_showsErrorTitle() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Error("Network unavailable"),
+                HomeBody(
+                    content = HomeContent.Error("Network unavailable"),
                     onRetry = {},
                     onItemClick = {},
                 )
@@ -45,11 +46,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenError_showsErrorMessage() {
+    fun homeBody_whenError_showsErrorMessage() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Error("Request timed out"),
+                HomeBody(
+                    content = HomeContent.Error("Request timed out"),
                     onRetry = {},
                     onItemClick = {},
                 )
@@ -59,11 +60,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenError_showsRetryButton() {
+    fun homeBody_whenError_showsRetryButton() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Error("Network unavailable"),
+                HomeBody(
+                    content = HomeContent.Error("Network unavailable"),
                     onRetry = {},
                     onItemClick = {},
                 )
@@ -73,12 +74,12 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenError_retryButtonInvokesCallback() {
+    fun homeBody_whenError_retryButtonInvokesCallback() {
         var retried = false
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Error("Network unavailable"),
+                HomeBody(
+                    content = HomeContent.Error("Network unavailable"),
                     onRetry = { retried = true },
                     onItemClick = {},
                 )
@@ -89,11 +90,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessWithItems_showsGreeting() {
+    fun homeBody_whenUsers_showsGreeting() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
@@ -108,11 +109,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessWithItems_showsItemTitle() {
+    fun homeBody_whenUsers_showsItemTitle() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
@@ -127,11 +128,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessWithItems_showsItemDescription() {
+    fun homeBody_whenUsers_showsItemDescription() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                         ),
@@ -146,11 +147,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessWithMultipleItems_showsAllItems() {
+    fun homeBody_whenSeveralUsers_showsAllItems() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(
                             HomeItem(id = "1", title = "Alice", description = "alice@example.com"),
                             HomeItem(id = "2", title = "Bob", description = "bob@example.com"),
@@ -167,13 +168,13 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessWithItems_itemClickInvokesCallback() {
+    fun homeBody_whenUsers_itemClickInvokesCallback() {
         val clicked = mutableListOf<HomeItem>()
         val item = HomeItem(id = "1", title = "Alice", description = "alice@example.com")
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(item),
                         greeting = "Boilerplate Android",
                     ),
@@ -188,11 +189,11 @@ class HomeScreenTest {
     }
 
     @Test
-    fun homeContent_whenSuccessEmpty_showsEmptyMessage() {
+    fun homeBody_whenNoUsers_showsEmptyMessage() {
         composeRule.setContent {
             BoilerplateTheme {
-                HomeContent(
-                    uiState = HomeUiState.Success(
+                HomeBody(
+                    content = HomeContent.Users(
                         items = persistentListOf(),
                         greeting = "Boilerplate Android",
                     ),

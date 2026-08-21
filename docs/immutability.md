@@ -106,18 +106,18 @@ On the sealed parent **and** on each subclass that declares properties:
 
 ```kotlin
 @Immutable
-sealed class HomeUiState {
-    data object Loading : HomeUiState()
+sealed interface HomeContent {
+    data object Loading : HomeContent
 
     @Immutable
-    data class Success(val items: ImmutableList<HomeItem>, val greeting: String) : HomeUiState()
+    data class Users(val items: ImmutableList<HomeItem>, val greeting: String) : HomeContent
 }
 ```
 
 The parent needs it because an abstract type's stability cannot be inferred from its own
 body — Compose cannot enumerate the subclasses, so it assumes the worst. The subclasses need
-their own because a Kotlin annotation is not inherited, and `HomeSuccessContent` takes
-`HomeUiState.Success` directly. A `data object` is exempt: it has no state to go stale.
+their own because a Kotlin annotation is not inherited, and `HomeUserList` takes
+`HomeContent.Users` directly. A `data object` is exempt: it has no state to go stale.
 
 Enums are exempt too — the compiler treats every enum as stable, so `BarcodeFormat` carries
 no annotation on purpose.
@@ -136,6 +136,6 @@ tool. Stability is a property of what crosses into a composable, not a style rul
 whole codebase — which is why `GoogleUser` is annotated despite living in `core/auth`, and
 `FanOutResult` is not despite living next to it.
 
-**One-shot events.** `GoogleSignInEvent` is delivered through a `Channel` and consumed by
+**One-shot effects.** A `UiEffect` is delivered through a `Channel` and consumed by
 `ObserveAsEvents`; it is never held across a recomposition, so stability says nothing about
 it and the audit does not walk it. See [state-and-events.md](state-and-events.md).

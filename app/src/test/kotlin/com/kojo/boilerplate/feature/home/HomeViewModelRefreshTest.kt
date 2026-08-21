@@ -27,6 +27,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,13 +35,14 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.RegisterExtension
 
 /**
- * `HomeViewModel.refresh()` — the network half of the screen, separate from
- * [HomeViewModelTest] which covers the database-backed list and the search.
+ * The network half of the home screen — `HomeUiEvent.RefreshClicked` and what it reports —
+ * separate from [HomeViewModelTest], which covers the database-backed list and the search.
  *
  * Every dispatcher here shares one scheduler, including `Dispatchers.Main`, so that the
- * coroutine `refresh()` launches into `viewModelScope` is on the same clock the test
+ * coroutine the refresh launches into `viewModelScope` is on the same clock the test
  * advances. With `Main` on a scheduler of its own, `advanceUntilIdle()` would return with
- * the refresh still pending and the assertions would race it.
+ * the refresh still pending and the assertions would race it. That now covers the effect
+ * channel as well: `emitEffect` sends from `viewModelScope`.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(MockKExtension::class)
@@ -57,8 +59,11 @@ class HomeViewModelRefreshTest {
 
     private val networkMonitor = FakeNetworkMonitor()
 
-    /** Keeps `uiState` hot; the states themselves are [HomeViewModelTest]'s subject, not this one's. */
+    /** Keeps `state` hot; the states themselves are [HomeViewModelTest]'s subject, not this one's. */
     private val rendered = mutableListOf<HomeUiState>()
+
+    /** Everything the view model decided should happen once, in order. */
+    private val effects = mutableListOf<HomeUiEffect>()
 
     private val testUsers = listOf(
         User(id = "1", displayName = "Alice Johnson", email = "alice@example.com"),
@@ -72,9 +77,13 @@ class HomeViewModelRefreshTest {
     }
 
     /**
-     * uiState is `WhileSubscribed`, so `refresh()` reads `HomeUiState.Loading` and refreshes
+     * `state` is `WhileSubscribed`, so a refresh reads `HomeContent.Loading` and refreshes
      * nothing unless something is collecting. Every test here needs a subscribed view model
      * for the same reason the screen does.
+     *
+     * The effect collector is part of the same setup rather than opt-in per test: a `Channel`
+     * buffers what nobody has taken yet, so a test that asserts "no effect was emitted"
+     * without collecting would pass whether or not one was sent.
      */
     private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
         val viewModel = HomeViewModel(
@@ -84,7 +93,10 @@ class HomeViewModelRefreshTest {
             networkMonitor = networkMonitor,
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.uiState.collect { rendered += it }
+            viewModel.state.collect { rendered += it }
+        }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.effects.collect { effects += it }
         }
         runCurrent()
         return viewModel
@@ -96,8 +108,8 @@ class HomeViewModelRefreshTest {
     )
 
     @Test
-    fun `refresh state starts Idle`() = runTest(mainDispatcher) {
-        assertEquals(RefreshState.Idle, buildSubscribedViewModel().refreshState.value)
+    fun `nothing is refreshing to begin with`() = runTest(mainDispatcher) {
+        assertFalse(buildSubscribedViewModel().state.value.isRefreshing)
     }
 
     @Test
@@ -106,7 +118,7 @@ class HomeViewModelRefreshTest {
         coEvery { userRepository.syncUsers(capture(requested)) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         advanceUntilIdle()
 
         assertEquals(listOf("1", "2", "3"), requested.captured)
@@ -120,10 +132,10 @@ class HomeViewModelRefreshTest {
                 succeedWith(listOf(testUsers[0]))
             val viewModel = buildSubscribedViewModel()
 
-            viewModel.updateSearchQuery("alice")
+            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("alice"))
             advanceTimeBy(SEARCH_SETTLE)
             runCurrent()
-            viewModel.refresh()
+            viewModel.onEvent(HomeUiEvent.RefreshClicked)
             advanceUntilIdle()
 
             // Refreshing the whole table would be work the user did not ask for, on rows
@@ -132,14 +144,17 @@ class HomeViewModelRefreshTest {
         }
 
     @Test
-    fun `refresh reports every user when the fan-out is clean`() = runTest(mainDispatcher) {
+    fun `a clean refresh reports nothing`() = runTest(mainDispatcher) {
         coEvery { userRepository.syncUsers(any()) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         advanceUntilIdle()
 
-        assertEquals(RefreshState.Finished(refreshed = 3, failed = 0), viewModel.refreshState.value)
+        // The refreshed rows are already on screen — the list observes the database the
+        // repository wrote them to. "Everything worked" would be a message the user has to
+        // dismiss to get their screen back.
+        assertEquals(emptyList<HomeUiEffect>(), effects)
     }
 
     @Test
@@ -154,17 +169,37 @@ class HomeViewModelRefreshTest {
             )
             val viewModel = buildSubscribedViewModel()
 
-            viewModel.refresh()
+            viewModel.onEvent(HomeUiEvent.RefreshClicked)
             advanceUntilIdle()
 
             assertEquals(
-                RefreshState.Finished(refreshed = 1, failed = 2),
-                viewModel.refreshState.value,
+                listOf(HomeUiEffect.RefreshIncomplete(refreshed = 1, failed = 2)),
+                effects,
             )
         }
 
+    /**
+     * The shortfall is an effect and not a field on the state, so it is delivered once. Held
+     * as state it had to be cleared by hand — and a rotation with the banner still up left it
+     * in place for the next composition to show again. Rule 2 of `docs/state-and-events.md`.
+     */
     @Test
-    fun `refresh is InProgress until the fan-out completes`() = runTest(mainDispatcher) {
+    fun `the shortfall is not left behind in the state`() = runTest(mainDispatcher) {
+        coEvery { userRepository.syncUsers(any()) } returns FanOutResult(
+            successes = emptyList(),
+            failures = listOf(FanOutFailure("1", IllegalStateException("boom"))),
+        )
+        val viewModel = buildSubscribedViewModel()
+
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        advanceUntilIdle()
+
+        assertEquals(1, effects.size)
+        assertFalse(viewModel.state.value.isRefreshing)
+    }
+
+    @Test
+    fun `isRefreshing stays true until the fan-out completes`() = runTest(mainDispatcher) {
         val gate = CompletableDeferred<Unit>()
         coEvery { userRepository.syncUsers(any()) } coAnswers {
             gate.await()
@@ -172,13 +207,13 @@ class HomeViewModelRefreshTest {
         }
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         runCurrent()
-        assertEquals(RefreshState.InProgress, viewModel.refreshState.value)
+        assertTrue(viewModel.state.value.isRefreshing)
 
         gate.complete(Unit)
         advanceUntilIdle()
-        assertTrue(viewModel.refreshState.value is RefreshState.Finished)
+        assertFalse(viewModel.state.value.isRefreshing)
     }
 
     @Test
@@ -190,10 +225,10 @@ class HomeViewModelRefreshTest {
         }
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         runCurrent()
-        viewModel.refresh()
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         gate.complete(Unit)
         advanceUntilIdle()
 
@@ -207,25 +242,13 @@ class HomeViewModelRefreshTest {
         coEvery { userRepository.syncUsers(any()) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         advanceUntilIdle()
-        viewModel.refresh()
+        viewModel.onEvent(HomeUiEvent.RefreshClicked)
         advanceUntilIdle()
 
-        // The in-flight guard must not latch: Finished is a claimable state.
+        // The in-flight guard must not latch.
         coVerify(exactly = 2) { userRepository.syncUsers(any()) }
-    }
-
-    @Test
-    fun `dismissRefreshResult returns the screen to Idle`() = runTest(mainDispatcher) {
-        coEvery { userRepository.syncUsers(any()) } returns succeedWith(testUsers)
-        val viewModel = buildSubscribedViewModel()
-
-        viewModel.refresh()
-        advanceUntilIdle()
-        viewModel.dismissRefreshResult()
-
-        assertEquals(RefreshState.Idle, viewModel.refreshState.value)
     }
 
     private companion object {

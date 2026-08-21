@@ -23,7 +23,7 @@ package com.kojo.boilerplate.core.event
  *
  * A per-screen one-shot — a snackbar, a "navigate on success" — fails question 2 and belongs
  * in the screen's own `Channel`, which is what
- * [com.kojo.boilerplate.feature.signin.GoogleSignInEvent] is. See `docs/event-bus.md`.
+ * [com.kojo.boilerplate.feature.signin.GoogleSignInUiEffect] is. See `docs/event-bus.md`.
  */
 sealed interface AppEvent {
 

@@ -1,8 +1,8 @@
 package com.kojo.boilerplate.feature.profile
 
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase
+import com.kojo.boilerplate.core.ui.udf.UdfViewModel
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.update
 class ProfileDetailPaneViewModel @AssistedInject constructor(
     @Assisted private val userId: String,
     private val observeUserProfile: ObserveUserProfileUseCase,
-) : ViewModel() {
+) : UdfViewModel<ProfileUiState, ProfileUiEvent, Nothing>() {
 
     @AssistedFactory
     interface Factory {
@@ -34,13 +34,13 @@ class ProfileDetailPaneViewModel @AssistedInject constructor(
     private val _retrySignal = MutableStateFlow(0)
 
     /**
-     * Identical to `ProfileViewModel.uiState`, and that is now the whole story rather than a
+     * Identical to `ProfileViewModel.state`, and that is now the whole story rather than a
      * problem: both are one `flatMapLatest` over the same use case, and the policy they used
      * to hold two copies of lives in [ObserveUserProfileUseCase]. The only difference between
      * the two screens is where [userId] comes from — an `@Assisted` parameter here, a
      * `SavedStateHandle` route there — which is the difference that is actually real.
      */
-    val uiState: StateFlow<ProfileUiState> = _retrySignal
+    override val state: StateFlow<ProfileUiState> = _retrySignal
         .flatMapLatest { observeUserProfile(userId).map { profile -> profile.toUiState() } }
         .stateIn(
             scope = viewModelScope,
@@ -48,8 +48,10 @@ class ProfileDetailPaneViewModel @AssistedInject constructor(
             initialValue = ProfileUiState.Loading,
         )
 
-    fun retry() {
-        _retrySignal.update { it + 1 }
+    override fun onEvent(event: ProfileUiEvent) {
+        when (event) {
+            ProfileUiEvent.RetryClicked -> _retrySignal.update { it + 1 }
+        }
     }
 
     private companion object {

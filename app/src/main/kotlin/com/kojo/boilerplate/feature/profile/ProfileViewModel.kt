@@ -1,10 +1,10 @@
 package com.kojo.boilerplate.feature.profile
 
 import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase
+import com.kojo.boilerplate.core.ui.udf.UdfViewModel
 import com.kojo.boilerplate.navigation.AppDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,7 +25,12 @@ import javax.inject.Inject
 class ProfileViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeUserProfile: ObserveUserProfileUseCase,
-) : ViewModel() {
+) : UdfViewModel<ProfileUiState, ProfileUiEvent, Nothing>() {
+
+    // `Nothing` as the effect type: this screen decides nothing that should happen exactly
+    // once. Navigating up is the back arrow, which the composable's own callback handles
+    // without the view model hearing about it — see `UiEffect` for why that is not an
+    // omission.
 
     private val route: AppDestination.Profile = savedStateHandle.toRoute()
     private val userId: String = route.userId
@@ -43,7 +48,7 @@ class ProfileViewModel @Inject constructor(
      * per emission. That is cheaper than the thread hand-off a `flowOn` would add to pay for
      * it — see `docs/dispatchers.md`.
      */
-    val uiState: StateFlow<ProfileUiState> = _retrySignal
+    override val state: StateFlow<ProfileUiState> = _retrySignal
         .flatMapLatest { observeUserProfile(userId).map { profile -> profile.toUiState() } }
         .stateIn(
             scope = viewModelScope,
@@ -51,8 +56,10 @@ class ProfileViewModel @Inject constructor(
             initialValue = ProfileUiState.Loading,
         )
 
-    fun retry() {
-        _retrySignal.update { it + 1 }
+    override fun onEvent(event: ProfileUiEvent) {
+        when (event) {
+            ProfileUiEvent.RetryClicked -> _retrySignal.update { it + 1 }
+        }
     }
 
     private companion object {
