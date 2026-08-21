@@ -134,7 +134,7 @@ TEST_CP="$TEST_CP:$(jar junit-platform-console-standalone-1.11.4.jar)"
 # than from a checked-in file list, so a new file is picked up — or skipped — on its own
 # merits instead of being silently missed.
 RESOLVABLE='^(kotlin|kotlinx|java|javax\.inject|org\.junit|org\.jetbrains|io\.mockk|dagger|retrofit2|okhttp3|okio|com\.kojo\.boilerplate)\.'
-STUBBED='^(android\.util\.Log|android\.content\.Context|android\.net\.NetworkCapabilities|androidx\.lifecycle\.(ViewModel|SavedStateHandle|viewModelScope)|androidx\.compose\.runtime\.(Immutable|Stable)|androidx\.navigation\.toRoute|androidx\.credentials\.exceptions\.GetCredential(Cancellation)?Exception|dagger\.hilt\.android\.lifecycle\.HiltViewModel)$'
+STUBBED='^(android\.util\.Log|android\.content\.Context|android\.net\.NetworkCapabilities|androidx\.lifecycle\.(ViewModel|SavedStateHandle|viewModelScope)|androidx\.compose\.runtime\.(Immutable|Stable)|androidx\.compose\.ui\.graphics\.vector\.ImageVector|androidx\.navigation\.toRoute|androidx\.credentials\.exceptions\.GetCredential(Cancellation)?Exception|dagger\.hilt\.android\.lifecycle\.HiltViewModel)$'
 
 # Files the import scan admits but that cannot run here, each with the reason. Kept as an
 # explicit list so an exclusion is a visible decision rather than a silent gap.
@@ -217,7 +217,19 @@ close_selection() { # sources-file [already-provided-file]
         import="${import%% *}"
         case "$import" in
           com.kojo.boilerplate.*)
-            grep -qxF "$import" "$sources.provided" || { ok=0; break; } ;;
+            # `import a.b.C.Companion.d` names a member of a top-level declaration, and
+            # `provides` only records top-level names — so trim segments off the end until
+            # one matches. Without this a test importing a companion helper was dropped
+            # without a word, which is how two tests came to run in CI and not here.
+            candidate="$import"
+            while [ -n "$candidate" ]; do
+              grep -qxF "$candidate" "$sources.provided" && break
+              case "$candidate" in
+                *.*) candidate="${candidate%.*}" ;;
+                *) candidate="" ;;
+              esac
+            done
+            [ -n "$candidate" ] || { ok=0; break; } ;;
         esac
       done < <(grep '^import com\.kojo\.boilerplate\.' "$file" || true)
       if [ "$ok" = 1 ]; then echo "$file" >> "$sources.next"; else changed=1; fi
@@ -266,6 +278,13 @@ TEST_PICKED=$(wc -l < "$WORK/test.args")
 echo "  main: $MAIN_PICKED of $MAIN_TOTAL files (plus $(find "$HERE/stubs" -name '*.kt' | wc -l) stubs)"
 echo "  test: $TEST_PICKED of $TEST_TOTAL files"
 echo "  skipped (needs the Android toolchain): $(( MAIN_TOTAL - MAIN_PICKED )) main, $(( TEST_TOTAL - TEST_PICKED )) test"
+# Named, not just counted. A skipped *test* is a gate this run did not apply, and a silent
+# count reads as coverage — which is exactly how a contract test came to be verified only
+# in CI. Anything listed here is CI's job.
+comm -23 \
+  <(find "$ROOT/app/src/test/kotlin" -name '*.kt' | sort) \
+  <(sort "$WORK/test.args") |
+  sed "s|$ROOT/app/src/test/kotlin/com/kojo/boilerplate/|    not run here: |"
 
 echo
 echo "==> Compiling"

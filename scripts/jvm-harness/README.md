@@ -23,7 +23,7 @@ prose in `SPEC.md` twice before being checked in; that is why it is here.
 
 ## What it covers
 
-At the time of writing: 75 of 117 `src/main` files, 37 of 53 `src/test` files, 245 tests, and
+At the time of writing: 76 of 117 `src/main` files, 39 of 53 `src/test` files, 257 tests, and
 detekt over `src/main`, `src/test` **and** `src/androidTest` with the repo's own config — the
 same three source sets `app/build.gradle.kts` gives the Gradle `detekt` task, so that gate is
 covered in full rather than in part.
@@ -32,6 +32,13 @@ Which files join is computed from their imports, not from a list: a file is in w
 import resolves against the jars the script fetches or against a stub in `stubs/`, and when
 every app symbol it imports is itself in. A new file is therefore picked up, or skipped, on
 its own merits.
+
+**Every skipped test file is printed by name on each run**, under `not run here:`. That is not
+decoration. A skipped test is a gate this run did not apply, and a bare count reads as
+coverage: `StabilityContractTest` was excluded for a single unresolvable import
+(`ImageVector`, via `AdaptiveNavItem`), the count said "37 of 53", and a regression it would
+have caught reached CI instead. Anything in that list is CI's job, and shortening it — by
+adding a stub, as `ImageVector` now is — is usually cheap.
 
 ## What it cannot cover
 
@@ -45,21 +52,23 @@ its own merits.
 - **`assembleDebug` and the APK checks.** `scripts/verify-apk.sh` needs a built APK.
 - **`SolidContractTest`.** It asserts over the whole app's compiled output — every repository
   interface and every implementation — so a partial compilation fails it on the harness's own
-  coverage rather than on anything about the code. It is excluded by name in `run.sh`, with
-  that reason. `StabilityContractTest`, `DomainLayerContractTest` and
+  coverage rather than on anything about the code. It is the one entry in `HARD_EXCLUDES` in
+  `run.sh`, with that reason next to it. `StabilityContractTest`, `DomainLayerContractTest` and
   `UnidirectionalDataFlowContractTest` read compiled output too and *do* run: they walk out
   from the view models, which the harness compiles in full.
+- Whatever the run prints under `not run here:` — mostly the Room- and DataStore-backed
+  repository and DAO tests.
 
 ## The stubs
 
 `stubs/` holds hand-written stand-ins for the handful of `androidx`/`android` declarations the
 JVM-compilable subset needs: `ViewModel` and `viewModelScope`, `SavedStateHandle` and
-`toRoute`, `@Immutable`/`@Stable`, `Log`, `Context`, `NetworkCapabilities`, the two Credential
-Manager exceptions, and `@HiltViewModel`. Each one says in its own KDoc what it reproduces and
-what it deliberately does not.
+`toRoute`, `@Immutable`/`@Stable`, `ImageVector`, `Log`, `Context`, `NetworkCapabilities`, the
+two Credential Manager exceptions, and `@HiltViewModel`. Each one says in its own KDoc what it
+reproduces and what it deliberately does not.
 
-Two are worth knowing about because getting them wrong would make a test pass for the wrong
-reason:
+Three are worth knowing about because getting them wrong would make a test pass — or fail —
+for the wrong reason:
 
 - `@Immutable`/`@Stable` are declared `BINARY` retention, matching the real ones.
   `StabilityContractTest` finds them by searching the class file's constant pool *because* the
@@ -67,6 +76,9 @@ reason:
   hide that.
 - `viewModelScope` is `SupervisorJob() + Dispatchers.Main.immediate`, exactly as the real one
   builds it, so a test that swaps the Main dispatcher behaves as it would on device.
+- `ImageVector` carries `@Immutable` because the real class does. Without it the stability
+  audit reports `AdaptiveNavItem` as holding an unstable property — a failure about the stub
+  rather than about the app, which is the other way a stub can waste an afternoon.
 
 Everything else — dagger, hilt-core, Retrofit, OkHttp, kotlinx, mockk, JUnit — is the real
 artifact from Maven Central at the version `gradle/libs.versions.toml` pins.

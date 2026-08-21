@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.lang.reflect.Modifier
 import java.util.jar.JarFile
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty
@@ -62,7 +63,7 @@ class StabilityContractTest {
      */
     @Test
     fun `discovery finds every view model in the app`() {
-        val found = appClasses().filter { ViewModel::class.java.isAssignableFrom(it) }
+        val found = viewModels()
         assertEquals(
             EXPECTED_VIEW_MODELS,
             found.map { it.simpleName }.sorted(),
@@ -174,14 +175,27 @@ class StabilityContractTest {
 
     // Discovery
 
-    private fun discoverStateRoots(): List<KClass<*>> = appClasses()
-        .filter { ViewModel::class.java.isAssignableFrom(it) }
+    private fun discoverStateRoots(): List<KClass<*>> = viewModels()
         .flatMap { viewModel ->
             viewModel.kotlin.memberProperties
                 .filter { it.returnType.jvmErasure == StateFlow::class }
                 .mapNotNull { it.returnType.arguments.firstOrNull()?.type?.jvmErasure }
         }
         .distinct()
+
+    /**
+     * The screens' view models: every `ViewModel` this app compiles, minus the abstract ones.
+     *
+     * `UdfViewModel` is the reason for the second half. It is a `ViewModel`, so it satisfies
+     * the assignability test, and it has a `state: StateFlow<S>` — but `S` is a type parameter,
+     * so there is no state type behind it to walk, and counting it here would mean listing a
+     * base class among the screens it is a base class *for*. An abstract view model has no
+     * state of its own by construction; its subclasses are where the roots are, and every one
+     * of them is in this list.
+     */
+    private fun viewModels(): List<Class<*>> = appClasses().filter {
+        ViewModel::class.java.isAssignableFrom(it) && !Modifier.isAbstract(it.modifiers)
+    }
 
     /**
      * Every class the Kotlin compiler produced for `src/main`, walked from the output

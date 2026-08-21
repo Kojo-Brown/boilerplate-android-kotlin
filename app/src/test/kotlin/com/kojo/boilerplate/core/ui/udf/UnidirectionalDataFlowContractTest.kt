@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.lang.reflect.Modifier
 import kotlin.reflect.KClass
 import kotlin.reflect.KType
 import kotlin.reflect.KVisibility
@@ -172,9 +173,14 @@ class UnidirectionalDataFlowContractTest {
         )
     }
 
-    private fun viewModels(): List<Class<*>> = CompiledApp.classes()
-        .filter { ViewModel::class.java.isAssignableFrom(it) && it != ViewModel::class.java }
-        .filterNot { it == UdfViewModel::class.java }
+    /**
+     * The screens' view models: every `ViewModel` this app compiles, minus the abstract ones.
+     * [UdfViewModel] is itself a `ViewModel` and would otherwise be held to the contract it
+     * defines — where `state` is typed on a type parameter and `onEvent` is abstract.
+     */
+    private fun viewModels(): List<Class<*>> = CompiledApp.classes().filter {
+        ViewModel::class.java.isAssignableFrom(it) && !Modifier.isAbstract(it.modifiers)
+    }
 
     /**
      * The `<S, E, F>` a view model bound, or null if it does not extend [UdfViewModel]
