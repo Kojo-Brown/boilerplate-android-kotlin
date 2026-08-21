@@ -60,6 +60,10 @@ Modern Android app starter following Google's recommended architecture.
   questions an event has to answer to get on it, why a `Channel` cannot do this job and a
   `replay` cannot fix it, and why the subscription that matters is started in `Application`
   rather than in a screen.
+- [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
+  `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
+  case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that
+  a comment cannot.
 
 ## Quick Start
 

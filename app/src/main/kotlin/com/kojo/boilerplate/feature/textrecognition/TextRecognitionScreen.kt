@@ -73,14 +73,13 @@ fun TextRecognitionScreen(
     onNavigateUp: () -> Unit,
     viewModel: TextRecognitionViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val isFlashEnabled by viewModel.isFlashEnabled.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (!granted) viewModel.onPermissionDenied()
+        if (!granted) viewModel.onEvent(TextRecognitionUiEvent.CameraPermissionDenied)
     }
 
     LaunchedEffect(Unit) {
@@ -103,11 +102,21 @@ fun TextRecognitionScreen(
                     }
                 },
                 actions = {
-                    if (uiState is TextRecognitionUiState.Scanning) {
-                        IconButton(onClick = viewModel::toggleFlash) {
+                    if (state.scan is TextScanState.Scanning) {
+                        IconButton(
+                            onClick = { viewModel.onEvent(TextRecognitionUiEvent.FlashToggled) },
+                        ) {
                             Icon(
-                                imageVector = if (isFlashEnabled) Icons.Default.FlashOff else Icons.Default.FlashOn,
-                                contentDescription = if (isFlashEnabled) "Disable flash" else "Enable flash",
+                                imageVector = if (state.isFlashEnabled) {
+                                    Icons.Default.FlashOff
+                                } else {
+                                    Icons.Default.FlashOn
+                                },
+                                contentDescription = if (state.isFlashEnabled) {
+                                    "Disable flash"
+                                } else {
+                                    "Enable flash"
+                                },
                             )
                         }
                     }
@@ -120,40 +129,48 @@ fun TextRecognitionScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            when (val state = uiState) {
-                is TextRecognitionUiState.Scanning -> {
+            when (val scan = state.scan) {
+                is TextScanState.Scanning -> {
                     TextRecognitionCameraPreview(
-                        isFlashEnabled = isFlashEnabled,
+                        isFlashEnabled = state.isFlashEnabled,
                         onTextDetected = { fullText, blocks ->
-                            viewModel.onTextDetected(fullText, blocks)
+                            viewModel.onEvent(
+                                TextRecognitionUiEvent.TextDetected(fullText, blocks),
+                            )
                         },
-                        onError = viewModel::onError,
+                        onError = { message ->
+                            viewModel.onEvent(TextRecognitionUiEvent.CameraFailed(message))
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                     TextScannerOverlay(modifier = Modifier.fillMaxSize())
                 }
 
-                is TextRecognitionUiState.TextDetected -> {
+                is TextScanState.TextDetected -> {
                     TextDetectedContent(
-                        state = state,
-                        onResumeScanning = viewModel::resumeScanning,
+                        scan = scan,
+                        onResumeScanning = {
+                            viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
 
-                is TextRecognitionUiState.PermissionDenied -> {
+                is TextScanState.PermissionDenied -> {
                     PermissionDeniedContent(
-                        message = state.message,
+                        message = scan.message,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
                     )
                 }
 
-                is TextRecognitionUiState.Error -> {
+                is TextScanState.Error -> {
                     ErrorContent(
-                        message = state.message,
-                        onRetry = viewModel::resumeScanning,
+                        message = scan.message,
+                        onRetry = {
+                            viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
@@ -252,7 +269,7 @@ private fun TextScannerOverlay(modifier: Modifier = Modifier) {
 
 @Composable
 private fun TextDetectedContent(
-    state: TextRecognitionUiState.TextDetected,
+    scan: TextScanState.TextDetected,
     onResumeScanning: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -282,22 +299,22 @@ private fun TextDetectedContent(
                     .padding(16.dp),
             ) {
                 Text(
-                    text = state.fullText.ifBlank { "No text detected" },
+                    text = scan.fullText.ifBlank { "No text detected" },
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
         }
 
-        if (state.blocks.isNotEmpty()) {
+        if (scan.blocks.isNotEmpty()) {
             item {
                 Text(
-                    text = "Text Blocks (${state.blocks.size})",
+                    text = "Text Blocks (${scan.blocks.size})",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
 
-            itemsIndexed(state.blocks) { index, block ->
+            itemsIndexed(scan.blocks) { index, block ->
                 TextBlockCard(index = index + 1, block = block)
             }
         }
@@ -306,7 +323,7 @@ private fun TextDetectedContent(
             Button(
                 onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("recognized_text", state.fullText))
+                    clipboard.setPrimaryClip(ClipData.newPlainText("recognized_text", scan.fullText))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {

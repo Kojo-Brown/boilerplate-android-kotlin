@@ -27,17 +27,22 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,20 +53,40 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
-    val refreshState by viewModel.refreshState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // The three navigation callbacks are parameters and not view model events on purpose. A
+    // tap that only ever means "go there" is not a decision anything below the composable
+    // makes, and routing it through the view model would add a handler that can only forward.
+    // It is also what lets `HomeTwoPaneScreen` reuse this screen with the same tap selecting a
+    // pane instead of navigating. See `UiEffect` for where the line is.
+    ObserveAsEvents(viewModel.effects) { effect ->
+        when (effect) {
+            // Launched rather than awaited: the handler returns immediately so a second
+            // effect is not held up behind a snackbar, and SnackbarHostState queues them.
+            is HomeUiEffect.RefreshIncomplete -> scope.launch {
+                snackbarHostState.showSnackbar(
+                    refreshFailureMessage(
+                        refreshed = effect.refreshed,
+                        failed = effect.failed,
+                    ),
+                )
+            }
+        }
+    }
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Home") },
                 actions = {
                     RefreshAction(
-                        inProgress = refreshState is RefreshState.InProgress,
-                        onRefresh = viewModel::refresh,
+                        inProgress = state.isRefreshing,
+                        onRefresh = { viewModel.onEvent(HomeUiEvent.RefreshClicked) },
                     )
                 },
             )
@@ -86,24 +111,21 @@ fun HomeScreen(
         },
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
-            if (isOffline) {
+            if (state.isOffline) {
                 OfflineBanner(modifier = Modifier.fillMaxWidth())
             }
-            RefreshOutcomeBanner(
-                refreshState = refreshState,
-                onDismiss = viewModel::dismissRefreshResult,
-                modifier = Modifier.fillMaxWidth(),
-            )
             SearchBar(
-                query = searchQuery,
-                onQueryChange = viewModel::updateSearchQuery,
+                query = state.searchQuery,
+                onQueryChange = { query ->
+                    viewModel.onEvent(HomeUiEvent.SearchQueryChanged(query))
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            HomeContent(
-                uiState = uiState,
-                onRetry = viewModel::retry,
+            HomeBody(
+                content = state.content,
+                onRetry = { viewModel.onEvent(HomeUiEvent.RetryClicked) },
                 onItemClick = { item -> onNavigateToProfile(item.id) },
             )
         }
@@ -148,55 +170,16 @@ internal fun RefreshAction(
 }
 
 /**
- * Reports what a finished refresh could not do, and stays out of the way otherwise.
- *
- * Nothing is rendered for a clean refresh: the rows that changed are already visible, and
- * "everything worked" is a message the user has to dismiss to get their screen back. What
- * is worth a banner is the gap between what they asked for and what arrived — a complete
- * failure, or a partial one where the list looks refreshed but some of it is not.
- *
- * A refresh that had nothing to refresh (an empty or fully filtered list) reports nothing
- * either: zero of zero users failed.
- */
-@Composable
-internal fun RefreshOutcomeBanner(
-    refreshState: RefreshState,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val finished = refreshState as? RefreshState.Finished ?: return
-    if (finished.failed == 0) return
-
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = refreshFailureMessage(
-                    refreshed = finished.refreshed,
-                    failed = finished.failed,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Dismiss")
-            }
-        }
-    }
-}
-
-/**
  * Says which users are stale, not how many requests failed.
  *
  * "2 of 10 failed" describes the fan-out; the user is looking at a list and wants to know
  * how much of it to trust. The complete-failure case gets its own sentence because "0 users
  * updated" reads as a successful no-op rather than as a failure.
+ *
+ * A clean refresh produces no message at all, and that decision is the view model's — it does
+ * not raise [HomeUiEffect.RefreshIncomplete] when nothing failed. The rows that changed are
+ * already visible, and "everything worked" is a message the user has to dismiss to get their
+ * screen back.
  */
 private fun refreshFailureMessage(refreshed: Int, failed: Int): String = when (refreshed) {
     0 -> "Could not refresh. Showing the last data loaded."
@@ -204,7 +187,7 @@ private fun refreshFailureMessage(refreshed: Int, failed: Int): String = when (r
 }
 
 /**
- * Shown while `HomeViewModel.isOffline` is true, above the content rather than in place of it:
+ * Shown while `HomeUiState.isOffline` is true, above the content rather than in place of it:
  * the list already loaded is still worth reading, it is just no longer guaranteed current.
  */
 @Composable
@@ -253,24 +236,29 @@ internal fun SearchBar(
     )
 }
 
+/**
+ * The part of the screen that the mutually-exclusive [HomeContent] governs. Named for the
+ * region it fills rather than for the type it renders, so it does not read as a constructor
+ * call for the sealed interface it takes.
+ */
 @Composable
-internal fun HomeContent(
-    uiState: HomeUiState,
+internal fun HomeBody(
+    content: HomeContent,
     onRetry: () -> Unit,
     onItemClick: (HomeItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
-        when (uiState) {
-            is HomeUiState.Loading -> {
+        when (content) {
+            is HomeContent.Loading -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            is HomeUiState.Success -> {
-                HomeSuccessContent(uiState = uiState, onItemClick = onItemClick)
+            is HomeContent.Users -> {
+                HomeUserList(users = content, onItemClick = onItemClick)
             }
-            is HomeUiState.Error -> {
+            is HomeContent.Error -> {
                 HomeErrorContent(
-                    message = uiState.message,
+                    message = content.message,
                     onRetry = onRetry,
                     modifier = Modifier.align(Alignment.Center),
                 )
@@ -280,17 +268,17 @@ internal fun HomeContent(
 }
 
 @Composable
-private fun HomeSuccessContent(
-    uiState: HomeUiState.Success,
+private fun HomeUserList(
+    users: HomeContent.Users,
     onItemClick: (HomeItem) -> Unit,
 ) {
     Column {
         Text(
-            text = uiState.greeting,
+            text = users.greeting,
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
-        if (uiState.items.isEmpty()) {
+        if (users.items.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = "No results found",
@@ -303,7 +291,7 @@ private fun HomeSuccessContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(uiState.items, key = { it.id }) { item ->
+                items(users.items, key = { it.id }) { item ->
                     HomeItemCard(item = item, onClick = { onItemClick(item) })
                 }
             }

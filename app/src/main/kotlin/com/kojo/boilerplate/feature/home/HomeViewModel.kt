@@ -1,6 +1,5 @@
 package com.kojo.boilerplate.feature.home
 
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kojo.boilerplate.core.coroutines.DefaultDispatcher
 import com.kojo.boilerplate.core.coroutines.asSearchQueries
@@ -9,20 +8,22 @@ import com.kojo.boilerplate.core.data.model.User
 import com.kojo.boilerplate.core.data.repository.UserRepository
 import com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase
 import com.kojo.boilerplate.core.network.connectivity.NetworkMonitor
+import com.kojo.boilerplate.core.ui.udf.UdfViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -41,7 +42,7 @@ class HomeViewModel @Inject constructor(
     // decisions with wrong answers, which is why that one moved.
     private val userRepository: UserRepository,
     private val refreshVisibleUsers: RefreshVisibleUsersUseCase,
-    // Covers the filtering and item mapping in uiState below, and nothing else.
+    // Covers the filtering and item mapping in `content` below, and nothing else.
     //
     // @DefaultDispatcher and not @IoDispatcher: this was IO while the same flowOn also
     // covered the repository's row mapping, which the repository now confines itself. What
@@ -51,49 +52,18 @@ class HomeViewModel @Inject constructor(
     // filling it with work that actually wants a core starves the calls it exists for.
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     networkMonitor: NetworkMonitor,
-) : ViewModel() {
+) : UdfViewModel<HomeUiState, HomeUiEvent, HomeUiEffect>() {
+
+    private val searchQuery = MutableStateFlow("")
+
+    private val retrySignal = MutableStateFlow(0)
 
     /**
-     * Whether to tell the user the list they are looking at may be stale.
-     *
-     * Separate from [uiState] rather than folded into it, because it answers a different
-     * question. `uiState` says whether the *last load* worked; this says whether a load could
-     * work *now*. A cached list plus "you are offline" is a truthful screen, and turning the
-     * whole thing into an error state because the network dropped would throw away data the
-     * user can still read.
-     *
-     * `WhileSubscribed(5_000)` matches `uiState`: the same rotation that keeps the loaded
-     * list also keeps the network callback registered, instead of tearing it down and putting
-     * it back up again a frame later. Nothing is registered at all while no one is looking.
-     *
-     * The initial value is "online" so a cold start does not flash a banner in the window
-     * before the monitor has reported; the first real status arrives immediately after.
+     * The refresh's in-flight flag *and* its lock — see the CAS in [refresh]. One atomic value
+     * cannot disagree with itself about whether a refresh is running, which is why the two are
+     * not separate.
      */
-    val isOffline: StateFlow<Boolean> = networkMonitor.networkStatus
-        .map { status -> !status.isOnline }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
-            initialValue = false,
-        )
-
-    /**
-     * What the text field shows. Undebounced on purpose: the field is bound to this, and a
-     * character that appears 300ms after it is typed reads as a broken keyboard. The debounce
-     * goes on the derived query below, where it saves work instead of costing responsiveness.
-     */
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _retrySignal = MutableStateFlow(0)
-
-    /**
-     * Plain [MutableStateFlow] rather than a `stateIn` pipeline: this is not derived from
-     * anything, it is written by [refresh] and read by the screen. It is also the refresh's
-     * own in-flight lock — see the CAS in [refresh].
-     */
-    private val _refreshState = MutableStateFlow<RefreshState>(RefreshState.Idle)
-    val refreshState: StateFlow<RefreshState> = _refreshState.asStateFlow()
+    private val refreshing = MutableStateFlow(false)
 
     /**
      * `flatMapLatest` and not `flatMapConcat`/`merge`: a manual retry must *replace* the
@@ -101,9 +71,9 @@ class HomeViewModel @Inject constructor(
      * away from. With either alternative every tap on retry would leave another live collection
      * of `getUsers()` behind it, all of them writing to the same state.
      */
-    val uiState: StateFlow<HomeUiState> = _retrySignal
+    private val content: Flow<HomeContent> = retrySignal
         .flatMapLatest {
-            combine<List<User>, String, HomeUiState>(
+            combine<List<User>, String, HomeContent>(
                 // Retry first, dedupe second. Resubscribing replays whatever the source has
                 // already emitted, and Room invalidates per table rather than per row, so an
                 // unrelated write to `users` re-delivers a byte-identical list. The `stateIn`
@@ -113,7 +83,7 @@ class HomeViewModel @Inject constructor(
                 userRepository.getUsers()
                     .retryWithBackoff()
                     .distinctUntilChanged(),
-                _searchQuery.asSearchQueries(),
+                searchQuery.asSearchQueries(),
             ) { users, query ->
                 val filtered = if (query.isBlank()) {
                     users
@@ -123,7 +93,7 @@ class HomeViewModel @Inject constructor(
                             it.email.contains(query, ignoreCase = true)
                     }
                 }
-                HomeUiState.Success(
+                HomeContent.Users(
                     // Mapped straight into a persistent-list builder rather than through
                     // `map { }.toImmutableList()`. The latter fills an ArrayList and then
                     // copies all of it into the persistent trie; the builder writes the trie
@@ -140,75 +110,125 @@ class HomeViewModel @Inject constructor(
                     greeting = "Boilerplate Android",
                 )
             }.catch { throwable ->
-                emit(HomeUiState.Error(message = throwable.message ?: "Failed to load users"))
+                emit(HomeContent.Error(message = throwable.message ?: "Failed to load users"))
             }
         }
         // Covers the combine transform only. The repository's own `flowOn` sits closer to
         // the source, and the innermost `flowOn` wins for the section it encloses — so the
         // row mapping stays on IO and this governs the filtering above it.
         .flowOn(defaultDispatcher)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
-            initialValue = HomeUiState.Loading,
+        // Outside the `flowOn`, and load-bearing rather than cosmetic. `combine` produces
+        // nothing until *every* input has emitted, so without a value here the whole screen —
+        // including the search field the user is typing into — would sit at the initial state
+        // until the first database read landed. Emitting Loading up front decouples the two,
+        // and it costs nothing: it is identical to `stateIn`'s initial value, so `stateIn`
+        // conflates it away.
+        .onStart { emit(HomeContent.Loading) }
+
+    /**
+     * The initial `false` is "assume online", so a cold start does not flash a banner in the
+     * window before the monitor has reported; the first real status arrives immediately after.
+     * It is also what keeps a monitor that never emits from stalling the whole screen, for the
+     * same `combine` reason as above. `distinctUntilChanged` absorbs the duplicate when the
+     * first real status agrees with the assumption.
+     */
+    private val offline: Flow<Boolean> = networkMonitor.networkStatus
+        .map { status -> !status.isOnline }
+        .onStart { emit(false) }
+        .distinctUntilChanged()
+
+    /**
+     * `WhileSubscribed(5_000)` is what makes all four inputs cost nothing while nobody is
+     * looking: the Room query, the debounce and the connectivity callback are all registered
+     * on the first collector and torn down five seconds after the last one leaves — long
+     * enough to cover an Activity recreation, short enough that a backgrounded screen stops
+     * holding a socket open. See `docs/state-and-events.md`.
+     */
+    override val state: StateFlow<HomeUiState> = combine(
+        content,
+        searchQuery,
+        offline,
+        refreshing,
+    ) { content, query, isOffline, isRefreshing ->
+        HomeUiState(
+            content = content,
+            searchQuery = query,
+            isOffline = isOffline,
+            isRefreshing = isRefreshing,
         )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
+        initialValue = HomeUiState(),
+    )
 
-    fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun retry() {
-        _retrySignal.update { it + 1 }
+    override fun onEvent(event: HomeUiEvent) {
+        when (event) {
+            is HomeUiEvent.SearchQueryChanged -> searchQuery.value = event.query
+            HomeUiEvent.RetryClicked -> retrySignal.update { it + 1 }
+            HomeUiEvent.RefreshClicked -> refresh()
+        }
     }
 
     /**
      * Re-fetches the users currently on screen from the network, all at once.
      *
-     * [retry] and this are different operations that a user would describe with the same
-     * word. `retry` resubscribes to the database query, which is the fix for a *read* that
-     * failed; it cannot make the data newer, because nothing in this screen ever asked the
-     * network for it. This is the one that does, and until it existed
+     * [HomeUiEvent.RetryClicked] and this are different operations that a user would describe
+     * with the same word. Retry resubscribes to the database query, which is the fix for a
+     * *read* that failed; it cannot make the data newer, because nothing in this screen ever
+     * asked the network for it. This is the one that does, and until it existed
      * [UserRepository.syncUser] had no caller outside its own tests — the app could display
      * users indefinitely without ever refetching one.
      *
-     * The ids come from [uiState], so a refresh under an active search covers what the user
-     * is looking at rather than the whole table. That is both the cheaper request and the
-     * one they asked for; clearing the search and refreshing again covers the rest.
-     *
-     * Nothing is done with the successes here. They were written to the database by the
-     * repository, and [uiState] observes the database, so the rows update themselves — the
-     * only thing this has to report is the shortfall.
+     * The ids come from [state], so a refresh under an active search covers what the user is
+     * looking at rather than the whole table. That is both the cheaper request and the one
+     * they asked for; clearing the search and refreshing again covers the rest.
      */
-    fun refresh() {
-        // Read once, then claim with a CAS. Read-check-write is not enough: two taps landing
-        // in the same frame both read Idle, both pass the check, and both launch a fan-out —
-        // doubling the requests and racing to write the result. Under the CAS the loser
-        // fails to claim and becomes a no-op. It is also why the in-flight flag is this
-        // StateFlow rather than a separate Boolean: one atomic value cannot disagree with
-        // itself about whether a refresh is running.
-        val claimed = _refreshState.value
-        if (claimed is RefreshState.InProgress) return
-        if (!_refreshState.compareAndSet(claimed, RefreshState.InProgress)) return
+    private fun refresh() {
+        // Claim with a CAS, not read-check-write. Two taps landing in the same frame both read
+        // false, both pass a check, and both launch a fan-out — doubling the requests and
+        // racing to write the result. Under the CAS the loser fails to claim and becomes a
+        // no-op.
+        if (!refreshing.compareAndSet(expect = false, update = true)) return
 
         viewModelScope.launch {
-            val ids = (uiState.value as? HomeUiState.Success)?.items?.map { it.id }.orEmpty()
-            val outcome = refreshVisibleUsers(ids)
-            _refreshState.value = RefreshState.Finished(
-                refreshed = outcome.refreshed,
-                failed = outcome.failed,
-            )
+            try {
+                // `state.value` is the initial value whenever nothing is collecting, which on
+                // this screen cannot happen — the tap came from a composition that is
+                // collecting it. The trap is real for tests, and is why they keep a collector
+                // alive; see `HomeViewModelRefreshTest`.
+                val ids = (state.value.content as? HomeContent.Users)
+                    ?.items
+                    ?.map { it.id }
+                    .orEmpty()
+                val outcome = refreshVisibleUsers(ids)
+                if (outcome.failed > 0) {
+                    emitEffect(
+                        HomeUiEffect.RefreshIncomplete(
+                            refreshed = outcome.refreshed,
+                            failed = outcome.failed,
+                        ),
+                    )
+                }
+            } finally {
+                // In a `finally` because anything else leaves the flag stuck on after a
+                // throw, and a stuck flag is a refresh button that never works again — the
+                // CAS above would reject every later tap. The previous shape had that bug.
+                //
+                // Defensive rather than exercised: nothing below here throws today, because
+                // the fan-out reports its failures as values. It is deliberately not unit
+                // tested — an exception escaping `viewModelScope` goes to the application's
+                // CoroutineExceptionHandler, and `runTest` treats that as the test failing,
+                // so the test would be about the framework rather than about this flag.
+                refreshing.value = false
+            }
         }
-    }
-
-    /** Dismisses the outcome of the last refresh, returning the screen to [RefreshState.Idle]. */
-    fun dismissRefreshResult() {
-        _refreshState.value = RefreshState.Idle
     }
 
     private companion object {
         /**
          * Long enough to cover a configuration change, short enough that a backgrounded screen
-         * stops costing anything. The standard Android value, and it now governs a platform
+         * stops costing anything. The standard Android value, and it governs a platform
          * callback registration as well as the repository subscription.
          */
         const val SUBSCRIPTION_TIMEOUT_MS = 5_000L

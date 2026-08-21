@@ -3,7 +3,6 @@ package com.kojo.boilerplate.feature.scanner
 import com.kojo.boilerplate.core.coroutines.MainDispatcherExtension
 import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -13,6 +12,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.RegisterExtension
 
+/**
+ * `state.value` is read directly here, with no collector: this view model backs its state with
+ * a plain `MutableStateFlow` rather than a `stateIn` pipeline, so there is no upstream that
+ * needs a subscriber and no `WhileSubscribed` window to fall outside of.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(MockKExtension::class)
 class BarcodeScannerViewModelTest {
@@ -28,96 +32,103 @@ class BarcodeScannerViewModelTest {
         viewModel = BarcodeScannerViewModel()
     }
 
+    private fun detect(rawValue: String, format: BarcodeFormat) =
+        viewModel.onEvent(BarcodeScannerUiEvent.BarcodeDetected(rawValue, format))
+
     @Test
-    fun `initial uiState is Scanning`() = runTest {
-        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
+    fun `the screen starts scanning, with the flash off`() = runTest {
+        assertEquals(BarcodeScannerUiState(), viewModel.state.value)
+        assertTrue(viewModel.state.value.scan is BarcodeScanState.Scanning)
+        assertFalse(viewModel.state.value.isFlashEnabled)
     }
 
     @Test
-    fun `initial isFlashEnabled is false`() = runTest {
-        assertFalse(viewModel.isFlashEnabled.first())
-    }
+    fun `a detected barcode is shown`() = runTest {
+        detect("https://example.com", BarcodeFormat.QR_CODE)
 
-    @Test
-    fun `onBarcodeDetected transitions to BarcodeDetected state`() = runTest {
-        viewModel.onBarcodeDetected("https://example.com", BarcodeFormat.QR_CODE)
-
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.BarcodeDetected)
-        val detected = state as BarcodeScannerUiState.BarcodeDetected
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is BarcodeScanState.Detected)
+        val detected = scan as BarcodeScanState.Detected
         assertEquals("https://example.com", detected.rawValue)
         assertEquals(BarcodeFormat.QR_CODE, detected.format)
     }
 
     @Test
-    fun `onBarcodeDetected is ignored when not in Scanning state`() = runTest {
-        viewModel.onBarcodeDetected("first", BarcodeFormat.QR_CODE)
-        viewModel.onBarcodeDetected("second", BarcodeFormat.EAN_13)
+    fun `a barcode detected while a result is on screen is ignored`() = runTest {
+        detect("first", BarcodeFormat.QR_CODE)
+        detect("second", BarcodeFormat.EAN_13)
 
-        val state = viewModel.uiState.first() as BarcodeScannerUiState.BarcodeDetected
-        assertEquals("first", state.rawValue)
+        // The analyser keeps running for a frame or two after the first hit, and the result
+        // the user is reading must not be replaced underneath them.
+        val scan = viewModel.state.value.scan as BarcodeScanState.Detected
+        assertEquals("first", scan.rawValue)
     }
 
     @Test
-    fun `onPermissionDenied transitions to PermissionDenied state`() = runTest {
-        viewModel.onPermissionDenied()
+    fun `a denied permission is explained`() = runTest {
+        viewModel.onEvent(BarcodeScannerUiEvent.CameraPermissionDenied)
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.PermissionDenied)
-        assertTrue((state as BarcodeScannerUiState.PermissionDenied).message.isNotBlank())
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is BarcodeScanState.PermissionDenied)
+        assertTrue((scan as BarcodeScanState.PermissionDenied).message.isNotBlank())
     }
 
     @Test
-    fun `onError transitions to Error state with message`() = runTest {
-        viewModel.onError("Camera failed to bind")
+    fun `a camera failure carries its message`() = runTest {
+        viewModel.onEvent(BarcodeScannerUiEvent.CameraFailed("Camera failed to bind"))
 
-        val state = viewModel.uiState.first()
-        assertTrue(state is BarcodeScannerUiState.Error)
-        assertEquals("Camera failed to bind", (state as BarcodeScannerUiState.Error).message)
+        val scan = viewModel.state.value.scan
+        assertTrue(scan is BarcodeScanState.Error)
+        assertEquals("Camera failed to bind", (scan as BarcodeScanState.Error).message)
     }
 
     @Test
-    fun `resumeScanning resets uiState to Scanning`() = runTest {
-        viewModel.onBarcodeDetected("https://example.com", BarcodeFormat.QR_CODE)
-        viewModel.resumeScanning()
+    fun `resuming after a result goes back to scanning`() = runTest {
+        detect("https://example.com", BarcodeFormat.QR_CODE)
+        viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
 
-        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
+        assertTrue(viewModel.state.value.scan is BarcodeScanState.Scanning)
     }
 
     @Test
-    fun `resumeScanning after error resets to Scanning`() = runTest {
-        viewModel.onError("Camera error")
-        viewModel.resumeScanning()
+    fun `resuming after an error goes back to scanning`() = runTest {
+        viewModel.onEvent(BarcodeScannerUiEvent.CameraFailed("Camera error"))
+        viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
 
-        assertTrue(viewModel.uiState.first() is BarcodeScannerUiState.Scanning)
+        assertTrue(viewModel.state.value.scan is BarcodeScanState.Scanning)
     }
 
     @Test
-    fun `toggleFlash enables flash when off`() = runTest {
-        viewModel.toggleFlash()
-        assertTrue(viewModel.isFlashEnabled.first())
+    fun `the flash toggles on and back off`() = runTest {
+        viewModel.onEvent(BarcodeScannerUiEvent.FlashToggled)
+        assertTrue(viewModel.state.value.isFlashEnabled)
+
+        viewModel.onEvent(BarcodeScannerUiEvent.FlashToggled)
+        assertFalse(viewModel.state.value.isFlashEnabled)
+    }
+
+    /**
+     * The flash and the scan state live in one value now, and this is the property that made
+     * two flows the wrong shape: the torch is on or off *underneath* whatever the scan is
+     * doing, and a result arriving must not turn it off.
+     */
+    @Test
+    fun `the flash survives a result being shown and dismissed`() = runTest {
+        viewModel.onEvent(BarcodeScannerUiEvent.FlashToggled)
+        detect("https://example.com", BarcodeFormat.QR_CODE)
+        assertTrue(viewModel.state.value.isFlashEnabled)
+
+        viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+        assertTrue(viewModel.state.value.isFlashEnabled)
     }
 
     @Test
-    fun `toggleFlash disables flash when on`() = runTest {
-        viewModel.toggleFlash()
-        viewModel.toggleFlash()
-        assertFalse(viewModel.isFlashEnabled.first())
-    }
-
-    @Test
-    fun `multiple barcode formats are stored correctly`() = runTest {
-        val formats = listOf(
-            BarcodeFormat.EAN_13,
-            BarcodeFormat.CODE_128,
-            BarcodeFormat.DATA_MATRIX,
-            BarcodeFormat.AZTEC,
-        )
-        formats.forEach { format ->
-            viewModel.resumeScanning()
-            viewModel.onBarcodeDetected("value", format)
-            val state = viewModel.uiState.first() as BarcodeScannerUiState.BarcodeDetected
-            assertEquals(format, state.format)
+    fun `every barcode format is carried through unchanged`() = runTest {
+        BarcodeFormat.entries.forEach { format ->
+            viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+            detect("value", format)
+            val scan = viewModel.state.value.scan as BarcodeScanState.Detected
+            assertEquals(format, scan.format)
         }
     }
 }

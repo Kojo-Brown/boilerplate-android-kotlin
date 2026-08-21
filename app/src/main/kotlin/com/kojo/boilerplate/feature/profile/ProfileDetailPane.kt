@@ -32,20 +32,23 @@ fun ProfileDetailPane(
             creationCallback = { factory -> factory.create(userId) },
         ),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize()) {
-        when (uiState) {
+        // `when (val current = state)` rather than `when (state)`: the delegated property is
+        // read through a getter, so smart-casting it is not possible and each branch would
+        // otherwise have to cast the value it has already matched on.
+        when (val current = state) {
             is ProfileUiState.Loading -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
             is ProfileUiState.Success -> {
-                ProfileDetailSuccessContent(profile = (uiState as ProfileUiState.Success).profile)
+                ProfileDetailSuccessContent(profile = current.profile)
             }
             is ProfileUiState.Error -> {
                 ProfileDetailErrorContent(
-                    message = (uiState as ProfileUiState.Error).message,
-                    onRetry = viewModel::retry,
+                    message = current.message,
+                    onRetry = { viewModel.onEvent(ProfileUiEvent.RetryClicked) },
                     modifier = Modifier.align(Alignment.Center),
                 )
             }

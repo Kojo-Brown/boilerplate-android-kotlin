@@ -133,7 +133,7 @@ upstream guarantees the caller deduplicated. It also keeps the count honest, sin
 duplicates in, "8 refreshed" could mean eight users or five.
 
 `HomeViewModel.refresh()` is the caller. Note what it does *not* do with the successes:
-nothing. They were written to the database, and `uiState` observes the database, so the rows
+nothing. They were written to the database, and the state observes the database, so the rows
 update themselves. The only thing the fan-out has to report to the UI is the shortfall — see
 [state and events](./state-and-events.md) for why that lives beside `HomeUiState` rather
 than inside it.

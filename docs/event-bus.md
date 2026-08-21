@@ -41,7 +41,7 @@ auth layer and to navigation. Wiring those up directly gives the network layer a
 the navigation graph.
 
 A per-screen one-shot — a snackbar, "navigate on success" — fails question 2. It belongs in
-the screen's own `Channel`, which is what `GoogleSignInEvent` is, and the two mechanisms
+the screen's own `Channel`, which is what a `UiEffect` is, and the two mechanisms
 coexist deliberately.
 
 ## Why `SharedFlow` here and `Channel` there

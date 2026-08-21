@@ -163,7 +163,7 @@ override suspend fun syncUser(id: String): Result<User> = syncUserResult
 
 The fake returns the configured result and writes nothing. A caller that syncs and then
 observes — which is exactly what `HomeViewModel.refresh()` does, since it reads the outcome
-for its count and lets `uiState` pick the new rows up out of the database — sees the write
+for its count and lets the state pick the new rows up out of the database — sees the write
 in production and not under test. The behaviour that makes `refresh()` work is the behaviour
 the fake omits.
 

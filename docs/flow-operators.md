@@ -16,19 +16,28 @@ quietly invalidating the guidance.
 `HomeViewModel` uses all four, and the order they appear in is the whole argument:
 
 ```kotlin
-val uiState: StateFlow<HomeUiState> = _retrySignal
+private val content: Flow<HomeContent> = retrySignal
     .flatMapLatest {                                  // manual retry replaces the subscription
         combine(
             userRepository.getUsers()
                 .retryWithBackoff()                   // transient failures never reach the UI
                 .distinctUntilChanged(),              // an unchanged list does no work
-            _searchQuery.asSearchQueries(),           // debounce + trim + distinct
+            searchQuery.asSearchQueries(),            // debounce + trim + distinct
         ) { users, query -> /* … */ }
             .catch { /* … */ }
     }
-    .flowOn(ioDispatcher)
-    .stateIn(viewModelScope, WhileSubscribed(5_000), Loading)
+    .flowOn(defaultDispatcher)
+    .onStart { emit(HomeContent.Loading) }            // combine waits for every input
+
+override val state: StateFlow<HomeUiState> = combine(content, searchQuery, offline, refreshing)
+    { /* … */ }
+    .stateIn(viewModelScope, WhileSubscribed(5_000), HomeUiState())
 ```
+
+The pipeline produces the *content* of the screen rather than the whole state — the search
+text, the offline flag and the refresh spinner are independent of it and are combined in at
+the end. [`unidirectional-data-flow.md`](./unidirectional-data-flow.md) has why, including
+the `onStart` above, which is load-bearing: `combine` emits nothing until every input has.
 
 ## `flatMapLatest` — switch, do not accumulate
 
@@ -41,7 +50,7 @@ val uiState: StateFlow<HomeUiState> = _retrySignal
 For anything that maps "the current selection" to "the data for it" — a retry signal, a
 selected id, a search query — only the first is correct. The other two leave the previous
 subscription alive, and every one of them keeps writing to the same state: tapping retry three
-times gives you three live collections racing to set `uiState`, and the winner is whichever
+times gives you three live collections racing to set the state, and the winner is whichever
 happens to emit last.
 
 `flatMapConcat` is worse than it looks here, because an inner flow backed by Room or a

@@ -41,22 +41,22 @@ fun GoogleSignInScreen(
     modifier: Modifier = Modifier,
     viewModel: GoogleSignInViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Navigation and the snackbar are driven by the event stream, not by uiState. Keyed on a
-    // state, a LaunchedEffect runs again every time the composition is rebuilt — which is once
-    // per rotation — so the same sign-in navigated twice and the same failure was announced
-    // once per configuration change.
-    ObserveAsEvents(viewModel.events) { event ->
-        when (event) {
-            is GoogleSignInEvent.SignedIn -> onSignedIn(event.user)
-            // Launched rather than awaited: the handler returns immediately so a second event
+    // Navigation and the snackbar are driven by the effect stream, not by the state. Keyed on
+    // a state, a LaunchedEffect runs again every time the composition is rebuilt — which is
+    // once per rotation — so the same sign-in navigated twice and the same failure was
+    // announced once per configuration change.
+    ObserveAsEvents(viewModel.effects) { effect ->
+        when (effect) {
+            is GoogleSignInUiEffect.SignedIn -> onSignedIn(effect.user)
+            // Launched rather than awaited: the handler returns immediately so a second effect
             // is not held up behind a snackbar, and SnackbarHostState queues the messages.
-            is GoogleSignInEvent.SignInFailed -> scope.launch {
-                snackbarHostState.showSnackbar(event.message)
+            is GoogleSignInUiEffect.SignInFailed -> scope.launch {
+                snackbarHostState.showSnackbar(effect.message)
             }
         }
     }
@@ -71,21 +71,25 @@ fun GoogleSignInScreen(
                 .padding(innerPadding),
             contentAlignment = Alignment.Center,
         ) {
-            when (val state = uiState) {
+            when (val current = state) {
                 is GoogleSignInUiState.Loading -> {
                     CircularProgressIndicator()
                 }
 
                 is GoogleSignInUiState.Success -> {
                     SignedInContent(
-                        user = state.user,
-                        onSignOut = viewModel::signOut,
+                        user = current.user,
+                        onSignOut = {
+                            viewModel.onEvent(GoogleSignInUiEvent.SignOutClicked)
+                        },
                     )
                 }
 
                 is GoogleSignInUiState.Idle -> {
                     SignInContent(
-                        onSignInClick = { viewModel.signIn(context) },
+                        onSignInClick = {
+                            viewModel.onEvent(GoogleSignInUiEvent.SignInClicked(context))
+                        },
                     )
                 }
             }

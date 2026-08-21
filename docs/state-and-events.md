@@ -41,13 +41,13 @@ That is not an edge case on a sign-in screen. The credential picker is another A
 of ours, so the screen is stopped for the entire time the interesting thing is happening.
 Sign-in completing while nothing is subscribed is the *ordinary* path.
 
-A `Channel` buffers instead. The event waits until something receives it, which is what
-[`GoogleSignInViewModel`](../app/src/main/kotlin/com/kojo/boilerplate/feature/signin/GoogleSignInViewModel.kt)
-uses:
+A `Channel` buffers instead. The event waits until something receives it, which is what every
+screen gets from
+[`UdfViewModel`](../app/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt):
 
 ```kotlin
-private val _events = Channel<GoogleSignInEvent>(Channel.BUFFERED)
-val events: Flow<GoogleSignInEvent> = _events.receiveAsFlow()
+private val _effects = Channel<F>(Channel.BUFFERED)
+val effects: Flow<F> = _effects.receiveAsFlow()
 ```
 
 `receiveAsFlow` and not `consumeAsFlow`: the second closes the channel when its collector goes
@@ -64,11 +64,11 @@ disqualifying, and that is the case `SharedFlow` exists for.
 is to events what `collectAsStateWithLifecycle` is to state:
 
 ```kotlin
-ObserveAsEvents(viewModel.events) { event ->
-    when (event) {
-        is GoogleSignInEvent.SignedIn -> onSignedIn(event.user)
-        is GoogleSignInEvent.SignInFailed -> scope.launch {
-            snackbarHostState.showSnackbar(event.message)
+ObserveAsEvents(viewModel.effects) { effect ->
+    when (effect) {
+        is GoogleSignInUiEffect.SignedIn -> onSignedIn(effect.user)
+        is GoogleSignInUiEffect.SignInFailed -> scope.launch {
+            snackbarHostState.showSnackbar(effect.message)
         }
     }
 }
@@ -80,13 +80,13 @@ a new lambda. Restarting on every recomposition is the subtle way to lose buffer
 
 ## What this replaced
 
-The sign-in screen used to drive both from `uiState`:
+The sign-in screen used to drive both from its state:
 
 ```kotlin
 // before
-LaunchedEffect(uiState) {
-    if (uiState is GoogleSignInUiState.Error) {
-        snackbarHostState.showSnackbar((uiState as GoogleSignInUiState.Error).message)
+LaunchedEffect(state) {
+    if (state is GoogleSignInUiState.Error) {
+        snackbarHostState.showSnackbar((state as GoogleSignInUiState.Error).message)
         viewModel.clearError()   // ← the tell
     }
 }
@@ -96,7 +96,7 @@ LaunchedEffect(uiState) {
 event wearing state's clothes, and the manual clear is the part that does not survive a
 configuration change:
 
-1. The sign-in fails. `uiState` becomes `Error("Network error")`.
+1. The sign-in fails. The state becomes `Error("Network error")`.
 2. The snackbar shows. `showSnackbar` suspends until it is dismissed, so `clearError()` has
    not run yet.
 3. The user rotates the device. The composition — and with it the `LaunchedEffect` — is
@@ -110,17 +110,17 @@ graph change away from double navigation.
 
 Now `GoogleSignInUiState` has no `Error` case at all. The state after a failed sign-in is the
 state the screen started in — `Idle`, offering the button — and the reason is a
-`SignInFailed` event that is delivered once and gone.
+`SignInFailed` effect that is delivered once and gone.
 
 ## `WhileSubscribed(5_000)`
 
-Every flow-backed `uiState` in this app ends the same way:
+Every flow-backed `state` in this app ends the same way:
 
 ```kotlin
 .stateIn(
     scope = viewModelScope,
     started = SharingStarted.WhileSubscribed(5_000L),
-    initialValue = HomeUiState.Loading,
+    initialValue = HomeUiState(),
 )
 ```
 
@@ -152,7 +152,7 @@ Two things that follow from it, and both are easy to get wrong:
   to after a minute renders its data immediately and refreshes underneath, instead of flashing
   `Loading`. Passing `WhileSubscribed(5_000, replayExpirationMillis = 0)` resets to
   `initialValue` on expiry and puts that flash back.
-- **Nothing runs until something collects.** With no subscriber, `uiState.value` is the
+- **Nothing runs until something collects.** With no subscriber, `state.value` is the
   initial value forever. That is a live trap in tests: assert against `.value` without
   collecting and you are asserting against `Loading`, whatever the repository was told to
   return. `HomeViewModelTest` keeps a collector on `backgroundScope` for exactly this reason.
@@ -170,3 +170,9 @@ Two things that follow from it, and both are easy to get wrong:
 5. Flow-backed state: `stateIn(viewModelScope, WhileSubscribed(5_000), <initial>)`, and expose
    `StateFlow`, never the cold flow.
 6. Never navigate from a `LaunchedEffect` keyed on state.
+
+The shape these rules are applied in — one `UiState`, one `UiEvent`, one `UiEffect` per screen,
+and nothing else public on a view model — is
+[`docs/unidirectional-data-flow.md`](./unidirectional-data-flow.md). Rule 2 is the one it
+turned up a second violation of: the home screen's refresh outcome was state with a Dismiss
+button, and the manual clear is now a one-shot effect.

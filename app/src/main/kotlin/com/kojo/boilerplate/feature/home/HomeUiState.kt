@@ -10,13 +10,51 @@ data class HomeItem(
     val description: String,
 )
 
+/**
+ * Everything the home screen renders, in one value.
+ *
+ * This screen is what the single-state rule is worth arguing about, because it is the one
+ * where four separate flows were each defensible on their own. The list, the search text, the
+ * offline banner and the refresh spinner really do answer different questions, and
+ * `docs/state-and-events.md` records why the answers must not be collapsed into each other —
+ * an offline device must not turn a readable list into an error page, and a refresh that fails
+ * must not replace the rows the user is reading.
+ *
+ * None of that argues for four `StateFlow`s. It argues against one *sealed* state, where
+ * `Error` would exclude the list and `Loading` would exclude the search text. A data class of
+ * independent fields with the mutually-exclusive part in [content] keeps every distinction and
+ * still hands the composable one object: the screen collects once, renders once, and cannot
+ * observe half an update — which four flows, conflated independently, allow.
+ */
 @Immutable
-sealed class HomeUiState {
-    data object Loading : HomeUiState()
+data class HomeUiState(
+    val content: HomeContent = HomeContent.Loading,
+    /**
+     * What the text field shows. Undebounced on purpose: the field is bound to this, and a
+     * character that appears 300ms after it is typed reads as a broken keyboard. The debounce
+     * goes on the derived query inside the view model, where it saves work instead of costing
+     * responsiveness.
+     */
+    val searchQuery: String = "",
+    /**
+     * Whether to tell the user the list they are looking at may be stale. A different question
+     * from [content]: that says whether the last load worked, this says whether a load could
+     * work *now*. A cached list plus "you are offline" is a truthful screen.
+     */
+    val isOffline: Boolean = false,
+    /** A network refresh is in flight. Also the refresh's own in-flight lock — see the CAS. */
+    val isRefreshing: Boolean = false,
+)
+
+/** The mutually-exclusive part of the home screen: what sits where the list goes. */
+@Immutable
+sealed interface HomeContent {
+
+    data object Loading : HomeContent
 
     /**
      * [items] is an [ImmutableList] rather than a `List` because `List` is an interface and
-     * `HomeContent` is called on every frame of a scroll.
+     * `HomeContent` is rendered on every frame of a scroll.
      *
      * A `List`-typed property makes the whole class unstable to the Compose compiler: it
      * cannot see the implementation, and `ArrayList` behind that interface is mutable. Under
@@ -27,44 +65,11 @@ sealed class HomeUiState {
      * equality and lets an identical refresh skip the recomposition entirely.
      */
     @Immutable
-    data class Success(
+    data class Users(
         val items: ImmutableList<HomeItem>,
         val greeting: String,
-    ) : HomeUiState()
+    ) : HomeContent
 
     @Immutable
-    data class Error(val message: String) : HomeUiState()
-}
-
-/**
- * Where the network refresh has got to, kept separate from [HomeUiState].
- *
- * The list on screen is served from the database and stays valid throughout a refresh, so
- * folding this into [HomeUiState] would mean tapping refresh replaced a readable list with
- * a spinner and a failure replaced it with an error page — losing data the user could still
- * use in order to report on a request they made *about* that data. The same argument the
- * offline banner is built on.
- *
- * Successful refreshes need no state of their own to be visible: the writes land in Room and
- * the list observing it re-renders. What [Finished] carries is the part the list cannot
- * show, which is what did *not* arrive.
- */
-@Immutable
-sealed interface RefreshState {
-
-    /** No refresh has run, or the last result has been dismissed. */
-    data object Idle : RefreshState
-
-    /** A fan-out is in flight. */
-    data object InProgress : RefreshState
-
-    /**
-     * A fan-out completed. [refreshed] and [failed] together account for every user the
-     * refresh attempted, so `refreshed + failed == 0` means there was nothing to refresh.
-     */
-    @Immutable
-    data class Finished(
-        val refreshed: Int,
-        val failed: Int,
-    ) : RefreshState
+    data class Error(val message: String) : HomeContent
 }

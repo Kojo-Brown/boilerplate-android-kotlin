@@ -55,7 +55,7 @@ class ProfileDetailPaneViewModelTest {
     )
 
     /**
-     * uiState is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream
+     * state is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream
      * does not run until something collects it. Reading .value with no subscriber returns
      * the initial Loading value forever — which is why every assertion below used to fail
      * with ClassCastException or "expected Success". Collecting on backgroundScope keeps
@@ -74,21 +74,21 @@ class ProfileDetailPaneViewModelTest {
             observeUserProfile = ObserveUserProfileUseCase(userRepository),
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.uiState.collect { }
+            viewModel.state.collect { }
         }
         return viewModel
     }
 
     @Test
-    fun `initial uiState is Loading`() {
-        assertEquals(ProfileUiState.Loading, createViewModel().uiState.value)
+    fun `the initial state is Loading`() {
+        assertEquals(ProfileUiState.Loading, createViewModel().state.value)
     }
 
     @Test
-    fun `uiState emits Success when user exists`() = runTest {
+    fun `Success is emitted when the user exists`() = runTest {
         val viewModel = createSubscribedViewModel()
 
-        val state = viewModel.uiState.value
+        val state = viewModel.state.value
 
         assertTrue(state is ProfileUiState.Success)
         val success = state as ProfileUiState.Success
@@ -98,18 +98,18 @@ class ProfileDetailPaneViewModelTest {
     }
 
     @Test
-    fun `uiState emits Error when user is not found`() = runTest {
+    fun `Error is emitted when the user is not found`() = runTest {
         every { userRepository.getUser("nonexistent-id") } returns flowOf(null)
 
         val viewModel = createSubscribedViewModel(userId = "nonexistent-id")
 
-        val state = viewModel.uiState.value
+        val state = viewModel.state.value
         assertTrue(state is ProfileUiState.Error)
         assertTrue((state as ProfileUiState.Error).message.contains("nonexistent-id"))
     }
 
     @Test
-    fun `uiState emits Error once the automatic retries are exhausted`() = runTest {
+    fun `Error is emitted once the automatic retries are exhausted`() = runTest {
         var subscriptions = 0
         every { userRepository.getUser(testUser.id) } returns flow {
             subscriptions++
@@ -120,11 +120,11 @@ class ProfileDetailPaneViewModelTest {
 
         // An IOException is transient, so retryWithBackoff holds the screen on Loading while
         // it tries again rather than showing an error the next attempt might clear.
-        assertEquals(ProfileUiState.Loading, viewModel.uiState.value)
+        assertEquals(ProfileUiState.Loading, viewModel.state.value)
 
         advanceUntilIdle()
 
-        val state = viewModel.uiState.value
+        val state = viewModel.state.value
         assertEquals("database error", (state as ProfileUiState.Error).message)
         assertEquals(4, subscriptions) // the first attempt plus three retries
     }
@@ -139,7 +139,7 @@ class ProfileDetailPaneViewModelTest {
 
         val viewModel = createSubscribedViewModel()
 
-        assertTrue(viewModel.uiState.value is ProfileUiState.Error)
+        assertTrue(viewModel.state.value is ProfileUiState.Error)
         assertEquals(1, subscriptions)
         assertEquals(0L, currentTime)
     }
@@ -150,28 +150,28 @@ class ProfileDetailPaneViewModelTest {
         val viewModel = createSubscribedViewModel()
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value is ProfileUiState.Error)
+        assertTrue(viewModel.state.value is ProfileUiState.Error)
 
         every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
-        viewModel.retry()
+        viewModel.onEvent(ProfileUiEvent.RetryClicked)
         advanceUntilIdle()
 
-        val state = viewModel.uiState.value as ProfileUiState.Success
+        val state = viewModel.state.value as ProfileUiState.Success
         assertEquals("Alice Johnson", state.profile.displayName)
     }
 
     @Test
-    fun `uiState updates when user data changes in repository`() = runTest {
+    fun `the state updates when the user changes in the repository`() = runTest {
         val userFlow = MutableStateFlow<User?>(testUser)
         every { userRepository.getUser(testUser.id) } returns userFlow
 
         val viewModel = createSubscribedViewModel()
-        assertTrue(viewModel.uiState.value is ProfileUiState.Success)
+        assertTrue(viewModel.state.value is ProfileUiState.Success)
 
         val updatedUser = testUser.copy(displayName = "Alice Updated")
         userFlow.value = updatedUser
 
-        val state = viewModel.uiState.value as ProfileUiState.Success
+        val state = viewModel.state.value as ProfileUiState.Success
         assertEquals("Alice Updated", state.profile.displayName)
     }
 }
