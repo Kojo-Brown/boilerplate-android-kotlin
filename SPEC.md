@@ -511,7 +511,7 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 - [x] Factory + Strategy: pluggable `SyncStrategy` resolved by Hilt multibinding — `VisibleUsersSyncStrategy` is the old `RefreshVisibleUsersUseCase` body moved down (its three decisions turned out to be about *that* way of syncing; `CURRENT_USER` answers all three differently), and the use case keeps the one decision that is genuinely policy: which mode a user-initiated list refresh means. The interesting part is what Dagger cannot check — a `SyncMode` with **no** binding compiles and throws at first use, and a `@SyncModeKey` naming a different mode than the strategy it sits on is a well-typed lie — so `SyncStrategy.mode` exists to be compared against the key on every resolution, and `SyncStrategyModuleContractTest` reads the module's annotations to pin both. `CURRENT_USER` is bound and tested but nothing selects it yet; it is the first caller `syncCurrentUser` has ever had, and WorkManager is its intended one (PR #32)
 - [x] Decorator pattern: repository wrappers adding cache, retry, and telemetry — three layers around an unchanged `UserRepositoryImpl`, which is what closes `docs/solid.md` finding 7. The order is the design (`retry` innermost, so everything above sees one logical operation; caching above it, so a hit costs no retry schedule; telemetry outermost, so durations are what the caller waited for) and `UserRepositoryDecoratorTest` walks the assembled chain, because nothing else fails when it is reversed. Three traps, each of which still compiles: the sync methods return failures as **values**, so `runCatching { delegate.syncUser(id) }` never retries anything; a shared in-flight request started with the first caller's `async` is cancelled when that caller leaves, taking down a request a second screen is still awaiting — it is hosted in `@ApplicationScope` instead, the first use that scope has had; and cancellation is not failure at any layer, so it is unretried, uncached and recorded as `Cancelled`. The retry decorator retries only the failed ids of a fan-out and restores request order, and `BackoffPolicy` is extracted so the flow operator and the suspend retry share one schedule (PR #33)
 - [x] Observer pattern: app-wide event bus on `SharedFlow` — implements rule 4 of `docs/state-and-events.md`, which had been written without anything behind it because nothing in the app had two independent listeners for one thing. Session expiry does: `TokenAuthenticator` is the only code that can tell a session has died, and it reacted by clearing the tokens and failing one request while nothing else found out — so Credential Manager kept its record of who was authorised and could answer the next sign-in by silently re-authorising the account the server had just ejected. The design is that its two reactions have different lifetimes: clearing the credential state is an `AppEventListener` under `AppEventDispatcher`'s process-lifetime subscription, because a session usually dies with the app backgrounded, and navigating is a composition-scoped `ObserveAsEvents` collector that accepts the miss. A `SharedFlow` reaches both; a `Channel` would have given the event to whichever asked first. Three traps, each verified by mutation rather than by a passing build: `start()` must launch `UNDISPATCHED` or the subscription registers a dispatch late and everything published in between is dropped while `tryEmit` reports success (removing it fails 6 of 16 tests); the dispatcher is a single `collect`, so a listener that throws would cancel it and silently stop *every* reaction for the life of the process (removing the per-listener catch fails 3); and the buffer is `SUSPEND` rather than `DROP_OLDEST`, so a full buffer is a `false` a caller can act on instead of a pending event that evaporates. `AppEvent` has exactly one member on purpose — the admission test is in `docs/event-bus.md`, and connectivity is the near miss it rejects, being state with a current answer that `NetworkMonitor` already publishes (PR #34)
-- [ ] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen
+- [x] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen — `UdfViewModel<S, E, F>` gives every screen `state`, `onEvent` and `effects` and nothing else public, which `UnidirectionalDataFlowContractTest` enforces against the compiled output. The convention had been in `CLAUDE.md` since the repo existed and nothing was checking, so `HomeViewModel` had reached four public flows and four public methods. Two of the three costs were real bugs rather than untidiness: `TextRecognitionViewModel` guarded detection with `uiState is Scanning && !isPaused` because neither flag could be trusted alone, and `isPaused` was true in exactly the cases where the scan state was `TextDetected` — a second copy of one value kept in step by hand, which folding the screen into one state deleted; and `RefreshState.Finished` was state cleared by a Dismiss button, the exact tell rule 2 of `docs/state-and-events.md` names, surviving every rotation until pressed and losing the press if the rotation came first. `HomeUiState` is a data class with the mutually-exclusive part as a sealed `content` field rather than one sealed state, because an `Error` case would exclude the search text and a `Loading` case the offline banner. Four of six screens bind `Nothing` as their effect type, which has no instances, so "this screen decides no one-shot" is compiler-enforced and `emitEffect` is uncallable there (PR #35)
 - [ ] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules
 
 Item 4 complete as of PR #33 (2026-08-18). **The local harness the last three runs kept
@@ -569,6 +569,35 @@ looks exactly like a hung runner and is not one. Read the *steps* array from
 `get_workflow_job` rather than the check-run summary, notice when a step's elapsed time exceeds
 the job's own `timeout-minutes` (30 here) without the job being killed, and treat that as stale
 data — not as a reason to push an empty commit or re-run.
+
+Item 6 complete as of PR #35 (2026-08-21). **The harness is checked in** — `scripts/jvm-harness/`
+— so the next run starts from a working one instead of rebuilding it from these notes for a
+third time. `run.sh --skip-detekt` for the fast loop; jars land in `~/.jvm-harness/jars` or
+wherever `JVM_HARNESS_JARS` points. It grew beyond what PR #33 and #34 described: dagger,
+hilt-core, Retrofit, OkHttp, mockwebserver and mockk are all real artifacts from Maven Central,
+so 76 of 117 main sources, 39 of 53 test sources and 257 tests run locally, plus detekt over
+all three source sets. The environment is unchanged: `dl.google.com` still 403s on CONNECT.
+
+**The one thing worth carrying forward is how it failed.** The first push went red on
+`StabilityContractTest`, which walks the compiled output for everything assignable to
+`ViewModel` and found the new `UdfViewModel` base class as a seventh entry. The harness had
+compiled and run 245 tests and reported itself green — because `StabilityContractTest` was
+being *silently skipped*, excluded by one unresolvable import (`ImageVector`, via
+`AdaptiveNavItem`), and so was `GoogleSignInViewModelTest`, the most heavily rewritten test in
+the change, because the import-closure check only recorded top-level names and could not
+satisfy `FakeGoogleAuthRepository.Companion.fakeGoogleUser`. A count of "37 of 53" reads as
+coverage and is not. `run.sh` now prints every skipped test file by name under `not run here:`
+— read that list, and treat shortening it (usually one stub) as cheaper than a red CI run.
+
+Two smaller traps for whoever adds a screen: a new `ViewModel` has to be added to
+`EXPECTED_VIEW_MODELS` in *two* contract tests, both of which assert the whole list; and a stub
+must reproduce the real declaration's annotations, not just its shape — `ImageVector` carries
+`@Immutable`, and without it the stability audit fails on the stub rather than on the app.
+
+Still open from earlier items and untouched here: `README.md` advertises "Retrofit 3 + OkHttp
+5" while the catalog pins Retrofit 2.11.0 / OkHttp 4.12.0, and the wrapper has no
+`distributionSha256Sum`. Modularisation is the next item, and it is also what deletes the
+`@StabilityInferred` exemption `docs/clean-architecture.md` records.
 
 ## Phase 9 — Offline-First & Data
 - [ ] WorkManager background sync with constraints, backoff, and unique work
