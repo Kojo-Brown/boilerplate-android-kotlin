@@ -11,8 +11,8 @@ shown a second time. The first is state; the second is an event; and the differe
 matter of taste, because the streams behave differently.
 
 Every claim below is pinned by
-[`StateAndEventSemanticsTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/StateAndEventSemanticsTest.kt)
-and [`GoogleSignInViewModelTest`](../app/src/test/kotlin/com/kojo/boilerplate/feature/signin/GoogleSignInViewModelTest.kt).
+[`StateAndEventSemanticsTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/StateAndEventSemanticsTest.kt)
+and [`GoogleSignInViewModelTest`](../feature/signin/src/test/kotlin/com/kojo/boilerplate/feature/signin/GoogleSignInViewModelTest.kt).
 
 ## The table
 
@@ -43,7 +43,7 @@ Sign-in completing while nothing is subscribed is the *ordinary* path.
 
 A `Channel` buffers instead. The event waits until something receives it, which is what every
 screen gets from
-[`UdfViewModel`](../app/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt):
+[`UdfViewModel`](../core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt):
 
 ```kotlin
 private val _effects = Channel<F>(Channel.BUFFERED)
@@ -60,7 +60,7 @@ disqualifying, and that is the case `SharedFlow` exists for.
 
 ## Reading events on the UI side
 
-[`ObserveAsEvents`](../app/src/main/kotlin/com/kojo/boilerplate/core/ui/event/ObserveAsEvents.kt)
+[`ObserveAsEvents`](../core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/event/ObserveAsEvents.kt)
 is to events what `collectAsStateWithLifecycle` is to state:
 
 ```kotlin

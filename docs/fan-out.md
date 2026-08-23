@@ -4,7 +4,7 @@ Running one suspending operation over many inputs at once, and deciding what a s
 failure means.
 
 Every claim on this page is pinned by a test in
-[`FanOutTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/FanOutTest.kt),
+[`FanOutTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/FanOutTest.kt),
 so a coroutines upgrade that changes one of these semantics fails the build rather than
 quietly invalidating the guidance.
 

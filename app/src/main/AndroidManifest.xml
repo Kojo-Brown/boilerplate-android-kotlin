@@ -1,15 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <uses-permission android:name="android.permission.CAMERA" />
-
     <!--
-      Required by ConnectivityManager.registerDefaultNetworkCallback, which throws
-      SecurityException without it. Normal-protection, so it is granted at install time
-      and there is no runtime request to make.
+      No <uses-permission> here any more. CAMERA belongs to the two camera features and
+      ACCESS_NETWORK_STATE to `:data`; each is declared in that module's own manifest and merged
+      in from there, so the set of permissions the APK asks for is a consequence of the modules
+      it includes rather than a list that has to be kept in step with them by hand.
     -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:name=".BoilerplateApp"

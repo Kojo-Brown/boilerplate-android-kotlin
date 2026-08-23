@@ -43,8 +43,15 @@ jobs:
       - name: Verify the Gradle wrapper runs
         run: ./gradlew --version
 
+      # Unqualified: `resolveAllDependencies` is registered in every module by the convention
+      # plugins, so this resolves every module's classpaths — including the ones `:app` does
+      # not compile against, such as `:core:testing`'s.
       - name: Resolve every declared dependency
-        run: ./gradlew :app:resolveAllDependencies --stacktrace
+        run: ./gradlew resolveAllDependencies --stacktrace
+
+      - name: Module graph
+        if: always()
+        run: ./gradlew projects
 
       - name: Dependency tree
         if: always()

@@ -4,7 +4,7 @@ One `UiState` out, one `UiEvent` in, one `UiEffect` for what happens once — an
 uniformity is the point rather than the ceremony.
 
 The three types are per screen and the shape is not. Every view model in this app extends
-[`UdfViewModel<S, E, F>`](../app/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt)
+[`UdfViewModel<S, E, F>`](../core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt)
 and exposes exactly three things:
 
 ```kotlin
@@ -14,7 +14,7 @@ val effects: Flow<F>                      // what happens exactly once
 ```
 
 Nothing else is public.
-[`UnidirectionalDataFlowContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/ui/udf/UnidirectionalDataFlowContractTest.kt)
+[`UnidirectionalDataFlowContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/architecture/UnidirectionalDataFlowContractTest.kt)
 fails the build if a fourth member appears.
 
 ## What this replaced, and what it cost

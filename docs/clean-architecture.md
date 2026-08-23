@@ -127,29 +127,32 @@ statement about this layer's dependencies, and no edit to `core.domain` could fi
 it. `_` is the marker — every generated name carries one and no hand-written declaration in
 this app does, the same heuristic `SolidContractTest` uses.
 
-### The one exemption, and what it tells you
+### The exemption that modularisation deleted
 
-`androidx.compose.runtime.internal.StabilityInferred` is forgiven, and finding out why was
-the most useful thing this test has done.
+`androidx.compose.runtime.internal.StabilityInferred` used to be forgiven, and finding out why
+was the most useful thing this test has done.
 
-The Compose compiler plugin is applied to this module, and it stamps `@StabilityInferred`
-onto **every** class it compiles — not just composables, not just UI types. `RefreshOutcome`,
-all three `UserProfile` arms and both use cases all came back carrying it on the first CI run.
+The Compose compiler plugin stamps `@StabilityInferred` onto **every** class it compiles — not
+just composables, not just UI types. While the app was one module that plugin was applied to
+the domain layer as well, and `RefreshOutcome`, all three `UserProfile` arms and both use cases
+came back carrying it on the first CI run. So the honest version of this page's headline was
+narrower than "no androidx in the domain layer": in a single-module Compose app it was not
+achievable at the bytecode level, and no edit to these files could achieve it. The annotation
+was the toolchain's, applied module-wide, and encoded nothing about what the code depended on.
 
-So the honest version of this page's headline is narrower than "no androidx in the domain
-layer": **in a single-module Compose app that is not achievable at the bytecode level**, and
-no edit to these files could achieve it. The annotation is the toolchain's, applied
-module-wide, and encodes nothing about what the code depends on.
+`:core:domain` is now its own Gradle module and the Compose plugin is not applied to it — see
+[modularisation](./modularisation.md). Nothing stamps the annotation any more, the exemption is
+gone, and the scan forgives nothing at all. That is what the module boundary bought here, and
+it is a better argument for splitting than build times: the layering used to be a convention
+this test policed, and it is now a fact about the build.
 
-What removes it is [modularisation](./solid.md) — the later Phase 8 item. A `:core:domain`
-Gradle module is a plain Kotlin/JVM library with no Compose plugin applied to it, and the
-exemption should be deleted the day that lands. That is the concrete, mechanical argument for
-splitting the modules, and it is worth more than the general one about build times: right now
-the layering is a convention this test polices, and a module boundary would make it a fact
-the compiler enforces.
+The three checks are deliberately different in kind, and each catches what the others cannot:
 
-The exemption is one fully-named annotation rather than a relaxed prefix, so a real
-`androidx.compose.runtime.Immutable` on a domain type still fails.
+| Check | Reads | Blind to |
+|---|---|---|
+| `ForbiddenImport` (detekt), scoped to `**/core/domain/**` | import directives | a fully-qualified reference, an inherited supertype |
+| `DomainLayerContractTest` | the compiled constant pool | nothing about references; it cannot say *which line* |
+| `core/domain/build.gradle.kts` | the dependency list | a type that arrives transitively through another module |
 
 It also pins two things that a rule alone cannot:
 

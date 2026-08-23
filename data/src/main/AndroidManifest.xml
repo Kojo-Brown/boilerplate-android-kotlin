@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Declared by the module that needs it rather than by the app, and merged into the APK by
+      the manifest merger. `ConnectivityManager.registerDefaultNetworkCallback` throws
+      SecurityException without it, and the code that calls it is here.
+
+      Normal-protection, so it is granted at install time and there is no runtime request to
+      make. INTERNET is deliberately absent: nothing in this app has needed it yet, and adding
+      a permission before there is a call that requires it is how a manifest stops describing
+      the app.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+</manifest>

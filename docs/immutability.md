@@ -5,7 +5,7 @@ their collections are `ImmutableList` and not `List`, and what the annotation ac
 promises.
 
 Every claim on this page is pinned by
-[`StabilityContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/ui/StabilityContractTest.kt),
+[`StabilityContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/architecture/StabilityContractTest.kt),
 which walks the state graph reachable from every view model and fails the build when the
 contract is broken — so this page cannot drift from the code without `testDebugUnitTest`
 going red.

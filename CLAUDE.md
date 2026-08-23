@@ -11,11 +11,15 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
 5. Run every gate locally; **all must pass** before pushing:
    ```
    ./gradlew --version
+   ./gradlew checkModuleDependencies
    ./gradlew compileDebugKotlin
    ./gradlew lintDebug detekt
    ./gradlew testDebugUnitTest
    ./gradlew assembleDebug
    ```
+   None of these take a project path: the tasks exist in every module, so one invocation
+   covers all thirteen. `checkModuleDependencies` is first because it is seconds of work and
+   fails on a layering violation every other gate would compile happily.
 6. Commit, `git push -u origin <branch>`, then `gh pr create`.
 7. `gh pr checks --watch` → **merge only if every check is green**:
    `gh pr merge --squash --delete-branch`
@@ -30,6 +34,19 @@ wrong, change it deliberately and say why in the PR.
 Never commit real credentials, tokens, keys, or `.env` files. Placeholders in
 `.env.example` only; CI reads from the GitHub secret store. Test fixtures must
 look obviously fake. Scan `git diff --cached` before every push.
+
+## Modules
+The app is thirteen Gradle modules — `:app`, `:data`, five `:feature:*` and six `:core:*`.
+What may depend on what is declared in the root `build.gradle.kts` and enforced by
+`checkModuleDependencies`; `docs/modularisation.md` is the map. Three rules break builds:
+- A `:feature:*` module may never depend on another `:feature:*`. Take a composable slot and
+  let `:app` fill it.
+- Nothing but `:app` may depend on `:data`.
+- `:core:domain` has no Android dependency and no Compose plugin. That is what keeps
+  `DomainLayerContractTest` free of exemptions.
+
+Shared build configuration is in `build-logic/convention`. A module's own build file should be
+its `namespace` and its dependencies; anything else probably belongs in a convention plugin.
 
 ## Conventions
 - MVVM with a single `UiState` per screen; no state in composables

@@ -34,7 +34,7 @@ written down.
 
 The order is not a matter of taste. Each pair has a right way round and a wrong one that still
 compiles and still passes every test that does not look for it — which is why
-[`UserRepositoryDecoratorTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/data/repository/decorator/UserRepositoryDecoratorTest.kt)
+[`UserRepositoryDecoratorTest`](../data/src/test/kotlin/com/kojo/boilerplate/core/data/repository/decorator/UserRepositoryDecoratorTest.kt)
 asserts the assembled chain.
 
 **Retry innermost, because a retry is a property of the request.** From anywhere above it, one
