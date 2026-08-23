@@ -57,6 +57,14 @@ internal object CompiledApp {
      * it. Asserted whole by [missingModulePackages]: a new module that `:app` forgets to depend
      * on is invisible to every audit in this package, and the failure should name it rather
      * than showing up as an audit that silently stopped covering a layer.
+     *
+     * `:core:testing` is deliberately absent. Its fakes are `main`-source classes and it is a
+     * test-only dependency of other modules, so it never reaches `:app` — if it ever appeared
+     * here, something would be shipping it.
+     *
+     * The list is hand-written and therefore driftable: `ui.theme` sat here for one CI run after
+     * the theme moved into `:core:ui`. The offline harness cross-checks it against the packages
+     * the modules actually declare, which is where a stale entry should be caught.
      */
     private val EXPECTED_MODULE_PACKAGES = listOf(
         "$PACKAGE.core.auth",
@@ -78,7 +86,6 @@ internal object CompiledApp {
         "$PACKAGE.feature.signin",
         "$PACKAGE.feature.textrecognition",
         "$PACKAGE.navigation",
-        "$PACKAGE.ui.theme",
     )
 
     private val classes: List<Class<*>> by lazy { load() }

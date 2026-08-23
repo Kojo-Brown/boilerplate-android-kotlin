@@ -57,6 +57,11 @@ seconds. Two failures it is specifically shaped to catch:
   `syncStrategyFactoryOver` moved into it. Checked against the build files rather than against
   the compiler, and only for these two: the rest of the external classpath is androidx, which
   cannot be fetched here and so cannot be modelled per module without inventing failures.
+- **`EXPECTED_MODULE_PACKAGES` drifting.** That list in `CompiledApp` is what makes the
+  whole-app contract tests fail loudly when a module drops off `:app`'s classpath, rather than
+  quietly auditing less. It is hand-written, so it drifts: the theme's package stayed in it for
+  a full CI run after the theme moved into `:core:ui`. Both directions are checked — an entry
+  no module declares, and a module no entry covers.
 - **An import that resolves only to another module's `test` source set.** A test source set is
   invisible from anywhere else, so this always fails in CI and is easy to miss locally — the
   file is right there in the repository. `syncStrategyFactoryOver` was exactly this, and the

@@ -389,6 +389,60 @@ def check_supplied_externals(modules: dict[str, Module]) -> list[str]:
     return violations
 
 
+# `:core:testing` never reaches `:app` — it is a test-only dependency of other modules — so the
+# contract tests there cannot see it and must not expect to.
+NOT_ON_APP_CLASSPATH = {":core:testing"}
+
+COMPILED_APP = Path("app/src/test/kotlin/com/kojo/boilerplate/architecture/CompiledApp.kt")
+
+
+def check_expected_module_packages(modules: dict[str, Module], owners: dict[str, str]) -> list[str]:
+    """Cross-checks `CompiledApp.EXPECTED_MODULE_PACKAGES` against the packages that exist.
+
+    That list is what makes the whole-app contract tests fail loudly when a module drops off
+    `:app`'s classpath instead of quietly auditing less. It is hand-written, so it drifts: the
+    theme's package sat in it for a full CI run after the theme moved into `:core:ui`, and the
+    only thing that noticed was a red `CompiledAppTest`. Both directions are checked here —
+    an entry matching no package, and a module no entry covers.
+    """
+    source = ROOT / COMPILED_APP
+    if not source.exists():
+        return []
+    text = source.read_text()
+    block = text.split("EXPECTED_MODULE_PACKAGES = listOf(", 1)[1].split(")", 1)[0]
+    expected = [
+        line.strip().strip('",').replace("$PACKAGE", APP_PACKAGE)
+        for line in block.splitlines()
+        if line.strip().startswith('"')
+    ]
+
+    findings: list[str] = []
+    for entry in expected:
+        if not any(package == entry or package.startswith(entry + ".") for package in owners):
+            findings.append(
+                f"{COMPILED_APP}: EXPECTED_MODULE_PACKAGES names {entry}, which no module "
+                f"declares any more. Remove it, or point it at where those classes went."
+            )
+    for path, module in modules.items():
+        if path in NOT_ON_APP_CLASSPATH:
+            continue
+        packages = [package for package, owner in owners.items() if owner == path]
+        if not packages:
+            continue
+        covered = any(
+            package == entry or package.startswith(entry + ".")
+            for package in packages
+            for entry in expected
+        )
+        if not covered:
+            findings.append(
+                f"{COMPILED_APP}: no entry in EXPECTED_MODULE_PACKAGES covers {path} "
+                f"({', '.join(sorted(packages))}). The contract tests in :app would not notice "
+                f"if that module stopped reaching them."
+            )
+    return findings
+
+
 def check_module_boundaries(modules: dict[str, Module], owners: dict[str, str]) -> list[str]:
     violations: list[str] = []
     test_owners = test_package_owners(modules)
@@ -755,7 +809,11 @@ def main() -> int:
 
     print()
     print("==> Module boundaries")
-    violations = check_module_boundaries(modules, owners) + check_supplied_externals(modules)
+    violations = (
+        check_module_boundaries(modules, owners)
+        + check_supplied_externals(modules)
+        + check_expected_module_packages(modules, owners)
+    )
     if violations:
         for violation in violations:
             print(f"  VIOLATION {violation}")
