@@ -182,69 +182,109 @@ internal fun Project.configureCompose() {
 /**
  * Registers `resolveAllDependencies`, which proves that every version declared in
  * `gradle/libs.versions.toml` actually exists on a configured repository by resolving the
- * dependency *graph* of every classpath the module builds against, and reports every module
- * that could not be resolved.
+ * dependency *graph* of every classpath the module builds against, and reports every module that
+ * could not be resolved.
  *
  * `./gradlew dependencies` is not a substitute: it prints a `FAILED` marker next to an
  * unresolvable module and still exits 0, so it cannot gate CI.
  *
  * This walks metadata only and deliberately does not download artifacts. A version that does not
  * exist fails during metadata resolution, which is the question this task answers, and skipping
- * the artifact fetch keeps the job to a couple of minutes instead of pulling every variant's
- * full graph — ML Kit and CameraX alone are hundreds of megabytes. The trade-off is that a
+ * the artifact fetch keeps the job to a couple of minutes instead of pulling every variant's full
+ * graph — ML Kit and CameraX alone are hundreds of megabytes. The trade-off is that a
  * published-but-empty module (POM present, AAR missing) would slip through here; the compile and
  * assemble gates are what cover that.
  *
- * Registered per module rather than once on `:app` so that `./gradlew resolveAllDependencies`
- * covers every module's classpaths, including the ones `:app` does not compile against —
- * `:core:testing`'s, for one.
+ * ### Why the classpaths are collected in `afterEvaluate`
+ *
+ * They have to be, twice over, and getting this wrong cost a CI round trip.
+ *
+ * A convention plugin runs while the module's build file is still being *read*. Reaching for
+ * `configurations` there sees only the handful AGP has created so far — not one variant
+ * classpath — so the check covered almost nothing while reporting success: every one of the
+ * thirteen modules resolved the same "5 configurations, 39 module nodes", `:app` with its eleven
+ * project dependencies included. A gate that passes without looking is worse than no gate.
+ *
+ * Worse, asking a configuration for its `resolutionResult` marks it and everything it extends
+ * from as observed. Dependencies the build file declares *after* that point are not reliably
+ * picked up — which is how `:core:domain` lost `api(project(":core:common"))` and failed to
+ * compile against a module its own build file names.
+ *
+ * `afterEvaluate` is the earliest point where the script has finished and AGP's own
+ * `afterEvaluate` — registered when it was applied, so it runs first — has created the variant
+ * configurations. [assertSawVariantClasspaths] is what stops this silently regressing.
  */
 internal fun Project.configureDependencyResolutionCheck() {
-    val graphs = configurations
-        .matching { it.isCanBeResolved && it.name.endsWith("Classpath") }
-        .map { it.name to it.incoming.resolutionResult.rootComponent }
-
-    tasks.register("resolveAllDependencies") {
+    val task = tasks.register("resolveAllDependencies") {
         group = "verification"
         description =
             "Resolves every classpath's dependency graph so a non-existent version fails."
+    }
 
-        doLast {
-            val failures = mutableListOf<String>()
-            var modules = 0
+    afterEvaluate {
+        val graphs = configurations
+            .matching { it.isCanBeResolved && it.name.endsWith("Classpath") }
+            .map { it.name to it.incoming.resolutionResult.rootComponent }
 
-            graphs.forEach { (name, rootComponent) ->
-                val seen = mutableSetOf<ResolvedComponentResult>()
+        task.configure {
+            doLast {
+                assertSawVariantClasspaths(graphs.map { it.first })
 
-                fun visit(component: ResolvedComponentResult) {
-                    if (!seen.add(component)) return
-                    component.dependencies.forEach { dependency ->
-                        when (dependency) {
-                            is ResolvedDependencyResult -> visit(dependency.selected)
-                            is UnresolvedDependencyResult ->
-                                failures += "$name -> ${dependency.requested.displayName}: " +
-                                    dependency.failure.message
-                            else -> Unit
+                val failures = mutableListOf<String>()
+                var modules = 0
+
+                graphs.forEach { (name, rootComponent) ->
+                    val seen = mutableSetOf<ResolvedComponentResult>()
+
+                    fun visit(component: ResolvedComponentResult) {
+                        if (!seen.add(component)) return
+                        component.dependencies.forEach { dependency ->
+                            when (dependency) {
+                                is ResolvedDependencyResult -> visit(dependency.selected)
+                                is UnresolvedDependencyResult ->
+                                    failures += "$name -> ${dependency.requested.displayName}: " +
+                                        dependency.failure.message
+                                else -> Unit
+                            }
                         }
                     }
+
+                    visit(rootComponent.get())
+                    modules += seen.size
+                    logger.lifecycle("Resolved $name (${seen.size} modules)")
                 }
 
-                visit(rootComponent.get())
-                modules += seen.size
-                logger.lifecycle("Resolved $name (${seen.size} modules)")
-            }
+                if (failures.isNotEmpty()) {
+                    throw GradleException(
+                        "${failures.size} dependency/dependencies could not be resolved:\n" +
+                            failures.joinToString("\n") { "  $it" },
+                    )
+                }
 
-            if (failures.isNotEmpty()) {
-                throw GradleException(
-                    "${failures.size} dependency/dependencies could not be resolved:\n" +
-                        failures.joinToString("\n") { "  $it" },
+                logger.lifecycle(
+                    "Resolved ${graphs.size} configurations, $modules module nodes, 0 failures",
                 )
             }
-
-            logger.lifecycle(
-                "Resolved ${graphs.size} configurations, $modules module nodes, 0 failures",
-            )
         }
+    }
+}
+
+/**
+ * Fails when the collected classpaths do not include the ones a variant actually builds against.
+ *
+ * This is the check on the check. Collecting configurations a moment too early produces a task
+ * that resolves a few plugin-internal classpaths, finds nothing wrong with them, and reports
+ * success — which is exactly what it did before, in every module, for a whole CI run.
+ */
+private fun assertSawVariantClasspaths(names: List<String>) {
+    val required = listOf("debugCompileClasspath", "debugRuntimeClasspath")
+    val missing = required.filterNot { it in names }
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "resolveAllDependencies collected ${names.size} classpath(s) and none of them were " +
+                "${missing.joinToString(", ")}. The configurations were read before AGP created " +
+                "them, so this task is resolving almost nothing and passing. Collect them later.",
+        )
     }
 }
 

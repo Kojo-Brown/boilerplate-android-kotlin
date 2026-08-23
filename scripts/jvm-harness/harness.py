@@ -409,6 +409,35 @@ def unterminated_code_spans(paths: list[Path]) -> list[str]:
     return findings
 
 
+# Characters that are invisible in an editor and in a diff, and that a reader will therefore
+# assume are not there. One of these was load-bearing: a zero-width space sat between the stars
+# and the slash of a path glob quoted inside a block comment, and was the only reason that
+# comment did not terminate early. Deleting it — which looks like deleting nothing — broke the
+# build. Nothing in this repository has a legitimate use for one.
+INVISIBLE_CHARACTERS = {
+    "\u200b": "ZERO WIDTH SPACE",
+    "\u200c": "ZERO WIDTH NON-JOINER",
+    "\u200d": "ZERO WIDTH JOINER",
+    "\u2060": "WORD JOINER",
+    "\ufeff": "ZERO WIDTH NO-BREAK SPACE",
+    "\u00a0": "NO-BREAK SPACE",
+}
+
+
+def invisible_characters(paths: list[Path]) -> list[str]:
+    findings: list[str] = []
+    for path in paths:
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            for character, name in INVISIBLE_CHARACTERS.items():
+                if character in line:
+                    findings.append(
+                        f"{path.relative_to(ROOT)}:{number}: contains {name} "
+                        f"(U+{ord(character):04X}), which is invisible to every reader and to "
+                        f"every diff. Remove it and say what it was standing in for."
+                    )
+    return findings
+
+
 def check_build_logic_parses(compiler: "Compiler") -> None:
     """Parses `build-logic` with no classpath, and reports only syntax diagnostics.
 
@@ -701,7 +730,19 @@ def main() -> int:
         for finding in spans:
             print(f"  {finding}")
         sys.exit(f"\n{len(spans)} comment(s) closed by a glob inside a code span.")
-    print(f"  {len(scripts)} build scripts, 0 comments closed early")
+
+    hidden = invisible_characters(scripts + [
+        source
+        for module in modules.values()
+        for source_set in ("main", "test", "androidTest")
+        for source in sources_in(module, source_set)
+    ])
+    if hidden:
+        for finding in hidden:
+            print(f"  {finding}")
+        sys.exit(f"\n{len(hidden)} invisible character(s) in source.")
+
+    print(f"  {len(scripts)} build scripts, 0 comments closed early, 0 invisible characters")
 
     compiler = Compiler(jars)
     check_build_logic_parses(compiler)

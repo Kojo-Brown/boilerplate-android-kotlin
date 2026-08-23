@@ -60,6 +60,17 @@ A module missing from the map fails the check rather than defaulting to permissi
 module is a decision about where it sits in the graph, and that map is where the decision is
 written down.
 
+`resolveAllDependencies` — the Phase 0 gate that proves every declared version exists — is
+registered by the same convention plugins, and it collects its classpaths in `afterEvaluate`
+for two reasons worth knowing before moving that line. Collecting them while the build file is
+still being read sees none of AGP's variant classpaths, so the gate passes having checked
+almost nothing: every module reported the same "5 configurations, 39 module nodes", `:app`
+included. And asking a configuration for its resolution result marks it observed, so a
+dependency the build file declares afterwards is not reliably picked up — that is how
+`:core:domain` lost `api(project(":core:common"))` and failed to compile against a module its
+own build file names. The task asserts it collected `debugCompileClasspath` before it does
+anything else, so that failure cannot come back quietly.
+
 The offline harness in [`scripts/jvm-harness`](../scripts/jvm-harness/README.md) checks the
 same thing a level lower and without Gradle: it compiles each module separately, against only
 the modules its build file declares — `api` travelling transitively, `implementation` not — so

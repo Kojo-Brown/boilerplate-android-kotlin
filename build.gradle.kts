@@ -95,19 +95,35 @@ val testOnlyModules = setOf(":core:testing")
 
 // Snapshotted after every project has been evaluated, so the task body reads a plain data
 // structure rather than reaching across the project tree while it runs.
+//
+// Two filters, both learned the hard way from a run that reported 85 violations and no real
+// ones:
+//
+//  - Only *declarable* configurations are read — `implementation`, `api`, `testImplementation`
+//    and their kin. A resolvable one such as `debugUnitTestCompileClasspath` carries whatever
+//    AGP put there, including the tested variant expressed as a dependency on the module
+//    itself, and none of that is a statement anybody wrote in a build file. Reading only what
+//    was declared is also what keeps this task from observing a resolution result, which is a
+//    mistake with consequences — see `configureDependencyResolutionCheck`.
+//  - `include(":core:auth")` implicitly creates `:core` as a container project with no build
+//    file and no plugins. It is scaffolding, not a module, and it has no place in a rule map.
 val declaredModuleEdges = mutableMapOf<String, MutableSet<Pair<String, String>>>()
 
 gradle.projectsEvaluated {
-    subprojects.forEach { module ->
-        val edges = declaredModuleEdges.getOrPut(module.path) { mutableSetOf() }
-        module.configurations.forEach { configuration ->
-            configuration.dependencies
-                .filterIsInstance<ProjectDependency>()
-                .forEach { dependency ->
-                    edges += configuration.name to dependency.dependencyProject.path
+    subprojects
+        .filter { it.file("build.gradle.kts").exists() }
+        .forEach { module ->
+            val edges = declaredModuleEdges.getOrPut(module.path) { mutableSetOf() }
+            module.configurations
+                .matching { !it.isCanBeResolved && !it.isCanBeConsumed }
+                .forEach { configuration ->
+                    configuration.dependencies
+                        .filterIsInstance<ProjectDependency>()
+                        .map { it.dependencyProject.path }
+                        .filter { it != module.path }
+                        .forEach { edges += configuration.name to it }
                 }
         }
-    }
 }
 
 tasks.register("checkModuleDependencies") {

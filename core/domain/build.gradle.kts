@@ -18,8 +18,10 @@ android {
  * forgiven. Applying `boilerplate.android.library.compose` here would put it straight back.
  *
  * There is no Android dependency below for the same reason, and the layer is held to it three
- * ways: the `ForbiddenImport` detekt rule scoped to `**​/core/domain/**`, `DomainLayerContractTest`
- * reading the compiled constant pool, and this dependency list.
+ * ways: the `ForbiddenImport` detekt rule, which is scoped by a glob over the `core/domain`
+ * path; `DomainLayerContractTest`, which reads the compiled constant pool; and this dependency
+ * list. The glob is described rather than quoted because a block comment ends at the first star
+ * followed by a slash, which is what a path glob is made of.
  */
 dependencies {
     api(project(":core:common"))

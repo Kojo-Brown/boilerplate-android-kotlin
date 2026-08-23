@@ -32,6 +32,10 @@ one has already paid for itself:
   contains exactly that sequence. The comment closes early, the rest of the glob becomes source,
   and the file stops parsing with "Expecting a top level declaration" pointing at a line that
   looks fine. This is checked across every Kotlin source and every build script.
+- **No invisible characters.** A zero-width space once sat between the stars and the slash of a
+  path glob quoted inside a block comment, and was the only thing stopping that comment from
+  terminating early. Deleting it looked like deleting nothing and broke the build. Nothing here
+  has a legitimate use for one.
 - **`build-logic` parses.** Nothing offline can *type-check* those files — they compile against
   AGP, which is what this environment cannot fetch — but a syntax error in them fails the very
   first Gradle invocation, so it costs a whole CI round trip to learn something the parser knows
