@@ -24,7 +24,21 @@ in `SPEC.md` twice before being checked in; that is why it is here.
 
 ## What it covers
 
-**The module graph, first and cheapest.** Before compiling anything it reads
+**Build scripts, before anything else.** Two checks that cost two seconds between them and each
+one has already paid for itself:
+
+- **A block comment that ends inside a `` ` ``-quoted span.** A Kotlin block comment ends at the
+  first `*/`, and a path glob quoted inside one — a `core/domain` glob with stars on both sides —
+  contains exactly that sequence. The comment closes early, the rest of the glob becomes source,
+  and the file stops parsing with "Expecting a top level declaration" pointing at a line that
+  looks fine. This is checked across every Kotlin source and every build script.
+- **`build-logic` parses.** Nothing offline can *type-check* those files — they compile against
+  AGP, which is what this environment cannot fetch — but a syntax error in them fails the very
+  first Gradle invocation, so it costs a whole CI round trip to learn something the parser knows
+  immediately. Only the parser's own diagnostics are reported; every semantic one is expected
+  and discarded.
+
+**The module graph, next and still cheap.** Before compiling anything it reads
 `settings.gradle.kts` and every module's `build.gradle.kts`, and checks that each source file's
 imports stay inside the modules that file's own module declares a dependency on — with `api`
 edges travelling transitively and `implementation` edges not, as Gradle does it. That makes this
@@ -72,8 +86,15 @@ adding a stub — is cheap.
   at all — that is what `:app` depending on `:data` is for, and only a real build proves it.
 - **Android Lint.** `lintDebug` needs AGP.
 - **`assembleDebug` and the APK checks.** `scripts/verify-apk.sh` needs a built APK.
-- **`build-logic`.** The convention plugins compile against AGP, so nothing here evaluates them.
-  A mistake in `build-logic/convention` is discovered in CI.
+- **`build-logic`, beyond parsing.** The convention plugins compile against AGP, so nothing here
+  type-checks or evaluates them. Two mistakes that got through to CI are worth knowing about:
+  `Plugin.apply` returns `Unit`, so an expression body ending in `dependencies.apply { … }`
+  does not override it; and `platform(…)` is a member of Gradle's `DependencyHandler` rather
+  than a Kotlin DSL extension, so `import org.gradle.kotlin.dsl.platform` does not resolve.
+  A third is a dependency rather than a mistake in the code: `hilt-android-gradle-plugin` 2.57.2
+  carries a Kotlin 2.x `.kotlin_module` that the compiler behind `kotlin-dsl` refuses to read,
+  so it must stay off `build-logic`'s compile classpath — which is fine, because nothing there
+  names a Hilt type.
 - **`SolidContractTest` and `CompiledAppTest`.** Both assert over the whole app's compiled
   output — every repository type, and at least one class per module. The harness compiles a
   subset by construction, so they would fail on its coverage rather than on the code. They are

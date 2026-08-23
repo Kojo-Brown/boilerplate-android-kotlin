@@ -366,6 +366,75 @@ def check_module_boundaries(modules: dict[str, Module], owners: dict[str, str]) 
     return violations
 
 
+# ------------------------------------------------------------------ build scripts and comments
+
+
+def unterminated_code_spans(paths: list[Path]) -> list[str]:
+    """Finds a block comment that ends inside a backtick-quoted span.
+
+    A Kotlin block comment ends at the first `*/`, and a path glob quoted inside one —
+    ``**/core/domain/**`` — contains exactly that sequence. The comment closes early, the rest of
+    the glob becomes source, and the file stops parsing with "Expecting a top level declaration"
+    pointing at a line that looks fine. It cost a CI round trip once.
+
+    The rule is narrow on purpose: a `*/` reached while an odd number of backticks is open on
+    that line is always this mistake, and nothing else in this repository looks like it.
+    """
+    findings: list[str] = []
+    for path in paths:
+        in_block = False
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            index = 0
+            backticks = 0
+            while index < len(line) - 1:
+                pair = line[index:index + 2]
+                if not in_block and pair == "/*":
+                    in_block = True
+                    index += 2
+                    continue
+                if in_block:
+                    if line[index] == "`":
+                        backticks += 1
+                    if pair == "*/":
+                        if backticks % 2 == 1:
+                            findings.append(
+                                f"{path.relative_to(ROOT)}:{number}: a block comment ends inside "
+                                f"a `...` span — the `*/` closes the comment early. Reword it "
+                                f"rather than quoting a glob that contains a star and a slash."
+                            )
+                        in_block = False
+                        index += 2
+                        continue
+                index += 1
+    return findings
+
+
+def check_build_logic_parses(compiler: "Compiler") -> None:
+    """Parses `build-logic` with no classpath, and reports only syntax diagnostics.
+
+    Nothing offline can *type-check* these files: they compile against AGP, which is exactly
+    what this environment cannot fetch. Parsing them is still worth doing — a syntax error here
+    fails the very first Gradle invocation, so it costs a full CI round trip to learn something
+    the parser knows in two seconds.
+
+    Every semantic diagnostic is expected and discarded; only the parser's own vocabulary
+    ("Expecting", "Unexpected", "Unclosed") is treated as a finding.
+    """
+    sources = sorted((ROOT / "build-logic").rglob("*.kt"))
+    if not sources:
+        return
+    output = compiler.parse_only(sources)
+    syntax = [
+        line for line in output
+        if re.search(r"error:.*(Expecting|Unexpected|Unclosed|Unresolved label)", line)
+    ]
+    if syntax:
+        for line in syntax:
+            print(f"  {line}")
+        sys.exit(f"\n{len(syntax)} syntax error(s) in build-logic.")
+    print(f"  build-logic: {len(sources)} files parse")
+
+
 # ------------------------------------------------------------------------------- compilation
 
 
@@ -473,6 +542,30 @@ class Compiler:
                 "trove4j-1.0.20200330.jar",
             )
         )
+
+    def parse_only(self, sources: list[Path]) -> list[str]:
+        """Runs the compiler with no classpath and returns its diagnostics, unfiltered."""
+        arguments = WORK / "parse.args"
+        arguments.parent.mkdir(parents=True, exist_ok=True)
+        arguments.write_text("\n".join(str(source) for source in sources) + "\n")
+        result = subprocess.run(
+            [
+                "java", "-cp", self.compiler_classpath,
+                "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
+                "-d", str(WORK / "classes" / "_parse"),
+                "-jvm-target", "17",
+                "-nowarn",
+                "-Xsuppress-version-warnings",
+                f"@{arguments}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return [
+            line.replace(f"file://{ROOT}/", "")
+            for line in (result.stdout + result.stderr).splitlines()
+            if line.startswith(("e: ", "error:"))
+        ]
 
     def compile(self, label: str, output: Path, classpath: list[str], sources: list[Path]) -> int:
         if not sources:
@@ -589,7 +682,30 @@ def main() -> int:
         )
     print(f"  {len(modules)} modules, 0 violations")
 
+    print()
+    print("==> Build scripts")
+    scripts = sorted(
+        set((ROOT / "build-logic").rglob("*.kt"))
+        | set(ROOT.glob("*.gradle.kts"))
+        | {path for path in ROOT.glob("*/build.gradle.kts")}
+        | {path for path in ROOT.glob("*/*/build.gradle.kts")}
+        | set((ROOT / "build-logic").rglob("*.gradle.kts"))
+    )
+    spans = unterminated_code_spans(scripts + [
+        source
+        for module in modules.values()
+        for source_set in ("main", "test", "androidTest")
+        for source in sources_in(module, source_set)
+    ])
+    if spans:
+        for finding in spans:
+            print(f"  {finding}")
+        sys.exit(f"\n{len(spans)} comment(s) closed by a glob inside a code span.")
+    print(f"  {len(scripts)} build scripts, 0 comments closed early")
+
     compiler = Compiler(jars)
+    check_build_logic_parses(compiler)
+
     stub_output = WORK / "classes" / "_stubs"
     base_classpath = library_classpath(jars)
     print()

@@ -15,7 +15,6 @@ import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
-import org.gradle.kotlin.dsl.platform
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
@@ -91,9 +90,14 @@ internal fun Project.configureUnitTests() {
  * `source` names the three source sets explicitly, as the single-module build did: the
  * per-variant `detektMain`/`detektTest` tasks the Android plugin would add need type resolution
  * and a full compile first, and this repo gates on the compile task directly instead. `basePath`
- * is the repository root in every module, which is what keeps path-scoped rules — the
- * `ForbiddenImport` rule is scoped to `**/core/domain/**` — matching the same way from wherever
- * they are evaluated.
+ * is the repository root in every module, which is what keeps path-scoped rules matching the
+ * same way from wherever they are evaluated: the `ForbiddenImport` rule is scoped by a glob over
+ * the `core/domain` path, and a per-module base path would make that glob mean something
+ * different in each of thirteen places.
+ *
+ * That glob is deliberately not written out here. A KDoc block ends at the first `*` followed by
+ * a slash, so a path glob quoted inside one closes the comment and turns the rest of the file
+ * into a parse error — which is exactly how this comment failed CI the first time.
  */
 internal fun Project.configureDetekt() {
     pluginManager.apply("io.gitlab.arturbosch.detekt")
@@ -155,6 +159,8 @@ internal fun Project.sharedTestDependencies() {
  */
 internal fun Project.configureCompose() {
     dependencies.apply {
+        // `platform` is a member of `DependencyHandler` itself — Gradle's Java API, not a
+        // Kotlin DSL extension — so there is nothing to import for it here.
         val bom = platform(libs.findLibrary("androidx-compose-bom").get())
         add("implementation", bom)
         add("androidTestImplementation", bom)

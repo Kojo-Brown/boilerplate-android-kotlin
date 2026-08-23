@@ -23,13 +23,17 @@ tasks.withType<KotlinJvmCompile>().configureEach {
 // classpath — the root `build.gradle.kts` declares every one of them with `apply false` — and
 // putting a second copy here would mean two AGP instances in one build. What is needed at this
 // end is only their DSL types, at compile time.
+//
+// Only three are here, and the omissions are deliberate. The Compose, KSP and Hilt plugins are
+// applied by id and never referenced by type, so nothing here needs to compile against them.
+// Adding the Hilt one is not merely redundant, it breaks the build: `hilt-android-gradle-plugin`
+// 2.57.2 ships a Kotlin 2.x `.kotlin_module` that the compiler behind `kotlin-dsl` cannot read,
+// and it fails this compilation with "Module was compiled with an incompatible version of
+// Kotlin" before reaching any of this project's own source.
 dependencies {
     compileOnly(libs.android.gradlePlugin)
     compileOnly(libs.kotlin.gradlePlugin)
-    compileOnly(libs.compose.gradlePlugin)
-    compileOnly(libs.ksp.gradlePlugin)
     compileOnly(libs.detekt.gradlePlugin)
-    compileOnly(libs.hilt.gradlePlugin)
 }
 
 gradlePlugin {

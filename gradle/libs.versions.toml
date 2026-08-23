@@ -114,16 +114,18 @@ androidx-credentials = { group = "androidx.credentials", name = "credentials", v
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 
-# Gradle plugins, as libraries. `build-logic` needs the plugin implementations on its own
-# compile classpath to write against their DSL types; the marker artifacts under [plugins]
-# are how a build script applies them, which is a different question. Both refer to the same
-# versions above, so the two can never drift.
+# Gradle plugins, as libraries. `build-logic` needs these three on its own compile classpath to
+# write against their DSL types — `LibraryExtension`, `JvmTarget`, `DetektExtension`; the marker
+# artifacts under [plugins] are how a build script applies them, which is a different question.
+# Both refer to the same versions above, so the two can never drift.
+#
+# The Compose, KSP and Hilt Gradle plugins are deliberately absent: `build-logic` applies them by
+# id and never names a type from one. Adding `hilt-android-gradle-plugin` here also breaks that
+# compilation outright — it carries a Kotlin 2.x `.kotlin_module` the `kotlin-dsl` compiler
+# refuses to read.
 android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
 kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
-compose-gradlePlugin = { group = "org.jetbrains.kotlin", name = "compose-compiler-gradle-plugin", version.ref = "kotlin" }
-ksp-gradlePlugin = { group = "com.google.devtools.ksp", name = "com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
 detekt-gradlePlugin = { group = "io.gitlab.arturbosch.detekt", name = "detekt-gradle-plugin", version.ref = "detekt" }
-hilt-gradlePlugin = { group = "com.google.dagger", name = "hilt-android-gradle-plugin", version.ref = "hilt" }
 
 # Testing
 # kotlin-reflect is test-only on purpose. `StabilityContractTest` needs the Kotlin

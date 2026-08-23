@@ -1,5 +1,6 @@
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.VersionCatalogsExtension
 
 /**
  * Hilt, for any module that declares a binding.
@@ -13,19 +14,23 @@ import org.gradle.api.Project
  */
 class HiltConventionPlugin : Plugin<Project> {
 
-    override fun apply(target: Project) = with(target) {
-        with(pluginManager) {
-            apply("com.google.devtools.ksp")
-            apply("com.google.dagger.hilt.android")
-        }
+    // A block body, not an expression body: the last statement here is `dependencies.apply`,
+    // which evaluates to a `DependencyHandler`, and `Plugin.apply` returns `Unit`.
+    override fun apply(target: Project) {
+        with(target) {
+            with(pluginManager) {
+                apply("com.google.devtools.ksp")
+                apply("com.google.dagger.hilt.android")
+            }
 
-        val libs = extensions
-            .getByType(org.gradle.api.artifacts.VersionCatalogsExtension::class.java)
-            .named("libs")
+            val libs = extensions
+                .getByType(VersionCatalogsExtension::class.java)
+                .named("libs")
 
-        dependencies.apply {
-            add("implementation", libs.findLibrary("hilt-android").get())
-            add("ksp", libs.findLibrary("hilt-android-compiler").get())
+            dependencies.apply {
+                add("implementation", libs.findLibrary("hilt-android").get())
+                add("ksp", libs.findLibrary("hilt-android-compiler").get())
+            }
         }
     }
 }
