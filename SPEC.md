@@ -512,7 +512,7 @@ design; a pull-to-refresh gesture and a "refresh all" affordance are both unbuil
 - [x] Decorator pattern: repository wrappers adding cache, retry, and telemetry — three layers around an unchanged `UserRepositoryImpl`, which is what closes `docs/solid.md` finding 7. The order is the design (`retry` innermost, so everything above sees one logical operation; caching above it, so a hit costs no retry schedule; telemetry outermost, so durations are what the caller waited for) and `UserRepositoryDecoratorTest` walks the assembled chain, because nothing else fails when it is reversed. Three traps, each of which still compiles: the sync methods return failures as **values**, so `runCatching { delegate.syncUser(id) }` never retries anything; a shared in-flight request started with the first caller's `async` is cancelled when that caller leaves, taking down a request a second screen is still awaiting — it is hosted in `@ApplicationScope` instead, the first use that scope has had; and cancellation is not failure at any layer, so it is unretried, uncached and recorded as `Cancelled`. The retry decorator retries only the failed ids of a fan-out and restores request order, and `BackoffPolicy` is extracted so the flow operator and the suspend retry share one schedule (PR #33)
 - [x] Observer pattern: app-wide event bus on `SharedFlow` — implements rule 4 of `docs/state-and-events.md`, which had been written without anything behind it because nothing in the app had two independent listeners for one thing. Session expiry does: `TokenAuthenticator` is the only code that can tell a session has died, and it reacted by clearing the tokens and failing one request while nothing else found out — so Credential Manager kept its record of who was authorised and could answer the next sign-in by silently re-authorising the account the server had just ejected. The design is that its two reactions have different lifetimes: clearing the credential state is an `AppEventListener` under `AppEventDispatcher`'s process-lifetime subscription, because a session usually dies with the app backgrounded, and navigating is a composition-scoped `ObserveAsEvents` collector that accepts the miss. A `SharedFlow` reaches both; a `Channel` would have given the event to whichever asked first. Three traps, each verified by mutation rather than by a passing build: `start()` must launch `UNDISPATCHED` or the subscription registers a dispatch late and everything published in between is dropped while `tryEmit` reports success (removing it fails 6 of 16 tests); the dispatcher is a single `collect`, so a listener that throws would cancel it and silently stop *every* reaction for the life of the process (removing the per-listener catch fails 3); and the buffer is `SUSPEND` rather than `DROP_OLDEST`, so a full buffer is a `false` a caller can act on instead of a pending event that evaporates. `AppEvent` has exactly one member on purpose — the admission test is in `docs/event-bus.md`, and connectivity is the near miss it rejects, being state with a current answer that `NetworkMonitor` already publishes (PR #34)
 - [x] Unidirectional data flow: single `UiState` + `UiEvent` + `UiEffect` contract per screen — `UdfViewModel<S, E, F>` gives every screen `state`, `onEvent` and `effects` and nothing else public, which `UnidirectionalDataFlowContractTest` enforces against the compiled output. The convention had been in `CLAUDE.md` since the repo existed and nothing was checking, so `HomeViewModel` had reached four public flows and four public methods. Two of the three costs were real bugs rather than untidiness: `TextRecognitionViewModel` guarded detection with `uiState is Scanning && !isPaused` because neither flag could be trusted alone, and `isPaused` was true in exactly the cases where the scan state was `TextDetected` — a second copy of one value kept in step by hand, which folding the screen into one state deleted; and `RefreshState.Finished` was state cleared by a Dismiss button, the exact tell rule 2 of `docs/state-and-events.md` names, surviving every rotation until pressed and losing the press if the rotation came first. `HomeUiState` is a data class with the mutually-exclusive part as a sealed `content` field rather than one sealed state, because an `Error` case would exclude the search text and a `Loading` case the offline banner. Four of six screens bind `Nothing` as their effect type, which has no instances, so "this screen decides no one-shot" is compiler-enforced and `emitEffect` is uncallable there (PR #35)
-- [ ] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules
+- [x] Modularisation: `:core`, `:data`, `:feature:*` Gradle modules with dependency rules — thirteen modules with the layering declared in the root build file and enforced by `checkModuleDependencies`, which CI runs before compiling. The payoff is not build times at 180 files: `:core:domain` is compiled without the Compose plugin, so `@StabilityInferred` is no longer stamped on it and `DomainLayerContractTest` lost the one exemption it carried; two `@ApplicationScope` qualifiers turned out to exist, with `DataStoreTokenProvider` silently bound to the undocumented one; and `syncStrategyFactoryOver` was already being imported across what is now a module boundary. `HomeTwoPaneScreen` takes its detail pane as a slot so no feature imports a feature (PR #36)
 
 Item 4 complete as of PR #33 (2026-08-18). **The local harness the last three runs kept
 recommending was finally built in full, and it caught things.** The environment is unchanged —
@@ -598,6 +598,65 @@ Still open from earlier items and untouched here: `README.md` advertises "Retrof
 5" while the catalog pins Retrofit 2.11.0 / OkHttp 4.12.0, and the wrapper has no
 `distributionSha256Sum`. Modularisation is the next item, and it is also what deletes the
 `@StabilityInferred` exemption `docs/clean-architecture.md` records.
+
+Item 7 complete as of PR #36 (2026-08-23). **Five CI rounds, and every one of them found
+something no offline check could have.** The environment is unchanged — `dl.google.com` still
+403s on CONNECT, so AGP does not resolve and none of the five Gradle gates run here — and the
+harness in `scripts/jvm-harness/` was rewritten to be module-aware: it reads the module graph out
+of the build files and compiles each module against only the classpath its build file entitles it
+to, `api` transitive and `implementation` not. That found the two real defects above plus a stale
+`BuildConfig` import before anything was pushed. What it could not find is the interesting part.
+
+**Round 1 — `build-logic` did not compile.** Three errors, and the first is worth remembering: a
+Kotlin block comment ends at the first `*/`, and `**/core/domain/**` quoted inside one contains
+exactly that, so the comment closed mid-sentence and the rest of the glob became source. The
+reported failure was "Expecting a top level declaration" on a line that looks fine. Also
+`Plugin.apply` returns `Unit`, so an expression body ending in `dependencies.apply { … }` does not
+override it; and `platform(…)` is a member of Gradle's `DependencyHandler`, not a Kotlin DSL
+extension, so `import org.gradle.kotlin.dsl.platform` does not resolve. Separately,
+`hilt-android-gradle-plugin` 2.57.2 carries a Kotlin 2.x `.kotlin_module` the `kotlin-dsl`
+compiler refuses to read — keep it off `build-logic`'s classpath; nothing there names a Hilt type.
+
+**Round 2 — a convention plugin collected `configurations` at apply time**, i.e. before the
+module's own `dependencies { }` block had run. Two consequences, and the second is the one to
+watch for. AGP has created no variant classpaths that early, so `resolveAllDependencies` — the
+Phase 0 gate that proves every declared version exists — was resolving a handful of
+plugin-internal classpaths and passing: all thirteen modules reported the identical "5
+configurations, 39 module nodes", `:app` alongside `:core:navigation`. And asking a configuration
+for its `resolutionResult` marks it observed, so `api(project(":core:common"))` declared afterwards
+was silently dropped and `:core:domain` failed to compile against a module its own build file
+names. `afterEvaluate` fixes both; the task now asserts it collected `debugCompileClasspath`
+before doing anything, and the gate reports 20–31 configurations and 234–1906 module nodes per
+module. **If a verification task's numbers are identical across modules, it is not verifying.**
+
+**Round 3 — `javax.inject` was not declared anywhere.** `SyncStrategyFactory`'s constructor takes
+a `Map<SyncMode, Provider<SyncStrategy>>`, so `Provider` is on `:core:domain`'s public surface and
+needs `api`, not the `implementation` the Hilt convention supplies. The harness had missed it
+because it hands every module the same jars; it now checks `javax.inject` and `dagger` against the
+build files instead.
+
+**Rounds 4 and 5 — the whole-app discovery, twice.** `EXPECTED_MODULE_PACKAGES` in `CompiledApp`
+still named the theme's old package one commit after the theme moved, and then
+`getResources("com/kojo/boilerplate")` turned out to return every *dependency's* output but not
+`:app`'s own, so `com.kojo.boilerplate.navigation` went missing. The module the contract tests live
+in is now reached through a class in it named as a string — no import, so the file stays
+compilable by the harness. Roots are compared by equality rather than path prefix, because
+`…/kotlin-classes/debugUnitTest` starts with `…/kotlin-classes/debug`.
+
+**Every one of those five fixes carries the check that would have caught it**, which is the only
+reason the count is not higher: the harness now parses `build-logic`, cross-checks
+`EXPECTED_MODULE_PACKAGES` against the packages modules actually declare, and scans every source
+for a comment that closes inside a code span or for invisible characters. That last one is not
+theoretical — a zero-width space was the only thing keeping the round-1 comment alive, and
+deleting it looked like deleting nothing.
+
+Still open and untouched here: `README.md` advertises "Retrofit 3 + OkHttp 5" while the catalog
+pins Retrofit 2.11.0 / OkHttp 4.12.0, and the wrapper has no `distributionSha256Sum`. New with
+this change: `:data` still holds `core.data`, `core.database`, `core.datastore`, `core.network` and
+`core.di` — packages were left alone except where one would straddle two modules, and aligning
+them is a mechanical follow-up. `:core:auth` exists only because `GoogleAuthRepository.signIn`
+takes a `Context`, which is `docs/solid.md` finding 2 showing up as a module; inverting that
+parameter folds the module into `:data`.
 
 ## Phase 9 — Offline-First & Data
 - [ ] WorkManager background sync with constraints, backoff, and unique work
