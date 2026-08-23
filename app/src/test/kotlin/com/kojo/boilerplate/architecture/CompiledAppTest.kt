@@ -24,7 +24,8 @@ class CompiledAppTest {
                 "package is auditing an app that is missing them. Either `:app` no longer " +
                 "depends on the module that declares them — add the dependency, or drop the " +
                 "audit deliberately — or the package moved and EXPECTED_MODULE_PACKAGES in " +
-                "CompiledApp should move with it.",
+                "CompiledApp should move with it.\n\nRoots scanned:\n" +
+                CompiledApp.scannedRoots().joinToString("\n") { "  $it" },
         )
     }
 }
