@@ -334,6 +334,61 @@ def owning_module(owners: dict[str, str], imported: str) -> str | None:
     return None
 
 
+# Import prefixes the harness puts on every module's classpath but Gradle does not. Each is
+# supplied by exactly one thing a module has to opt into, and leaning on it without opting in
+# compiles here and fails in CI — which is how `:core:testing` came to import `javax.inject`
+# with nothing to provide it, after `syncStrategyFactoryOver` moved in.
+#
+# Deliberately only these two. The rest of the external classpath is androidx, which cannot be
+# fetched in this environment and therefore cannot be modelled per module without inventing
+# failures.
+SUPPLIED_BY_HILT = {
+    "javax.inject.": "libs.javax.inject (or the boilerplate.hilt convention)",
+    "dagger.": "the boilerplate.hilt convention",
+}
+
+
+def check_supplied_externals(modules: dict[str, Module]) -> list[str]:
+    """Flags a module importing `javax.inject` or `dagger` without anything that supplies it.
+
+    Supplied means: the module applies `boilerplate.hilt`, or declares `libs.javax.inject`, or
+    reaches a module that declares it as `api`. The harness cannot tell the difference on its
+    own, because it hands every module the same jars — which is exactly why this is checked
+    against the build files instead of against the compiler.
+    """
+    def supplies(path: str) -> bool:
+        text = (modules[path].directory / "build.gradle.kts").read_text()
+        return bool(
+            re.search(r'^\s*id\("boilerplate\.hilt"\)', text, re.M)
+            or re.search(r"^\s*(api|implementation)\(libs\.javax\.inject\)", text, re.M)
+        )
+
+    def exports(path: str) -> bool:
+        text = (modules[path].directory / "build.gradle.kts").read_text()
+        return bool(re.search(r"^\s*api\(libs\.javax\.inject\)", text, re.M))
+
+    violations: list[str] = []
+    for path, module in modules.items():
+        reachable = [
+            dependency
+            for dependency in visible_from(modules, path, include_test=True)
+            if dependency in modules
+        ]
+        available = supplies(path) or any(exports(dependency) for dependency in reachable)
+        if available:
+            continue
+        for source_set in ("main", "test", "androidTest"):
+            for source in sources_in(module, source_set):
+                for imported in IMPORT.findall(source.read_text()):
+                    for prefix, remedy in SUPPLIED_BY_HILT.items():
+                        if imported.startswith(prefix):
+                            violations.append(
+                                f"{source.relative_to(ROOT)} imports {imported}, and {path} "
+                                f"declares nothing that provides it — add {remedy}."
+                            )
+    return violations
+
+
 def check_module_boundaries(modules: dict[str, Module], owners: dict[str, str]) -> list[str]:
     violations: list[str] = []
     test_owners = test_package_owners(modules)
@@ -700,14 +755,15 @@ def main() -> int:
 
     print()
     print("==> Module boundaries")
-    violations = check_module_boundaries(modules, owners)
+    violations = check_module_boundaries(modules, owners) + check_supplied_externals(modules)
     if violations:
         for violation in violations:
             print(f"  VIOLATION {violation}")
         sys.exit(
             f"\n{len(violations)} module boundary violation(s). Either the import is wrong or "
-            f"the build file should declare the dependency — and if it should, the rule in the "
-            f"root build.gradle.kts has to allow it."
+            f"the module's build file should declare what it reaches for — and if the dependency "
+            f"is on another module, `moduleDependencyRules` in the root build.gradle.kts has to "
+            f"allow it too."
         )
     print(f"  {len(modules)} modules, 0 violations")
 

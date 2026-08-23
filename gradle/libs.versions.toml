@@ -72,6 +72,11 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 
 # Hilt
+# javax.inject on its own, for the modules that name `@Inject` or `Provider` without declaring a
+# binding. Hilt drags it in transitively, but `implementation(libs.hilt.android)` does not put it
+# on a *consumer's* compile classpath — so a module whose public API carries a `Provider`, as
+# `SyncStrategyFactory` does, has to say so itself.
+javax-inject = { group = "javax.inject", name = "javax.inject", version = "1" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }

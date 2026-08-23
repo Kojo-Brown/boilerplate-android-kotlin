@@ -26,6 +26,11 @@ dependencies {
 
     // The JUnit rule and extension are part of this module's surface, so their annotations have
     // to be on the consumer's compile classpath too.
+    // `syncStrategyFactoryOver` builds the strategy map by hand, so it names `Provider`
+    // directly. Declared here rather than leaned on transitively — this module applies no Hilt
+    // convention and has no binding of its own.
+    implementation(libs.javax.inject)
+
     api(libs.junit)
     api(libs.junit.jupiter.api)
     api(libs.kotlinx.coroutines.test)

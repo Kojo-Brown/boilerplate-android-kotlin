@@ -26,5 +26,11 @@ android {
 dependencies {
     api(project(":core:common"))
 
+    // `api`, not `implementation`: `SyncStrategyFactory`'s constructor takes a
+    // `Map<SyncMode, Provider<SyncStrategy>>`, so `javax.inject.Provider` is part of this
+    // module's public surface and anyone constructing one needs it. The Hilt convention brings
+    // it in transitively, but as `implementation`, which stops at this module's own boundary.
+    api(libs.javax.inject)
+
     testImplementation(project(":core:testing"))
 }

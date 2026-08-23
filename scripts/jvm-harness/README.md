@@ -51,6 +51,12 @@ seconds. Two failures it is specifically shaped to catch:
 
 - **A package declared in two modules.** A split package breaks `internal` visibility and
   confuses every path-scoped rule in the repository. The run stops and names both modules.
+- **An import of `javax.inject` or `dagger` with nothing declaring it.** The harness hands every
+  module the same jars, so a module that leans on what the `boilerplate.hilt` convention supplies
+  elsewhere compiles here and fails in CI — which is what `:core:testing` did the moment
+  `syncStrategyFactoryOver` moved into it. Checked against the build files rather than against
+  the compiler, and only for these two: the rest of the external classpath is androidx, which
+  cannot be fetched here and so cannot be modelled per module without inventing failures.
 - **An import that resolves only to another module's `test` source set.** A test source set is
   invisible from anywhere else, so this always fails in CI and is easy to miss locally — the
   file is right there in the repository. `syncStrategyFactoryOver` was exactly this, and the
