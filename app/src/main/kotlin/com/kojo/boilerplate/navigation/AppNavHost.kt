@@ -15,12 +15,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.kojo.boilerplate.core.event.AppEvent
+import com.kojo.boilerplate.core.navigation.AppDestination
 import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavItem
 import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavigationScaffold
 import com.kojo.boilerplate.core.ui.adaptive.useListDetailLayout
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
-import com.kojo.boilerplate.feature.home.HomeTwoPaneScreen
 import com.kojo.boilerplate.feature.home.HomeScreen
+import com.kojo.boilerplate.feature.home.HomeTwoPaneScreen
+import com.kojo.boilerplate.feature.profile.ProfileDetailPane
 import com.kojo.boilerplate.feature.profile.ProfileScreen
 import com.kojo.boilerplate.feature.scanner.BarcodeScannerScreen
 import com.kojo.boilerplate.feature.signin.GoogleSignInScreen
@@ -97,6 +99,10 @@ fun AppNavHost(
                                 launchSingleTop = true
                             }
                         },
+                        // `:feature:home` cannot see `:feature:profile` — features are siblings
+                        // and neither may import the other. Knowing about both is navigation's
+                        // job, so the detail pane is supplied from here.
+                        detailPane = { userId -> ProfileDetailPane(userId = userId) },
                     )
                 } else {
                     HomeScreen(

@@ -5,9 +5,9 @@ connection dropping, a database invalidating a table — and the mistakes each o
 prevent.
 
 Every claim here is pinned by a test in
-[`FlowRetryTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/FlowRetryTest.kt),
-[`SearchQueryFlowTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/SearchQueryFlowTest.kt)
-and [`HomeViewModelTest`](../app/src/test/kotlin/com/kojo/boilerplate/feature/home/HomeViewModelTest.kt),
+[`FlowRetryTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/FlowRetryTest.kt),
+[`SearchQueryFlowTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/SearchQueryFlowTest.kt)
+and [`HomeViewModelTest`](../feature/home/src/test/kotlin/com/kojo/boilerplate/feature/home/HomeViewModelTest.kt),
 so a coroutines upgrade that changes one of these semantics fails the build rather than
 quietly invalidating the guidance.
 
@@ -62,7 +62,7 @@ a class depends on is visible where the class is defined.
 
 ## `debounce` — rate-limit the work, never the field
 
-[`asSearchQueries()`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/SearchQueryFlow.kt)
+[`asSearchQueries()`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/SearchQueryFlow.kt)
 is `trim` → `debounce` → `distinctUntilChanged`, and it goes on the *derived* flow:
 
 ```kotlin
@@ -105,7 +105,7 @@ equality makes this operator silently do nothing.
 A `Flow` is over the moment it throws. There is no resuming: the collector's `catch` runs and
 the subscription is gone. For a screen backed by `stateIn`, one dropped connection therefore
 leaves an error on screen until the user finds the retry button —
-[`retryWithBackoff`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/FlowRetry.kt)
+[`retryWithBackoff`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/FlowRetry.kt)
 is `retryWhen` wrapped so that does not happen for failures that would have cleared on their
 own.
 

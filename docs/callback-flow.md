@@ -7,9 +7,9 @@ to hand the object back when you are done. `ConnectivityManager.NetworkCallback`
 `OnSharedPreferenceChangeListener` are all this API.
 
 `callbackFlow` is the adapter for that shape, and
-[`ConnectivityManagerNetworkMonitor`](../app/src/main/kotlin/com/kojo/boilerplate/core/network/connectivity/ConnectivityManagerNetworkMonitor.kt)
+[`ConnectivityManagerNetworkMonitor`](../data/src/main/kotlin/com/kojo/boilerplate/core/network/connectivity/ConnectivityManagerNetworkMonitor.kt)
 is this repo's worked example of it. Every claim below is pinned by a test in
-[`ConnectivityManagerNetworkMonitorTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/network/connectivity/ConnectivityManagerNetworkMonitorTest.kt).
+[`ConnectivityManagerNetworkMonitorTest`](../data/src/test/kotlin/com/kojo/boilerplate/core/network/connectivity/ConnectivityManagerNetworkMonitorTest.kt).
 
 ## The shape
 

@@ -3,7 +3,7 @@
 Which scope builder to reach for, and what to do about cancellation.
 
 Every claim on this page is pinned by a test in
-[`StructuredConcurrencyTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/StructuredConcurrencyTest.kt),
+[`StructuredConcurrencyTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/StructuredConcurrencyTest.kt),
 so a coroutines upgrade that changes one of these semantics fails the build rather than
 quietly invalidating the guidance.
 
@@ -60,7 +60,7 @@ for a screen the user has already left.
 suspend fun load(): Result<User> = runCatching { api.getUser() }   // wrong
 ```
 
-Use [`safeCall`](../app/src/main/kotlin/com/kojo/boilerplate/core/common/Result.kt), which
+Use [`safeCall`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/common/Result.kt), which
 is that same wrapper with the cancellation put back on its way, or call
 `Throwable.rethrowIfCancellation()` as the first line of your own broad `catch`.
 
@@ -79,7 +79,7 @@ try {
 
 The `finally` block runs; the suspending call inside it does not. Cleanup that suspends has
 to run in `NonCancellable`, which is what
-[`withCleanup`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/StructuredConcurrency.kt)
+[`withCleanup`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/StructuredConcurrency.kt)
 and `useCancellationSafe` do:
 
 ```kotlin

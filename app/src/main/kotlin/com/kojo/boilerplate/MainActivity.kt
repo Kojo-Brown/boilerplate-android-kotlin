@@ -6,11 +6,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kojo.boilerplate.core.common.ThemeMode
 import com.kojo.boilerplate.core.datastore.ThemePreferencesRepository
 import com.kojo.boilerplate.core.event.AppEventBus
+import com.kojo.boilerplate.core.ui.theme.BoilerplateTheme
 import com.kojo.boilerplate.navigation.AppNavHost
-import com.kojo.boilerplate.ui.theme.BoilerplateTheme
-import com.kojo.boilerplate.ui.theme.ThemeMode
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 

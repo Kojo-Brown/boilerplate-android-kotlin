@@ -3,9 +3,14 @@
 /local.properties
 /.idea
 .DS_Store
-/build
+# Every module has one now, plus `build-logic`'s own. The bare `build/` pattern matches at any
+# depth; the leading-slash form only ever matched the root project's.
+build/
 /captures
 .externalNativeBuild
 .cxx
 *.keystore
 !debug.keystore
+
+# The offline harness is a Python script; running it leaves bytecode next to it.
+__pycache__/

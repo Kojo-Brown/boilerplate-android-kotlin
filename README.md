@@ -4,6 +4,27 @@
 
 Modern Android app starter following Google's recommended architecture.
 
+## Modules
+
+Thirteen Gradle modules, with the layering enforced by `./gradlew checkModuleDependencies`
+rather than by convention. [`docs/modularisation.md`](./docs/modularisation.md) is the full
+map and the reasoning; the short version:
+
+| Module | Holds |
+|---|---|
+| `:app` | `MainActivity`, `BoilerplateApp`, `AppNavHost`. Depends on everything. |
+| `:feature:home` `:feature:profile` `:feature:signin` `:feature:scanner` `:feature:textrecognition` | One screen family each. Siblings — no feature may depend on another. |
+| `:data` | Room, DataStore, Retrofit/OkHttp, the connectivity monitor, and the bindings for them. Only `:app` depends on it. |
+| `:core:ui` | Theme, shared widgets, adaptive scaffold, the `UdfViewModel`/`UiState` vocabulary. |
+| `:core:domain` | Use cases, sync strategies, domain models, `UserRepository`. No Compose plugin, no Android reference. |
+| `:core:auth` | `GoogleAuthRepository` and its Credential Manager implementation. |
+| `:core:navigation` | The typed route contract. |
+| `:core:common` | `Result`/`safeCall`, coroutine utilities, event bus, telemetry seam. Depends on nothing. |
+| `:core:testing` | Fakes and JUnit rules, on test configurations only. |
+
+Shared build configuration lives in [`build-logic/convention`](./build-logic/convention), so a
+module's own build file is its namespace and its dependencies and nothing else.
+
 ## Stack
 
 | Layer | Tech |
@@ -42,6 +63,10 @@ Modern Android app starter following Google's recommended architecture.
 - [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
   costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
   `@Immutable` promises the compiler that nothing verifies.
+- [Modularisation](./docs/modularisation.md) — the thirteen-module graph, what each module
+  may depend on and what enforces it, and what the split actually bought (a domain layer that
+  is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned
+  out to be one too many).
 - [SOLID in the repository layer](./docs/solid.md) — an audit of the abstractions the data
   flows through: where each principle holds, the eight places it does not, and why the
   application policy that was duplicated across two ViewModels is the finding the rest of
@@ -71,6 +96,10 @@ Modern Android app starter following Google's recommended architecture.
 2. Sync Gradle
 3. Create `local.properties` with `API_URL=https://your-api.com`
 4. Run on emulator (API 26+) or device
+
+Every Gradle gate is unqualified — `./gradlew compileDebugKotlin`, `lintDebug`, `detekt`,
+`testDebugUnitTest` — and runs in all thirteen modules. `./gradlew checkModuleDependencies`
+checks the layering on its own and takes seconds.
 
 ## CI
 

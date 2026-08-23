@@ -1,0 +1,20 @@
+package com.kojo.boilerplate.core.navigation
+
+import kotlinx.serialization.Serializable
+
+sealed interface AppDestination {
+    @Serializable
+    data object SignIn : AppDestination
+
+    @Serializable
+    data object Home : AppDestination
+
+    @Serializable
+    data class Profile(val userId: String) : AppDestination
+
+    @Serializable
+    data object BarcodeScanner : AppDestination
+
+    @Serializable
+    data object TextRecognition : AppDestination
+}

@@ -5,7 +5,7 @@ of them, where this code answers and where it does not, and which of the remaini
 items is the fix for each gap.
 
 Every structural claim on this page is pinned by
-[`SolidContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/architecture/SolidContractTest.kt),
+[`SolidContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/architecture/SolidContractTest.kt),
 which reads the compiled output rather than the source and fails `testDebugUnitTest` when
 the shape it finds stops matching the shape described here — including when a finding is
 *fixed*, so a repair cannot quietly leave this page describing a problem that is gone. That
@@ -18,11 +18,25 @@ change. The domain layer that repair introduced has its own pinned page,
 
 Eight types carry the repository role, and the audit is the whole set:
 
-| Type | Abstraction | Implementation | Bound in |
-| --- | --- | --- | --- |
-| `UserRepository` | interface, framework-free | `UserRepositoryImpl`, wrapped by three decorators | `RepositoryModule` |
-| `GoogleAuthRepository` | interface, takes an `android.content.Context` | `GoogleAuthRepositoryImpl` | `GoogleAuthModule` |
-| `ThemePreferencesRepository` | **none — a concrete class** | itself | injected directly |
+| Type | Abstraction | Implementation | Bound in | Module |
+| --- | --- | --- | --- | --- |
+| `UserRepository` | interface, framework-free | `UserRepositoryImpl`, wrapped by three decorators | `RepositoryModule` | `:core:domain` / `:data` |
+| `GoogleAuthRepository` | interface, takes an `android.content.Context` | `GoogleAuthRepositoryImpl` | `GoogleAuthModule` | `:core:auth` |
+| `ThemePreferencesRepository` | **none — a concrete class** | itself | injected directly | `:data` |
+
+The last column is what [modularisation](./modularisation.md) added, and it changed one thing
+on this page rather than none. `UserRepository` moved from `core.data.repository` to
+`core.domain.repository`: it is the interface the domain layer is written against, and leaving
+it in the package its implementation lives in would have meant every feature depending on
+`:data` to see it. The implementations did not move.
+
+**`GoogleAuthRepository` is why `:core:auth` exists**, and finding 2 below is the reason. Its
+`signIn` takes an `android.content.Context`, so it cannot live in `:core:domain` — that module
+is checked to have no framework reference at all — and it cannot live in `:data`, because
+`:feature:signin` injects it and no feature may see `:data`. A module of its own is the honest
+answer while that parameter is on the interface. Inverting the parameter would let the
+abstraction move down to `:core:domain` and `:core:auth` disappear into `:data`, which is a
+second reason to fix finding 2 beyond the one the finding itself gives.
 
 `CachingUserRepository`, `RetryingUserRepository` and `TelemetryUserRepository` are counted as
 implementations of `UserRepository`, because that is what they are: each one is a repository a

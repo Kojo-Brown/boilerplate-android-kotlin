@@ -3,8 +3,8 @@
 Two mechanisms, and which one a given failure belongs to.
 
 Every claim on this page is pinned by a test in
-[`AppCoroutineExceptionHandlerTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/AppCoroutineExceptionHandlerTest.kt)
-and [`ResultTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/common/ResultTest.kt),
+[`AppCoroutineExceptionHandlerTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/AppCoroutineExceptionHandlerTest.kt)
+and [`ResultTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/common/ResultTest.kt),
 so a coroutines upgrade that changes one of these semantics fails the build rather than
 quietly invalidating the guidance.
 
@@ -14,7 +14,7 @@ The question is not "how do I handle errors in coroutines" but **is there still 
 
 | | Someone is waiting for the result | Nobody is |
 |---|---|---|
-| Mechanism | [`safeCall`](../app/src/main/kotlin/com/kojo/boilerplate/core/common/Result.kt) | [`AppCoroutineExceptionHandler`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/AppCoroutineExceptionHandler.kt) |
+| Mechanism | [`safeCall`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/common/Result.kt) | [`AppCoroutineExceptionHandler`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/AppCoroutineExceptionHandler.kt) |
 | Failure becomes | a `Result.failure` the caller renders | a report, and nothing else |
 | Typical caller | a repository method a ViewModel awaits | fire-and-forget work on the application scope |
 | Can it recover? | yes — that is the point | no — the coroutine has already failed |
@@ -66,7 +66,7 @@ work you need a result from with `async` + `await()` so the failure has somewher
 
 1. Ignores cancellation.
 2. Hands the failure and the coroutine's name to a
-   [`CoroutineFailureReporter`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/CoroutineFailureReporter.kt).
+   [`CoroutineFailureReporter`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/CoroutineFailureReporter.kt).
 3. For a **fatal** error — `VirtualMachineError` or `LinkageError` — passes it on to the
    thread's uncaught-exception handler after reporting, so the process still dies. Absorbing
    an `OutOfMemoryError` only buys a second, more confusing crash somewhere unrelated. An

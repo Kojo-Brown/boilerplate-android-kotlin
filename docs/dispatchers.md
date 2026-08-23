@@ -12,9 +12,9 @@ constructor parameter is one a test can hand a `TestDispatcher` to and then chec
 
 ## The qualifiers
 
-[`AppDispatchers.kt`](../app/src/main/kotlin/com/kojo/boilerplate/core/coroutines/AppDispatchers.kt)
+[`AppDispatchers.kt`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/coroutines/AppDispatchers.kt)
 declares three Hilt qualifiers, bound in
-[`CoroutineDispatchersModule`](../app/src/main/kotlin/com/kojo/boilerplate/core/di/CoroutineDispatchersModule.kt):
+[`CoroutineDispatchersModule`](../core/common/src/main/kotlin/com/kojo/boilerplate/core/common/di/CoroutineDispatchersModule.kt):
 
 | Qualifier | Backed by | For |
 |---|---|---|
@@ -29,7 +29,7 @@ it with work that actually wants a core starves the waiting calls it exists for.
 
 ## Rule 1 — the layer that does the work owns the dispatcher
 
-Not the caller. [`UserRepositoryImpl`](../app/src/main/kotlin/com/kojo/boilerplate/core/data/repository/UserRepositoryImpl.kt)
+Not the caller. [`UserRepositoryImpl`](../data/src/main/kotlin/com/kojo/boilerplate/core/data/repository/UserRepositoryImpl.kt)
 takes `@IoDispatcher` and confines itself:
 
 ```kotlin
@@ -111,7 +111,7 @@ There are two ways to get that sharing, and both are used here:
 - Construct from the test's own: `UnconfinedTestDispatcher(testScheduler)`.
 
 `Dispatchers.Main` is a third case: it does not exist off-device, so a view model test must
-install one. [`MainDispatcherExtension`](../app/src/test/kotlin/com/kojo/boilerplate/core/coroutines/MainDispatcherExtension.kt)
+install one. [`MainDispatcherExtension`](../core/testing/src/main/kotlin/com/kojo/boilerplate/core/testing/MainDispatcherExtension.kt)
 (JUnit 5) does the `setMain`/`resetMain` pair. `runTest` then picks up *its* scheduler
 automatically, so no explicit wiring is needed as long as nothing else invents a scheduler.
 
@@ -126,7 +126,7 @@ automatically, so no explicit wiring is needed as long as nothing else invents a
 `UnconfinedTestDispatcher` is the convenient default and the reason to be careful:
 because it never actually dispatches, a **missing** `flowOn` behaves exactly like a present
 one. Anything asserting *where* code runs has to use `StandardTestDispatcher`, which is what
-[`UserRepositoryImplDispatcherTest`](../app/src/test/kotlin/com/kojo/boilerplate/core/data/repository/UserRepositoryImplDispatcherTest.kt)
+[`UserRepositoryImplDispatcherTest`](../data/src/test/kotlin/com/kojo/boilerplate/core/data/repository/UserRepositoryImplDispatcherTest.kt)
 does.
 
 ### Asserting where the code ran

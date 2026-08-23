@@ -58,6 +58,7 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 
 # Compose BOM
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
@@ -71,6 +72,11 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 
 # Hilt
+# javax.inject on its own, for the modules that name `@Inject` or `Provider` without declaring a
+# binding. Hilt drags it in transitively, but `implementation(libs.hilt.android)` does not put it
+# on a *consumer's* compile classpath — so a module whose public API carries a `Provider`, as
+# `SyncStrategyFactory` does, has to say so itself.
+javax-inject = { group = "javax.inject", name = "javax.inject", version = "1" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
@@ -113,6 +119,19 @@ androidx-credentials = { group = "androidx.credentials", name = "credentials", v
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 
+# Gradle plugins, as libraries. `build-logic` needs these three on its own compile classpath to
+# write against their DSL types — `LibraryExtension`, `JvmTarget`, `DetektExtension`; the marker
+# artifacts under [plugins] are how a build script applies them, which is a different question.
+# Both refer to the same versions above, so the two can never drift.
+#
+# The Compose, KSP and Hilt Gradle plugins are deliberately absent: `build-logic` applies them by
+# id and never names a type from one. Adding `hilt-android-gradle-plugin` here also breaks that
+# compilation outright — it carries a Kotlin 2.x `.kotlin_module` the `kotlin-dsl` compiler
+# refuses to read.
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+detekt-gradlePlugin = { group = "io.gitlab.arturbosch.detekt", name = "detekt-gradle-plugin", version.ref = "detekt" }
+
 # Testing
 # kotlin-reflect is test-only on purpose. `StabilityContractTest` needs the Kotlin
 # declaration model — `val` vs `var`, sealed subclasses, generic type arguments —
@@ -131,6 +150,7 @@ androidx-adaptive = { group = "androidx.compose.material3.adaptive", name = "ada
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

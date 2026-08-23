@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The camera declarations travel with the screens that use the camera. Both this module and
+      the other camera feature declare them; the manifest merger collapses the duplicates, and
+      an app that includes neither module asks for neither permission.
+
+      `required="false"` so the app stays installable on a device without a camera — the screens
+      check `PackageManager` and degrade rather than assuming hardware.
+    -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+</manifest>
