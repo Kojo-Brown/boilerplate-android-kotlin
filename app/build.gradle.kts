@@ -117,6 +117,15 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.collections.immutable)
 
+    // WorkManager reaches `:app` for one reason: `BoilerplateApp` has to implement
+    // `Configuration.Provider` and hand WorkManager the `HiltWorkerFactory`, because a worker
+    // with constructor dependencies cannot be built by the default factory. That is a statement
+    // about how the *application* is configured, so it belongs to the application module — and
+    // it is the only WorkManager type named outside `:data`. The schedule itself, the worker and
+    // the request stay there, behind `BackgroundSyncScheduler`.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+
     // Test-only on purpose. `StabilityContractTest` needs the Kotlin declaration model — `val`
     // vs `var`, sealed subclasses, generic type arguments — none of which survives into Java
     // reflection. Shipping it in the app would add ~1.7 MB to the APK to answer a question only

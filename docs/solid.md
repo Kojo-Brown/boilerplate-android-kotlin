@@ -57,13 +57,14 @@ invisible to the check and would need this page revisited by hand.
 original text is kept below the line because the argument for *why* the layer was worth adding
 is the part worth keeping.**
 
-`core.domain.usecase` now holds two use cases, and
+`core.domain.usecase` now holds three use cases, and
 [`clean-architecture.md`](./clean-architecture.md) is the page about them:
 
 | Use case | The policy it took out of the `ViewModel`s |
 | --- | --- |
 | `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" |
 | `RefreshVisibleUsersUseCase` | Which sync a list refresh performs — the three decisions it originally took (empty selection, dedupe, partial failure) moved on into `VisibleUsersSyncStrategy`, see [`sync-strategy.md`](./sync-strategy.md) |
+| `PerformBackgroundSyncUseCase` | Which sync a background worker performs, what counts as done, and when to stop retrying. Not taken out of a `ViewModel` — out of a `Worker`, which is a class no JVM test can construct. See [`background-sync.md`](./background-sync.md) |
 
 Both profile view models are now one `flatMapLatest` over `ObserveUserProfileUseCase` plus a
 `when` that turns the outcome into strings, and the `when` itself is shared as
@@ -207,16 +208,17 @@ contract test run against both implementations could, and that needs Room, which
 | `getUser(id)` | `ObserveUserProfileUseCase` |
 | `syncUsers(ids)` | `VisibleUsersSyncStrategy` |
 | `saveUser(user)` | none |
-| `syncCurrentUser()` | `CurrentUserSyncStrategy` — which nothing selects yet |
+| `syncCurrentUser()` | `CurrentUserSyncStrategy`, selected by `PerformBackgroundSyncUseCase` |
 | `syncUser(id)` | none |
 
 The count above is as of the Factory + Strategy item. Before it, half the interface had no
 caller at all and neither of the sync methods ever had one: `HomeViewModel.refresh()` was
 written to give `syncUser` a caller and ended up needing the fan-out instead, so `syncUsers`
 was the only one of the three that was reachable. `CurrentUserSyncStrategy` is the first
-caller `syncCurrentUser` has had — but it is bound into the strategy map without anything
-selecting `SyncMode.CURRENT_USER`, so the method is reachable from production code and not
-yet from a screen. That
+caller `syncCurrentUser` has had, and as of the WorkManager background-sync item it is
+selected as well as bound: `PerformBackgroundSyncUseCase` asks for `SyncMode.CURRENT_USER` on
+every periodic run. So the method is now reachable end to end — from a scheduler rather than
+from a screen, which is the shape the strategy was written for. That
 surface is not free: `FakeUserRepository` implements all six regardless, so the two profile
 view models — which between them call exactly one method — are tested through a double that
 has to model the whole thing, and a seventh method would enlarge every one of those tests

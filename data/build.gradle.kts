@@ -47,6 +47,14 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences)
 
+    // WorkManager, plus the Hilt integration that lets a worker take constructor dependencies.
+    // `hilt-compiler` is the second KSP processor in this module — Room's is the other — and it
+    // is what writes the `HiltWorkerFactory` entry for `UserSyncWorker`. Without it the class
+    // compiles and WorkManager fails to instantiate it at runtime.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)

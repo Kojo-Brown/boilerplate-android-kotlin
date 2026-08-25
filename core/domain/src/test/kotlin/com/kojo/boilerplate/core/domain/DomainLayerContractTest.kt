@@ -239,6 +239,7 @@ class DomainLayerContractTest {
 
         val DOCUMENTED_USE_CASES = listOf(
             "com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase",
+            "com.kojo.boilerplate.core.domain.usecase.PerformBackgroundSyncUseCase",
             "com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase",
         )
 

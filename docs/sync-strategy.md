@@ -114,15 +114,19 @@ The strategies own *how* their mode syncs; the use case owns *which* mode a refr
 | Mode | Strategy | What it does | Selected by |
 | --- | --- | --- | --- |
 | `VISIBLE_USERS` | `VisibleUsersSyncStrategy` | Dedupes the caller's ids and fans out over them, reporting successes and failures side by side | `RefreshVisibleUsersUseCase`, from `HomeViewModel.refresh()` |
-| `CURRENT_USER` | `CurrentUserSyncStrategy` | One request for the signed-in user, whatever the screen holds | nothing yet |
+| `CURRENT_USER` | `CurrentUserSyncStrategy` | One request for the signed-in user, whatever the screen holds | `PerformBackgroundSyncUseCase`, from `UserSyncWorker` |
 
-**`CURRENT_USER` has no production caller**, and that is a known gap rather than an oversight.
-It is written because a Strategy with one implementation demonstrates nothing, and because
-`UserRepository.syncCurrentUser` had no caller at all before it — half of finding 6 in
-[`solid.md`](./solid.md). Its intended caller is the WorkManager background-sync item that
-opens Phase 9: a worker that wakes up to keep the account current wants the smallest useful
-refresh, not the one sized by whatever screen was last open. Until then it is bound, tested
-and unreached.
+**`CURRENT_USER` now has the caller it was written for.** It was bound, tested and unreached
+for one item — written because a Strategy with a single implementation demonstrates nothing,
+and because `UserRepository.syncCurrentUser` had no caller at all before it, half of finding 6
+in [`solid.md`](./solid.md). The WorkManager background-sync item that opens Phase 9 is what
+selects it: a worker that wakes on a timer has no screen, so it wants the smallest useful
+refresh rather than one sized by whatever list happened to be open hours ago. See
+[`background-sync.md`](./background-sync.md).
+
+That is worth noting as evidence about the pattern rather than as a status update. Adding the
+caller was a use case naming a mode — no edit to the factory, the map, or the other strategy —
+which is the property the indirection was bought for.
 
 ## Testing without a Hilt runtime
 
@@ -150,3 +154,4 @@ answer.
 4. Add it to `documentedStrategies` in `SyncStrategyModuleContractTest` and to
    `syncStrategyFactoryOver`. If you forget either, the contract test tells you which.
 5. Give it a caller, or record in this file that it has none and what its intended one is.
+   `CURRENT_USER` spent one item in that state and the entry above is what tracked it.
