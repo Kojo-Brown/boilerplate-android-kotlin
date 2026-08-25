@@ -659,7 +659,7 @@ takes a `Context`, which is `docs/solid.md` finding 2 showing up as a module; in
 parameter folds the module into `:data`.
 
 ## Phase 9 — Offline-First & Data
-- [ ] WorkManager background sync with constraints, backoff, and unique work
+- [x] WorkManager background sync with constraints, backoff, and unique work — a six-hourly periodic sync of the signed-in user, under CONNECTED + battery-not-low, exponential backoff from 30s against a four-attempt budget, enqueued as unique work under `UPDATE` (PR #37)
 - [ ] Offline-first repository: single source of truth in Room with a `NetworkBoundResource`
 - [ ] Conflict resolution: last-write-wins vs merge, with a version column
 - [ ] Paging 3 with `RemoteMediator` over Room + network
@@ -721,3 +721,49 @@ audit checks the contract at the source level, which is where the fix lives, but
 it does not read back what the compiler actually inferred. `ImageVector` is
 trusted to carry its upstream `@Immutable` rather than being listed by hand;
 CI confirms that trust is well placed today.
+
+Phase 9 item 1 complete as of PR #37 (2026-08-25). All four checks green:
+dependency resolution, `modules · compile · lint · detekt · test`, `Build +
+verify APK`, and GitGuardian.
+
+`SyncMode.CURRENT_USER` finally has the caller it was written for. Adding it was
+a use case naming a mode — no edit to `SyncStrategyFactory`, to the multibinding
+map, or to the other strategy — which is the property the Phase 7 indirection
+was bought for and the first time it has been paid out.
+
+The layer split is worth restating because it is the decision in the change:
+WorkManager's vocabulary stays in `:data`, and `:core:domain` takes only what
+survives without it. That is not tidiness — a `ListenableWorker` needs a
+`Context` and a `WorkerParameters` that only the framework builds, so anything
+left inside one is checkable on an emulator and nowhere else. What crossed:
+which users a background run covers, what counts as done, that a throw is a
+retry rather than a dropped occurrence, and that cancellation is neither.
+
+Two pins are load-bearing and neither is the newest release. `androidx.work` is
+**2.10.0** because Gradle resolves to the highest version anyone asks for and
+`lifecycleRuntimeKtx` is held at 2.8.7 for the AGP 8.7.3 lint crash recorded
+above; 2.10.0 predates lifecycle 2.9.0 entirely, so it cannot undo that pin,
+while a later WorkManager could — and the failure would surface as a lint crash
+naming nothing about WorkManager. `androidx.hilt` stays at **1.2.0**, with the
+version key renamed `hiltNavigationCompose` -> `androidxHilt` now that three
+artifacts from one release wave share it.
+
+The environment constraint holds unchanged: `dl.google.com` is still 403 on
+CONNECT, so zero of the five CLAUDE.md gates ran locally and CI was the gate.
+What has improved since the note above is what stands in for them —
+`scripts/jvm-harness/run.sh` is now checked in and ran green end to end
+(13 modules / 0 boundary violations, 23 build scripts, per-module compile,
+every runnable suite, detekt 0 findings). It caught nothing this time, which is
+the outcome to want from a pre-flight check.
+
+Known gaps carried forward, all four written into `docs/background-sync.md`
+rather than left here: nothing proves Hilt can actually construct
+`UserSyncWorker` or that a run happens — that needs `WorkManagerTestInitHelper`
+and the emulator matrix of Phase 12, with `compileDebugKotlin` standing in for
+the binding half since KSP fails on an unsatisfied one. A failure's cause is
+reported nowhere, and belongs with Phase 11's crash reporting.
+`cancelPeriodicSync` has no production caller, because sign-out does not exist
+yet. And the sync runs whether or not anyone is signed in, so an install that
+has never signed in will fail, retry and give up four times a day — gating the
+schedule on auth state is the natural follow-up and pairs with the sign-out
+cancellation.
