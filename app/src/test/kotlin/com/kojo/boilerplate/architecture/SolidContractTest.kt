@@ -209,6 +209,7 @@ class SolidContractTest {
          */
         val AUDITED_USE_CASES = listOf(
             "$DOMAIN_PACKAGE.usecase.ObserveUserProfileUseCase",
+            "$DOMAIN_PACKAGE.usecase.PerformBackgroundSyncUseCase",
             "$DOMAIN_PACKAGE.usecase.RefreshVisibleUsersUseCase",
         )
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
       No <uses-permission> here any more. CAMERA belongs to the two camera features and
@@ -23,6 +24,33 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          WorkManager's own manifest contributes an androidx.startup provider that initialises
+          it eagerly with the default WorkerFactory. That factory can only build workers with
+          the two-argument (Context, WorkerParameters) constructor, so UserSyncWorker — which
+          takes a use case as well — would fail to instantiate at run time with
+          "Could not instantiate ...UserSyncWorker" and the sync would never happen.
+
+          Removing the initializer switches WorkManager to on-demand initialisation, where it
+          asks the Application for its Configuration on first use. BoilerplateApp implements
+          Configuration.Provider and supplies the HiltWorkerFactory there.
+
+          The node is removed rather than the whole provider: androidx.startup's InitializationProvider
+          is shared by every library that uses App Startup, so deleting the provider would take
+          any other initializer down with it. tools:node="remove" on the meta-data leaves the
+          provider in place and drops only WorkManager's entry in it.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>

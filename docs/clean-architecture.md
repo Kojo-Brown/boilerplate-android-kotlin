@@ -26,14 +26,24 @@ So the test for whether something belongs here is not "is it business logic". It
 
 > Would a second screen have to make this decision again, and could it get a different answer?
 
-Two things passed that test:
+Two things passed that test, and a third has since joined them for a different reason:
 
 | Use case | The policy it owns | Was duplicated in |
 | --- | --- | --- |
 | `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
 | `RefreshVisibleUsersUseCase` | Which sync a list refresh performs: a person tapping refresh covers what the screen is showing | `HomeViewModel.refresh()` |
+| `PerformBackgroundSyncUseCase` | Which sync a *worker* performs, what counts as done, and when to stop retrying | nothing — see below |
 
 `getUsers()` did not, and is still called on the repository directly.
+
+`PerformBackgroundSyncUseCase` is the one that did not arrive by extraction, and it is worth
+saying why it still belongs here rather than inside `UserSyncWorker`. The question above —
+would a second caller have to decide this again — is not the only reason a decision belongs in
+this layer. The other is reachability: a `ListenableWorker` needs a `Context` and a
+`WorkerParameters` that only the framework builds, so a decision left inside one can be checked
+on an emulator and nowhere else. Everything in that worker that is a judgement rather than a
+hand-off is here, and the worker is four lines of translation. See
+[`background-sync.md`](./background-sync.md).
 
 `RefreshVisibleUsersUseCase` owned three more decisions — empty selection makes no request,
 ids are deduped, a partial failure is a partial success — until the Factory + Strategy item

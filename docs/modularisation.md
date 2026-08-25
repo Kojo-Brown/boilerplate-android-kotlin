@@ -123,7 +123,7 @@ version catalog is shared with the main build, so a convention plugin and a modu
 cannot disagree about a version.
 
 **Some packages no longer match their module.** `:data` holds `com.kojo.boilerplate.core.data`,
-`core.database`, `core.datastore`, `core.network` and `core.di`. Packages were left alone except
+`core.database`, `core.datastore`, `core.network`, `core.work` and `core.di`. Packages were left alone except
 where one would otherwise straddle two modules, which kept the change reviewable: renaming every
 package in the data layer would have added several hundred lines of import churn to a change
 that is already large, and it can be done on its own later. What was *not* left alone is any

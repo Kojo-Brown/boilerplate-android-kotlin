@@ -14,7 +14,13 @@ datastore = "1.1.1"
 # in the same 2.1.x line as this project's Kotlin 2.1.0; later releases jump to
 # 2.3.x on the processor classpath for no benefit here.
 hilt = "2.57.2"
-hiltNavigationCompose = "1.2.0"
+# The `androidx.hilt` group — the Jetpack integrations that sit on top of Dagger's Hilt rather
+# than Dagger itself, so it versions separately from `hilt` above. One key for all three
+# artifacts because they ship as a single release wave and are not supported mixed: the
+# `hilt-compiler` that generates a `@HiltWorker`'s factory has to be the one that matches the
+# `hilt-work` runtime reading it. This was `hiltNavigationCompose` while
+# `hilt-navigation-compose` was the only one of them in use; the pin is unchanged at 1.2.0.
+androidxHilt = "1.2.0"
 # 2.9.0 ships lint checks built against a newer Kotlin Analysis API than the lint
 # bundled with AGP 8.7.3, so lintAnalyzeDebug crashed rather than reporting:
 # "Found class org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall, but
@@ -25,6 +31,15 @@ hiltNavigationCompose = "1.2.0"
 lifecycleRuntimeKtx = "2.8.7"
 navigationCompose = "2.8.5"
 room = "2.7.0"
+# WorkManager. 2.10.0 rather than the newest release, for a reason that is about this
+# repository rather than about WorkManager: `lifecycleRuntimeKtx` above is held at 2.8.7 because
+# 2.9.0 crashes the lint bundled with AGP 8.7.3, and Gradle resolves a dependency to the
+# *highest* version anyone in the graph asks for. 2.10.0 predates lifecycle 2.9.0 entirely, so
+# nothing it drags in can undo that pin; a later WorkManager could, and the failure would
+# surface as the lint crash described above rather than as anything naming WorkManager.
+#
+# It also wants compileSdk 35, which is what `BoilerplateBuild.COMPILE_SDK` already is.
+work = "2.10.0"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 retrofit = "2.11.0"
@@ -79,7 +94,17 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 javax-inject = { group = "javax.inject", name = "javax.inject", version = "1" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
-androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
+androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidxHilt" }
+# `@HiltWorker` is two artifacts and both are needed: `hilt-work` carries the annotation and the
+# `HiltWorkerFactory` the Application hands to WorkManager, and `hilt-compiler` is the KSP
+# processor that writes the factory entry for each worker. Declaring only the first compiles and
+# then fails at runtime with "Could not instantiate …Worker", because nothing generated the
+# binding the factory looks the worker up in.
+androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "androidxHilt" }
+androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "androidxHilt" }
+
+# WorkManager
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 
 # Room
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
