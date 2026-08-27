@@ -660,7 +660,7 @@ parameter folds the module into `:data`.
 
 ## Phase 9 — Offline-First & Data
 - [x] WorkManager background sync with constraints, backoff, and unique work — a six-hourly periodic sync of the signed-in user, under CONNECTED + battery-not-low, exponential backoff from 30s against a four-attempt budget, enqueued as unique work under `UPDATE` (PR #37)
-- [ ] Offline-first repository: single source of truth in Room with a `NetworkBoundResource`
+- [x] Offline-first repository: single source of truth in Room with a `NetworkBoundResource` — `networkBoundResource` in `:core:common` joins the two halves that nothing obliged a caller to connect, and `ObserveUserProfileUseCase` is the first to use it, so the profile screen refreshes at all for the first time; `refresh` returns `Unit`, which is what makes "the network only ever writes to Room" a property of the signature (PR #38)
 - [ ] Conflict resolution: last-write-wins vs merge, with a version column
 - [ ] Paging 3 with `RemoteMediator` over Room + network
 - [ ] Room migrations with exported schemas and a migration test suite
@@ -767,3 +767,57 @@ yet. And the sync runs whether or not anyone is signed in, so an install that
 has never signed in will fail, retry and give up four times a day — gating the
 schedule on auth state is the natural follow-up and pairs with the sign-out
 cancellation.
+
+Phase 9 item 2 complete as of PR #38 (2026-08-27). All four checks green:
+dependency resolution, `checkModuleDependencies` / `compileDebugKotlin` /
+`lintDebug` / `detekt` / `testDebugUnitTest`, `assembleDebug` + APK
+verification, and GitGuardian.
+
+The item asked for a `NetworkBoundResource` and the interesting part was
+deciding **where** to compose one. Inside `UserRepositoryImpl` is the obvious
+reading of "offline-first *repository*", and it is wrong here for a reason
+specific to this codebase: retry, caching and telemetry are decorators around
+the `UserRepository` interface, so a resource built inside the implementation
+would reach the DAO and the API underneath all three — no backoff, no
+telemetry, and no coalescing, meaning a two-pane profile layout would fire two
+identical requests every time it subscribed. Composed above the repository, in
+the use case, the refresh is an ordinary `syncUser` and inherits the whole
+stack. `docs/offline-first.md` is the argument; `docs/decorator.md` carries the
+other half of it.
+
+Two departures from the canonical implementations, both deliberate and both
+tested. `Resource` has no arm without data — the payload is non-null on
+`Loading`, `Success` and `Failure` alike, because every emission comes from
+reading the store, and a nullable payload makes every call site's
+`if (data != null)` a stand-in for "has the store been read yet?". And there is
+no `shouldFetch`: freshness is `CachingUserRepository`'s existing 30-second
+window, and a second copy of that decision here is a second place for it to
+disagree with the first.
+
+The product decision worth knowing about: a refresh that fails over a cached
+row renders the cached row rather than an error. `UserProfile.Unavailable` is
+kept for having genuinely nothing to show.
+
+Known gaps, carried forward and written into `docs/offline-first.md`. A screen
+showing a cached row after a failed refresh gets **no staleness signal** —
+`UserProfile` has nowhere to put one, and adding a fourth arm belongs with the
+Phase 10 UI items. Nothing in Room records when a row was written, so "stale"
+means "the refresh this subscription ran did not land", never "this row is four
+days old"; the column that changes that arrives with the conflict-resolution
+item immediately below. And lists are deliberately not covered: a resource over
+`getUsers` needs a `refresh` that fetches the whole queried set, and this API
+has no bulk endpoint, which is the same constraint that made the list refresh a
+fan-out in the first place.
+
+The environment constraint holds unchanged: `dl.google.com` is still 403 on
+CONNECT, so zero of the five CLAUDE.md gates ran locally and CI was the gate.
+`scripts/jvm-harness/run.sh` ran green end to end beforehand (13 modules / 0
+boundary violations, 23 build scripts, per-module compile, 299 tests across
+eleven modules, detekt 0 findings). It earned its place this time: it caught
+that `ProfileDetailPaneViewModelTest` had been passing only because MockK's
+"no answer found for syncUser(nonexistent-id)" message happens to contain the
+id the assertion was looking for. One note for whoever runs it next — its jar
+fetch retries `URLError` and `TimeoutError` but not `http.client.IncompleteRead`,
+so a truncated download of the 60 MB Kotlin compiler aborts the whole run;
+pre-fetching with `curl --retry` into `~/.jvm-harness/jars` is the workaround,
+and widening that `except` clause is the fix.
