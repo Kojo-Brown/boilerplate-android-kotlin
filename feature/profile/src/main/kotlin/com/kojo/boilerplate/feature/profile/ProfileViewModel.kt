@@ -38,10 +38,16 @@ class ProfileViewModel @Inject constructor(
     private val _retrySignal = MutableStateFlow(0)
 
     /**
-     * Retry, dedupe and the missing-row decision all sit in [ObserveUserProfileUseCase] now;
-     * what is left here is the route's id, the retry signal, and turning the outcome into
-     * strings. `ProfileDetailPaneViewModel` held a verbatim copy of the part that moved —
-     * `docs/solid.md` finding 1.
+     * Retry, dedupe, the missing-row decision and the network refresh all sit in
+     * [ObserveUserProfileUseCase] now; what is left here is the route's id, the retry signal,
+     * and turning the outcome into strings. `ProfileDetailPaneViewModel` held a verbatim copy
+     * of the part that moved — `docs/solid.md` finding 1.
+     *
+     * The `flatMapLatest` over [_retrySignal] gained a second job when the use case became a
+     * `networkBoundResource`: resubscribing is how an offline-first read retries, so the retry
+     * button now re-runs the *fetch* as well as the database query. It used to be able to do
+     * only the second, which made it useless against the failure users actually hit — see
+     * `docs/offline-first.md`.
      *
      * No `flowOn` and no injected dispatcher, deliberately: the repository confines its own
      * I/O and row mapping, so what runs here is one `when` and one [ProfileData] allocation

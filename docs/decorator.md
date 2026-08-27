@@ -142,6 +142,13 @@ The one thing it must do because it holds that decision: **invalidate on a local
 `saveUser` drops the entry for the user it wrote, or a `syncUser` moments later would answer
 with the copy that predates the edit.
 
+This is also what a `networkBoundResource` composed above the repository inherits, and the
+reason it is composed there. `ObserveUserProfileUseCase` refreshes on every subscription and
+lets this layer decide whether that costs a request — so a two-pane layout subscribing twice at
+once makes one, and a configuration change inside the 30-second window makes none. A resource
+built *inside* `UserRepositoryImpl` would call the DAO and the API underneath all three
+decorators and get none of it. See [offline-first](./offline-first.md).
+
 ## Adding a layer
 
 1. Implement `UserRepositoryDecorator` — all six methods, including the ones that just forward.

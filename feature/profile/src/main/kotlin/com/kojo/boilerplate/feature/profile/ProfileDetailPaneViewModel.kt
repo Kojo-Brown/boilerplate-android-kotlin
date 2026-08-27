@@ -39,6 +39,12 @@ class ProfileDetailPaneViewModel @AssistedInject constructor(
      * to hold two copies of lives in [ObserveUserProfileUseCase]. The only difference between
      * the two screens is where [userId] comes from — an `@Assisted` parameter here, a
      * `SavedStateHandle` route there — which is the difference that is actually real.
+     *
+     * The `flatMapLatest` is also what makes retry work against a *network* failure now that
+     * the use case is a `networkBoundResource`: resubscribing re-runs the fetch, not just the
+     * database query. Two of these panes on screen at once still cost one request —
+     * `CachingUserRepository` coalesces them — which is why the resource is composed above the
+     * repository rather than inside it. See `docs/offline-first.md`.
      */
     override val state: StateFlow<ProfileUiState> = _retrySignal
         .flatMapLatest { observeUserProfile(userId).map { profile -> profile.toUiState() } }

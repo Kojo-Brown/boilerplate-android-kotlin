@@ -77,6 +77,10 @@ module's own build file is its namespace and its dependencies and nothing else.
 - [Sync strategies](./docs/sync-strategy.md) — Factory + Strategy over a Dagger
   multibinding: why the map beats a `when`, why it holds `Provider`s, and the two wiring
   mistakes Dagger cannot catch that a contract test and a runtime check do.
+- [Offline-first reads](./docs/offline-first.md) — `networkBoundResource`: the database as the
+  only thing a screen renders from, why every arm of `Resource` carries data, why a failed
+  refresh keeps showing the cached row, and why the resource is composed above the repository
+  rather than inside it.
 - [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
