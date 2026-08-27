@@ -209,12 +209,15 @@ contract test run against both implementations could, and that needs Room, which
 | `syncUsers(ids)` | `VisibleUsersSyncStrategy` |
 | `saveUser(user)` | none |
 | `syncCurrentUser()` | `CurrentUserSyncStrategy`, selected by `PerformBackgroundSyncUseCase` |
-| `syncUser(id)` | none |
+| `syncUser(id)` | `ObserveUserProfileUseCase` |
 
-The count above is as of the Factory + Strategy item. Before it, half the interface had no
-caller at all and neither of the sync methods ever had one: `HomeViewModel.refresh()` was
-written to give `syncUser` a caller and ended up needing the fan-out instead, so `syncUsers`
-was the only one of the three that was reachable. `CurrentUserSyncStrategy` is the first
+The count above is as of the offline-first item. Before the Factory + Strategy item, half the
+interface had no caller at all and neither of the sync methods ever had one:
+`HomeViewModel.refresh()` was written to give `syncUser` a caller and ended up needing the
+fan-out instead, so `syncUsers` was the only one of the three that was reachable. `syncUser`
+finally has one: `ObserveUserProfileUseCase` calls it as the `refresh` half of a
+`networkBoundResource` ([offline-first](./offline-first.md)), which is also what changes that
+use case from a one-method consumer of this interface into a two-method one. `CurrentUserSyncStrategy` is the first
 caller `syncCurrentUser` has had, and as of the WorkManager background-sync item it is
 selected as well as bound: `PerformBackgroundSyncUseCase` asks for `SyncMode.CURRENT_USER` on
 every periodic run. So the method is now reachable end to end — from a scheduler rather than
@@ -229,11 +232,19 @@ nothing else, and each depended on a six-method interface to get it. Both now de
 `ObserveUserProfileUseCase`, which is the single-method surface they wanted.
 
 The finding is *moved rather than closed*, and it is worth being exact about how much was
-bought. There is now one type depending on the six-method interface for `getUser` instead of
-two, and `ObserveUserProfileUseCaseTest` has to hand-write a double declaring all six to test
-a use case that calls one — the same cost, one layer down and paid once. What did change is
-that the two `ViewModel` tests no longer pay it at all, and a seventh method would now
-enlarge one double instead of three.
+bought. There is now one type depending on the six-method interface for the profile read
+instead of two, and `ObserveUserProfileUseCaseTest` has to hand-write a double declaring all
+six to test a use case that calls two of them — the same cost, one layer down and paid once.
+What did change is that the two `ViewModel` tests no longer pay it at all, and a seventh
+method would now enlarge one double instead of three.
+
+The two it calls, rather than the one it used to, is the offline-first item's doing: a
+`networkBoundResource` needs a query *and* a refresh, so the use case took on `syncUser`
+alongside `getUser`. That is worth noting as a cost of the pattern rather than waving through
+— the narrower a consumer's surface, the cheaper its double — but the alternative surfaces
+are wider still. A repository method returning the resource would put the pattern *underneath*
+the decorator stack it needs, and a second interface declaring exactly these two methods would
+be a third abstraction over the same six.
 
 `UserDao` has the milder version of this: `delete` is called from `UserDaoTest` and nowhere
 else. A DAO is generated surface rather than a hand-designed abstraction, so the cost is

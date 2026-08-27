@@ -30,7 +30,7 @@ Two things passed that test, and a third has since joined them for a different r
 
 | Use case | The policy it owns | Was duplicated in |
 | --- | --- | --- |
-| `ObserveUserProfileUseCase` | Retry, dedupe, and "a missing row is a failed load, not an empty one" | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
+| `ObserveUserProfileUseCase` | Retry, dedupe, "a missing row is a failed load, not an empty one", and — since it became a `networkBoundResource` — that observing a profile also refreshes it, and that a refresh which fails keeps showing the cached row ([offline-first](./offline-first.md)) | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
 | `RefreshVisibleUsersUseCase` | Which sync a list refresh performs: a person tapping refresh covers what the screen is showing | `HomeViewModel.refresh()` |
 | `PerformBackgroundSyncUseCase` | Which sync a *worker* performs, what counts as done, and when to stop retrying | nothing — see below |
 

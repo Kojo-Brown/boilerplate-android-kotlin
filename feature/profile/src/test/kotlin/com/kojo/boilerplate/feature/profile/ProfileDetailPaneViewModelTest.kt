@@ -4,6 +4,8 @@ import com.kojo.boilerplate.core.domain.model.User
 import com.kojo.boilerplate.core.domain.repository.UserRepository
 import com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase
 import com.kojo.boilerplate.core.testing.MainDispatcherExtension
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
@@ -44,9 +46,18 @@ class ProfileDetailPaneViewModelTest {
         avatarUrl = null,
     )
 
+    /**
+     * Both halves of the offline-first read are stubbed, because subscribing now runs both:
+     * `ObserveUserProfileUseCase` is a `networkBoundResource` over `getUser` and `syncUser`, so
+     * a mock that answers only the query fails these tests inside the refresh rather than in
+     * anything they are about. The refresh succeeds by default and writes nothing — the store
+     * stub is what these tests vary — which is the "refresh landed and changed nothing" case
+     * and keeps every assertion below about the query, as it was.
+     */
     @BeforeEach
     fun setUp() {
         every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
+        coEvery { userRepository.syncUser(any()) } returns Result.success(testUser)
     }
 
     private fun createViewModel(userId: String = testUser.id) = ProfileDetailPaneViewModel(
@@ -154,6 +165,37 @@ class ProfileDetailPaneViewModelTest {
 
         every { userRepository.getUser(testUser.id) } returns flowOf(testUser)
         viewModel.onEvent(ProfileUiEvent.RetryClicked)
+        advanceUntilIdle()
+
+        val state = viewModel.state.value as ProfileUiState.Success
+        assertEquals("Alice Johnson", state.profile.displayName)
+    }
+
+    /**
+     * Until `ObserveUserProfileUseCase` became a `networkBoundResource` this screen never
+     * asked the network for anything — it rendered whatever row some other screen's sync had
+     * left in Room. Subscribing is what asks now, and this is the assertion that says so.
+     */
+    @Test
+    fun `subscribing refreshes the user from the network`() = runTest {
+        createSubscribedViewModel()
+
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { userRepository.syncUser(testUser.id) }
+    }
+
+    /**
+     * The offline-first half. A refresh that fails over a row the app already has must leave
+     * that row on screen: the error state is for having nothing to show, not for having
+     * something that might be out of date. See `docs/offline-first.md`.
+     */
+    @Test
+    fun `a refresh that fails leaves the cached profile on screen`() = runTest {
+        coEvery { userRepository.syncUser(testUser.id) } returns
+            Result.failure(IOException("offline"))
+
+        val viewModel = createSubscribedViewModel()
         advanceUntilIdle()
 
         val state = viewModel.state.value as ProfileUiState.Success
