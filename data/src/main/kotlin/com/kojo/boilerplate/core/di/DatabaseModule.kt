@@ -15,6 +15,14 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    /**
+     * Migrations are declared and no fallback is. `fallbackToDestructiveMigration()` is the
+     * one line that would make a missing migration invisible: the database is dropped and
+     * rebuilt, the app starts, and every row the user had is gone — including, here, the local
+     * edits the conflict resolver exists to protect. Without it a schema change that nobody
+     * wrote a migration for throws on open, which is a crash on the developer's machine
+     * instead of data loss on a user's.
+     */
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -22,7 +30,9 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "boilerplate.db",
-        ).build()
+        )
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .build()
 
     @Provides
     fun provideUserDao(db: AppDatabase): UserDao = db.userDao()

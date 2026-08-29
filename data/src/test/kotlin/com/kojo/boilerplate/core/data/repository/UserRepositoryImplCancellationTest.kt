@@ -2,6 +2,7 @@ package com.kojo.boilerplate.core.data.repository
 
 import com.kojo.boilerplate.core.database.dao.UserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
+import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlinx.coroutines.CompletableDeferred
@@ -55,7 +56,7 @@ class UserRepositoryImplCancellationTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
 
         val job = launch { repository.syncUser("1") }
         writeStarted.await()
@@ -74,7 +75,7 @@ class UserRepositoryImplCancellationTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
 
         val job = launch { repository.syncCurrentUser() }
         writeStarted.await()
@@ -91,7 +92,7 @@ class UserRepositoryImplCancellationTest {
         runTest {
             val requestStarted = CompletableDeferred<Unit>()
             val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-            val repository = UserRepositoryImpl(userDao, HangingUserApi(requestStarted), ioDispatcher())
+            val repository = UserRepositoryImpl(userDao, HangingUserApi(requestStarted), MergeConflictResolver(), ioDispatcher())
 
             val job = launch { repository.syncUser("1") }
             requestStarted.await()
@@ -106,7 +107,7 @@ class UserRepositoryImplCancellationTest {
     @Test
     fun `syncUser caches the fetched user when it is not cancelled`() = runTest {
         val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), ioDispatcher())
+        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
 
         val result = repository.syncUser("1")
 
@@ -122,7 +123,7 @@ class UserRepositoryImplCancellationTest {
     private class GatedUserDao(
         private val writeStarted: CompletableDeferred<Unit>,
         private val releaseWrite: CompletableDeferred<Unit>,
-    ) : UserDao {
+    ) : UserDao() {
 
         val written = mutableListOf<UserEntity>()
 
@@ -130,6 +131,9 @@ class UserRepositoryImplCancellationTest {
 
         override fun observeById(id: String): Flow<UserEntity?> =
             flowOf(written.firstOrNull { it.id == id })
+
+        override suspend fun findById(id: String): UserEntity? =
+            written.firstOrNull { it.id == id }
 
         override suspend fun upsert(entity: UserEntity) {
             writeStarted.complete(Unit)

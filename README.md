@@ -81,6 +81,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   only thing a screen renders from, why every arm of `Resource` carries data, why a failed
   refresh keeps showing the cached row, and why the resource is composed above the repository
   rather than inside it.
+- [Conflict resolution](./docs/conflict-resolution.md) — a server-assigned `version` column and
+  two policies over it: why last-write-wins means the highest version rather than the latest
+  arrival, why the merge needs a per-field dirty set and not a boolean, and why there is no
+  timestamp anywhere near the decision.
 - [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
