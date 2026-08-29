@@ -3,6 +3,7 @@ package com.kojo.boilerplate.core.data.repository
 import com.kojo.boilerplate.core.database.dao.FakeUserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
 import com.kojo.boilerplate.core.domain.model.User
+import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -45,7 +46,7 @@ class UserRepositoryImplTest {
         // and should fail loudly rather than quietly succeed against a fake.
         // The network path has its own coverage in UserRepositoryImplSyncTest,
         // which drives a real Retrofit client against MockWebServer.
-        repository = UserRepositoryImpl(userDao, mockk<UserApi>(), testDispatcher)
+        repository = UserRepositoryImpl(userDao, mockk<UserApi>(), MergeConflictResolver(), testDispatcher)
     }
 
     @Test

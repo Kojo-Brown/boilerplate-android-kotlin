@@ -66,9 +66,10 @@ import kotlinx.coroutines.flow.map
  * costs a request* is decided one layer down by `CachingUserRepository`, which already holds a
  * freshness window and coalesces concurrent callers onto one request. Adding the same decision
  * here would be a second place to make it and a second place for it to be wrong: a two-pane
- * layout subscribing twice would then have to agree with itself about how old is too old. When
- * a row gains an `updatedAt` — the next item in `SPEC.md` — a per-row age policy still belongs
- * in the repository, next to the column that carries it.
+ * layout subscribing twice would then have to agree with itself about how old is too old. A
+ * per-row age policy would still belong in the repository, next to the column carrying it; the
+ * row has since gained a `version`, but deliberately no timestamp — see
+ * `docs/conflict-resolution.md`.
  *
  * ## Retrying
  *

@@ -209,10 +209,16 @@ networkBoundResource(query = { getUser(id).retryWithBackoff() }, refresh = { …
   user. That is exactly why the list refresh is a fan-out reporting `FanOutResult` rather than
   a resource ([concurrent fan-out](./fan-out.md)), and why `HomeViewModel` keeps its explicit
   refresh button. A `users?ids=` endpoint would change the answer.
-- **Writes.** This is a read pattern. Local edits reaching the server is an outbox, and
-  reconciling one that lands on a changed row is the conflict-resolution item that follows this
-  one in `SPEC.md`.
+- **Writes.** This is a read pattern. Reconciling a local edit with a row that changed on the
+  server is [conflict resolution](./conflict-resolution.md), which is the item that followed
+  this one. Getting the edit *to* the server is still an outbox, and still open.
 - **Paging.** `RemoteMediator` is the same idea over a windowed query and is its own item.
 - **Row age.** Nothing in Room records when a row was written, so "stale" here means "the
-  refresh this subscription ran did not land", never "this row is four days old". The column
-  that would change that arrives with conflict resolution.
+  refresh this subscription ran did not land", never "this row is four days old". This said
+  the column would arrive with conflict resolution, and it did not:
+  [conflict resolution](./conflict-resolution.md) added a server-assigned `version` instead,
+  and deliberately no wall-clock column, because a timestamp sitting next to a conflict
+  resolver gets read as a tiebreaker and a skewed device clock then wins conflicts it should
+  lose. Row age belongs with the freshness policy that would read it — today an in-memory
+  window in `CachingUserRepository` — where being wrong costs a redundant request rather than
+  a lost edit.

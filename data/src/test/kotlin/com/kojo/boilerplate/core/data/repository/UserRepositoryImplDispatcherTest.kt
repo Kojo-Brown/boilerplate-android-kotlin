@@ -3,6 +3,7 @@ package com.kojo.boilerplate.core.data.repository
 import com.kojo.boilerplate.core.database.dao.UserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
 import com.kojo.boilerplate.core.domain.model.User
+import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlin.coroutines.ContinuationInterceptor
@@ -67,17 +68,27 @@ class UserRepositoryImplDispatcherTest {
         avatarUrl = null,
     )
 
+    /**
+     * A version above the stored row's, so that the sync it feeds actually writes.
+     *
+     * Conflict resolution declines to write a response identical to what is already stored
+     * (see `ConflictResolver`), and with the default version of `0` on both sides this
+     * response would be exactly that — leaving nothing for the upsert assertions below to
+     * observe and turning them green for the wrong reason. Making the response genuinely
+     * newer keeps this suite measuring what it is about, which is *where* the write runs.
+     */
     private val dto = UserDto(
         id = "1",
         displayName = "Ada Lovelace",
         email = "ada@example.com",
         avatarUrl = null,
+        version = 2,
     )
 
     private val dao = RecordingUserDao(entity)
 
     private fun repository(api: UserApi = RespondingUserApi(dto)) =
-        UserRepositoryImpl(dao, api, ioDispatcher)
+        UserRepositoryImpl(dao, api, MergeConflictResolver(), ioDispatcher)
 
     @Test
     fun `getUsers runs its query and row mapping on the injected dispatcher`() =
@@ -149,7 +160,7 @@ class UserRepositoryImplDispatcherTest {
      * `flow { }` builders rather than stored flows so that the recording happens at
      * collection time, which is the moment `flowOn` governs.
      */
-    private class RecordingUserDao(private val stored: UserEntity) : UserDao {
+    private class RecordingUserDao(private val stored: UserEntity) : UserDao() {
 
         val written = mutableListOf<UserEntity>()
 
@@ -169,6 +180,13 @@ class UserRepositoryImplDispatcherTest {
             observeByIdContext = currentCoroutineContext()[ContinuationInterceptor]
             emit(stored.takeIf { it.id == id })
         }
+
+        // Reads the last write when there has been one, so that `upsertResolving` resolves
+        // against what this DAO actually holds rather than against the constructor argument
+        // forever. Not context-recording: it is called from inside `upsertResolving`, which
+        // the upsert assertions already cover.
+        override suspend fun findById(id: String): UserEntity? =
+            written.lastOrNull { it.id == id } ?: stored.takeIf { it.id == id }
 
         override suspend fun upsert(entity: UserEntity) {
             upsertContext = currentCoroutineContext()[ContinuationInterceptor]

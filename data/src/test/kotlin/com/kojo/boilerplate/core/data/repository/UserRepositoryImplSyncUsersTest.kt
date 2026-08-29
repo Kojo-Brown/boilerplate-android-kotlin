@@ -2,6 +2,7 @@ package com.kojo.boilerplate.core.data.repository
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.kojo.boilerplate.core.database.dao.FakeUserDao
+import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -58,7 +59,7 @@ class UserRepositoryImplSyncUsersTest {
             .create(UserApi::class.java)
 
         userDao = FakeUserDao()
-        repository = UserRepositoryImpl(userDao, userApi, testDispatcher)
+        repository = UserRepositoryImpl(userDao, userApi, MergeConflictResolver(), testDispatcher)
     }
 
     @After
