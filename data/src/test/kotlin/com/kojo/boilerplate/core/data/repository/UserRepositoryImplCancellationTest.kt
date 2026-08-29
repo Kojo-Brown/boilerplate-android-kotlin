@@ -92,7 +92,12 @@ class UserRepositoryImplCancellationTest {
         runTest {
             val requestStarted = CompletableDeferred<Unit>()
             val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-            val repository = UserRepositoryImpl(userDao, HangingUserApi(requestStarted), MergeConflictResolver(), ioDispatcher())
+            val repository = UserRepositoryImpl(
+                userDao,
+                HangingUserApi(requestStarted),
+                MergeConflictResolver(),
+                ioDispatcher(),
+            )
 
             val job = launch { repository.syncUser("1") }
             requestStarted.await()
