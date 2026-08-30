@@ -34,6 +34,7 @@ include(":core:auth")
 include(":core:common")
 include(":core:domain")
 include(":core:navigation")
+include(":core:paging")
 include(":core:testing")
 include(":core:ui")
 

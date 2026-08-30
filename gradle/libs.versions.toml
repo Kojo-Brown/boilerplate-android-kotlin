@@ -40,6 +40,17 @@ room = "2.7.0"
 #
 # It also wants compileSdk 35, which is what `BoilerplateBuild.COMPILE_SDK` already is.
 work = "2.10.0"
+# Paging 3. Held on the 3.3.x line — 3.3.6 is its last release — rather than moved to the
+# newest stable, for the same reason `lifecycleRuntimeKtx` above is held at 2.8.7: Gradle
+# resolves a dependency to the *highest* version anyone in the graph asks for, so a Paging
+# release built against a later AndroidX vintage can drag `androidx.lifecycle` past 2.8.7 and
+# crash the lint bundled with AGP 8.7.3. The failure would name a lint detector rather than
+# Paging, which is what makes it worth pinning deliberately instead of tracking latest. 3.3.6
+# predates lifecycle 2.9.0 entirely, so nothing it brings in can undo that pin.
+#
+# `room-paging` is not here: it versions with the rest of Room and uses `room` above, which is
+# what keeps the generated `PagingSource` and the Room runtime reading it on the same release.
+paging = "3.3.6"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 retrofit = "2.11.0"
@@ -110,6 +121,19 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+# What lets a `@Query` return a `PagingSource<Int, UserEntity>`. Without it the DAO method
+# compiles as far as Kotlin is concerned and Room's processor fails with "Type of the parameter
+# must be a class annotated with @Entity or a collection/array of it", naming nothing about
+# Paging.
+androidx-room-paging = { group = "androidx.room", name = "room-paging", version.ref = "room" }
+
+# Paging 3
+# `paging-common` is the plain-JVM half — `PagingData`, `PagingConfig`, `PagingSource`,
+# `RemoteMediator` — and is all `:core:paging` needs to declare the contract. `paging-runtime`
+# adds the Android half (`Pager`'s `LiveData`/`RecyclerView` surface and the platform
+# dispatchers) and belongs to `:data`, which is where the `Pager` is actually constructed.
+androidx-paging-common = { group = "androidx.paging", name = "paging-common", version.ref = "paging" }
+androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", version.ref = "paging" }
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

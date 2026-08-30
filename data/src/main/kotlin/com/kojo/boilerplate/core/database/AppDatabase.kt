@@ -7,17 +7,21 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.kojo.boilerplate.core.database.converter.UserFieldSetConverter
 import com.kojo.boilerplate.core.database.dao.UserDao
+import com.kojo.boilerplate.core.database.dao.UserPagingDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
+import com.kojo.boilerplate.core.database.entity.UserPageKeyEntity
 
 @Database(
-    entities = [UserEntity::class],
-    version = 2,
+    entities = [UserEntity::class, UserPageKeyEntity::class],
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(UserFieldSetConverter::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun userDao(): UserDao
+
+    abstract fun userPagingDao(): UserPagingDao
 
     companion object {
 
@@ -47,6 +51,34 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE users ADD COLUMN version INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE users ADD COLUMN locallyChanged TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * Adds the paged list's cursor table. No data, and none needed: an empty
+         * `user_page_keys` is exactly "no page has been fetched yet", which is true of every
+         * database upgrading from version 2, and the first `REFRESH` writes the row.
+         *
+         * The `users` table is untouched on purpose. Rows already cached by `syncUser` or
+         * `syncCurrentUser` are the same rows the paged list serves — Room is the single source
+         * of truth for both — so an upgrade neither loses them nor has to re-fetch them; the
+         * mediator fills in around them.
+         *
+         * The column list has to match what Room generates for `UserPageKeyEntity` exactly,
+         * down to nullability: Room compares its own idea of the schema against the database it
+         * opens and throws on any difference. `id` is `INTEGER NOT NULL` because the property
+         * is a non-null `Int`; `nextPage` is a bare `INTEGER` because it is `Int?`, and that
+         * nullability is load-bearing — it is what tells the mediator the server has run out of
+         * pages.
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `user_page_keys` (" +
+                        "`id` INTEGER NOT NULL, " +
+                        "`nextPage` INTEGER, " +
+                        "PRIMARY KEY(`id`))",
+                )
             }
         }
     }

@@ -201,5 +201,10 @@ class UserRepositoryImplDispatcherTest {
     private class RespondingUserApi(private val dto: UserDto) : UserApi {
         override suspend fun getCurrentUser(): UserDto = dto
         override suspend fun getUser(id: String): UserDto = dto
+        // Not part of what this suite exercises. `error` rather than an empty list so a
+        // test that drifts onto the paged path fails loudly instead of silently seeing
+        // an empty page.
+        override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> =
+            error("getUsers is not used by this test")
     }
 }

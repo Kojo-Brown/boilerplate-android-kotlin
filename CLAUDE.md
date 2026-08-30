@@ -18,7 +18,7 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
    ./gradlew assembleDebug
    ```
    None of these take a project path: the tasks exist in every module, so one invocation
-   covers all thirteen. `checkModuleDependencies` is first because it is seconds of work and
+   covers all fourteen. `checkModuleDependencies` is first because it is seconds of work and
    fails on a layering violation every other gate would compile happily.
 6. Commit, `git push -u origin <branch>`, then `gh pr create`.
 7. `gh pr checks --watch` → **merge only if every check is green**:
@@ -36,7 +36,7 @@ Never commit real credentials, tokens, keys, or `.env` files. Placeholders in
 look obviously fake. Scan `git diff --cached` before every push.
 
 ## Modules
-The app is thirteen Gradle modules — `:app`, `:data`, five `:feature:*` and six `:core:*`.
+The app is fourteen Gradle modules — `:app`, `:data`, five `:feature:*` and seven `:core:*`.
 What may depend on what is declared in the root `build.gradle.kts` and enforced by
 `checkModuleDependencies`; `docs/modularisation.md` is the map. Three rules break builds:
 - A `:feature:*` module may never depend on another `:feature:*`. Take a composable slot and

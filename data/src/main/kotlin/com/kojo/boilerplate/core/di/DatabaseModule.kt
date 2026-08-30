@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.kojo.boilerplate.core.database.AppDatabase
 import com.kojo.boilerplate.core.database.dao.UserDao
+import com.kojo.boilerplate.core.database.dao.UserPagingDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -31,9 +32,12 @@ object DatabaseModule {
             AppDatabase::class.java,
             "boilerplate.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
 
     @Provides
     fun provideUserDao(db: AppDatabase): UserDao = db.userDao()
+
+    @Provides
+    fun provideUserPagingDao(db: AppDatabase): UserPagingDao = db.userPagingDao()
 }

@@ -225,5 +225,10 @@ class UserRepositoryImplConflictTest {
     private class StubUserApi(private val response: UserDto) : UserApi {
         override suspend fun getCurrentUser(): UserDto = response
         override suspend fun getUser(id: String): UserDto = response
+        // Not part of what this suite exercises. `error` rather than an empty list so a
+        // test that drifts onto the paged path fails loudly instead of silently seeing
+        // an empty page.
+        override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> =
+            error("getUsers is not used by this test")
     }
 }

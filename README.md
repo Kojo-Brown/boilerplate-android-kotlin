@@ -63,12 +63,12 @@ module's own build file is its namespace and its dependencies and nothing else.
 - [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
   costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
   `@Immutable` promises the compiler that nothing verifies.
-- [Modularisation](./docs/modularisation.md) — the thirteen-module graph, what each module
+- [Modularisation](./docs/modularisation.md) — the fourteen-module graph, what each module
   may depend on and what enforces it, and what the split actually bought (a domain layer that
   is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned
   out to be one too many).
 - [SOLID in the repository layer](./docs/solid.md) — an audit of the abstractions the data
-  flows through: where each principle holds, the eight places it does not, and why the
+  flows through: where each principle holds, the nine places it does not, and why the
   application policy that was duplicated across two ViewModels is the finding the rest of
   Phase 8 is built around.
 - [The domain layer](./docs/clean-architecture.md) — what earns a place in `core.domain`
@@ -85,6 +85,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   two policies over it: why last-write-wins means the highest version rather than the latest
   arrival, why the merge needs a per-field dirty set and not a boolean, and why there is no
   timestamp anywhere near the decision.
+- [Paging 3 over Room and the network](./docs/paging.md) — a `RemoteMediator` that only ever
+  writes, and the three places this departs from the codelab: why the cursor is one row rather
+  than a key per user, why a refresh refills the table instead of clearing it, and why a page
+  goes through the same conflict resolver every other write does.
 - [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
@@ -106,7 +110,7 @@ module's own build file is its namespace and its dependencies and nothing else.
 4. Run on emulator (API 26+) or device
 
 Every Gradle gate is unqualified — `./gradlew compileDebugKotlin`, `lintDebug`, `detekt`,
-`testDebugUnitTest` — and runs in all thirteen modules. `./gradlew checkModuleDependencies`
+`testDebugUnitTest` — and runs in all fourteen modules. `./gradlew checkModuleDependencies`
 checks the layering on its own and takes seconds.
 
 ## CI

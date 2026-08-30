@@ -28,7 +28,7 @@ jobs:
   gates:
     name: modules · compile · lint · detekt · test
     runs-on: ubuntu-latest
-    # KSP runs in most of the thirteen modules on a cold Gradle cache, and the first run on a
+    # KSP runs in most of the fourteen modules on a cold Gradle cache, and the first run on a
     # branch also downloads the compileSdk 35 platform. Forty minutes is well clear of that;
     # beyond it the job is stuck and should fail rather than hold a runner for the six-hour
     # default. Raised from thirty with the module split: the same work is now spread over more
@@ -62,7 +62,7 @@ jobs:
         run: ./gradlew checkModuleDependencies --stacktrace
 
       # No project path on any of these: the tasks exist in every module, so one invocation
-      # covers all thirteen and a module added later is picked up without an edit here.
+      # covers all fourteen and a module added later is picked up without an edit here.
       - name: compileDebugKotlin
         if: ${{ !cancelled() }}
         run: ./gradlew compileDebugKotlin --stacktrace
@@ -85,7 +85,7 @@ jobs:
         with:
           name: gate-reports
           # Every module's reports, not just `:app`'s — a lint or detekt finding can now come
-          # from any of thirteen.
+          # from any of fourteen.
           path: |
             **/build/reports/lint-results-*.html
             **/build/reports/detekt/

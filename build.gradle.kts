@@ -52,8 +52,23 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
     ":core:auth" to setOf(":core:common", ":core:testing"),
     ":core:domain" to setOf(":core:common", ":core:testing"),
     ":core:ui" to setOf(":core:common"),
+    // The paged half of the user contract. It is its own module rather than three more
+    // declarations in `:core:domain` because `PagingData` is an `androidx` type and
+    // `:core:domain` is held to having none — by the `ForbiddenImport` detekt rule, by
+    // `DomainLayerContractTest` reading the compiled constant pool, and by its own empty
+    // dependency list. `:data` implements this and `:feature:*` consumes it, so it has to be
+    // visible to both, which rules out every existing module: the only ones both can see are
+    // `:core:common`, which may not depend on `:core:domain` and so cannot name a `User`, and
+    // `:core:domain` itself. See docs/paging.md.
+    ":core:paging" to setOf(":core:common", ":core:domain", ":core:testing"),
     ":core:testing" to setOf(":core:auth", ":core:common", ":core:domain"),
-    ":data" to setOf(":core:auth", ":core:common", ":core:domain", ":core:testing"),
+    ":data" to setOf(
+        ":core:auth",
+        ":core:common",
+        ":core:domain",
+        ":core:paging",
+        ":core:testing",
+    ),
     ":feature:home" to setOf(
         ":core:common",
         ":core:domain",

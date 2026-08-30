@@ -1,6 +1,6 @@
 # Modularisation
 
-The app is thirteen Gradle modules. This page is what each one is for, what it may depend on,
+The app is fourteen Gradle modules. This page is what each one is for, what it may depend on,
 and — the part worth reading — what the split actually bought, because most of the reasons
 usually given for modularising an Android app did not apply here.
 
@@ -15,15 +15,17 @@ usually given for modularising an Android app did not apply here.
         │          │             │         │              │
         └──────────┴──────┬──────┴─────────┴──────────────┘
                           │
-              ┌───────────┼─────────────┬───────────────┐
-              │           │             │               │
-         :core:ui    :core:domain  :core:navigation  :core:auth
-              │           │                             │
+              ┌───────────┼─────────────┬───────────────┬──────────────┐
+              │           │             │               │              │
+         :core:ui    :core:domain  :core:navigation  :core:auth   :core:paging
+              │           │  ▲                          │              │
+              │           │  └──────────────────────────┼──────────────┘
               └───────────┴──────────┬──────────────────┘
                                      │
                                 :core:common
 
-  :data ──▶ :core:domain, :core:auth, :core:common      (and nothing depends on :data but :app)
+  :data ──▶ :core:domain, :core:paging, :core:auth, :core:common
+                                       (and nothing depends on :data but :app)
   :core:testing ──▶ :core:auth, :core:common, :core:domain   (test configurations only)
 ```
 
@@ -33,6 +35,7 @@ usually given for modularising an Android app did not apply here.
 | `:core:navigation` | no | `AppDestination` — the route contract, and nothing that draws one. |
 | `:core:domain` | **no, deliberately** | Use cases, sync strategies, the domain models and `UserRepository`. No Android reference at all. |
 | `:core:auth` | no | `GoogleAuthRepository` and its Credential Manager implementation. |
+| `:core:paging` | no | `PagedUserRepository` — the paged user contract, and nothing else. It exists because `PagingData` is an `androidx` type and `:core:domain` may not name one. |
 | `:core:ui` | yes | The theme, the shared widgets, the adaptive scaffold, and the `UdfViewModel`/`UiState`/`ObserveAsEvents` vocabulary. |
 | `:core:testing` | no | Fakes and JUnit rules, in `src/main` so other modules' tests can see them. Test configurations only. |
 | `:data` | no | Room, DataStore, Retrofit/OkHttp, the connectivity monitor, and the Hilt modules that bind them. |
@@ -137,6 +140,15 @@ rule in the repository.
 `docs/solid.md` finding 2 showing up as a module. When the parameter is inverted, the interface
 belongs in `:core:domain` and this module folds into `:data`.
 
+**`:core:paging` is a module a fix would *not* delete**, and the contrast with `:core:auth` is
+the useful part. Both exist because a type in their interface cannot enter `:core:domain`.
+`:core:auth`'s is a leak — a `Context` on an abstraction, which inverting removes — so that
+module is temporary. `:core:paging`'s is not: a paged read is `Flow<PagingData<User>>`, and the
+only way to spell it without `androidx` is to reimplement invalidation, placeholders and load
+state, which is the whole of Paging 3. So the module is the permanent answer, and it is
+deliberately one interface wide — everything else about paging lives in `:data` behind it. See
+[`paging.md`](./paging.md).
+
 ## Adding a module
 
 1. `include(":your:module")` in [`settings.gradle.kts`](../settings.gradle.kts).
@@ -147,3 +159,8 @@ belongs in `:core:domain` and this module folds into `:data`.
 4. If `:app` should see it, add it to `:app`'s dependencies **and** to
    `EXPECTED_MODULE_PACKAGES` in `CompiledApp` — the contract tests in `app/src/test` audit the
    assembled app, and a module they cannot see is a module they silently stop covering.
+
+   "Should see it" includes reaching `:app` transitively: `:core:paging` is on `:app`'s
+   classpath because `:data` declares it as `api`, and it needs the `EXPECTED_MODULE_PACKAGES`
+   entry for that reason alone. The offline harness cross-checks that list against the packages
+   modules actually declare, in both directions, so a missing entry is caught before CI.

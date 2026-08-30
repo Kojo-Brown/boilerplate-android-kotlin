@@ -221,20 +221,29 @@ class SolidContractTest {
          * accident of naming. Each one is a `UserRepository` that any caller could be given, so
          * the dependency-inversion and interface-segregation questions this file asks apply to
          * them exactly as they apply to `UserRepositoryImpl`.
+         *
+         * `PagedUserRepository` is a second user abstraction rather than more methods on the
+         * first, and that is an interface-segregation decision the audit records: `PagingData`
+         * is an `androidx` type and `UserRepository` lives in a layer that carries none, so the
+         * paged read could not have been a seventh method there even if splitting were the
+         * wrong call. See finding 9 in docs/solid.md.
          */
         val AUDITED_REPOSITORIES = listOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository",
             "com.kojo.boilerplate.core.auth.GoogleAuthRepositoryImpl",
+            "com.kojo.boilerplate.core.data.paging.PagedUserRepositoryImpl",
             "com.kojo.boilerplate.core.data.repository.UserRepositoryImpl",
             "com.kojo.boilerplate.core.data.repository.decorator.CachingUserRepository",
             "com.kojo.boilerplate.core.data.repository.decorator.RetryingUserRepository",
             "com.kojo.boilerplate.core.data.repository.decorator.TelemetryUserRepository",
             "com.kojo.boilerplate.core.datastore.ThemePreferencesRepository",
             "com.kojo.boilerplate.core.domain.repository.UserRepository",
+            "com.kojo.boilerplate.core.paging.PagedUserRepository",
         )
 
         val AUDITED_ABSTRACTION_METHODS = mapOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository" to listOf("signIn", "signOut"),
+            "com.kojo.boilerplate.core.paging.PagedUserRepository" to listOf("users"),
             "com.kojo.boilerplate.core.domain.repository.UserRepository" to listOf(
                 "getUser",
                 "getUsers",
@@ -262,6 +271,8 @@ class SolidContractTest {
                 "com.kojo.boilerplate.core.data.repository.decorator.RetryingUserRepository",
                 "com.kojo.boilerplate.core.data.repository.decorator.TelemetryUserRepository",
             ),
+            "com.kojo.boilerplate.core.paging.PagedUserRepository" to
+                listOf("com.kojo.boilerplate.core.data.paging.PagedUserRepositoryImpl"),
         )
 
         /** Finding 3. `MainActivity` injects this by its concrete type. */
