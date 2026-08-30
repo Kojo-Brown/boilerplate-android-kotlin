@@ -86,6 +86,7 @@ internal object CompiledApp {
         "$PACKAGE.core.domain",
         "$PACKAGE.core.event",
         "$PACKAGE.core.navigation",
+        "$PACKAGE.core.paging",
         "$PACKAGE.core.telemetry",
         "$PACKAGE.core.ui",
         "$PACKAGE.core.data",

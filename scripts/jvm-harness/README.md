@@ -62,14 +62,23 @@ seconds. Two failures it is specifically shaped to catch:
   quietly auditing less. It is hand-written, so it drifts: the theme's package stayed in it for
   a full CI run after the theme moved into `:core:ui`. Both directions are checked — an entry
   no module declares, and a module no entry covers.
+- **A reference to a same-package declaration the selection dropped.** Which files join is
+  computed from *imports*, and a declaration in the file's own package needs none — so a test
+  sitting beside the class it instantiates was selected however unbuildable that class is here.
+  `UserFieldSetConverterTest` is in the Room `@TypeConverter`'s own package, so when the
+  converter was left to CI the test still compiled against nothing and took `:data`'s entire
+  test compilation down with it. The run reported a *failure* where it should have reported a
+  skip, which is the one way this script can be actively misleading. Matched by simple name
+  against the file's text, which is coarse on purpose: a false positive costs a line under
+  `not run here:`, a false negative costs the run.
 - **An import that resolves only to another module's `test` source set.** A test source set is
   invisible from anywhere else, so this always fails in CI and is easy to miss locally — the
   file is right there in the repository. `syncStrategyFactoryOver` was exactly this, and the
   message says to move it to `:core:testing`.
 
 **Then compilation, per module, in dependency order**, each against only the classpath its build
-file entitles it to. At the time of writing: 90 of 126 `src/main` files, 37 of 49 `src/test`
-files, 272 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
+file entitles it to. At the time of writing: 102 of 149 `src/main` files, 44 of 61 `src/test`
+files, 327 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
 module with the repo's own config — the same three source sets the `detekt` convention gives the
 Gradle task, so that gate is covered in full rather than in part.
 

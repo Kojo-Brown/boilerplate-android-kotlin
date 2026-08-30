@@ -38,11 +38,20 @@ dependencies {
     implementation(project(":core:auth"))
     api(project(":core:common"))
     api(project(":core:domain"))
+    // `api` for the same reason `:core:domain` is: `PagedUserRepositoryImpl` implements an
+    // interface declared there, so the interface is part of what this module offers `:app`.
+    api(project(":core:paging"))
 
     implementation(libs.androidx.core.ktx)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    // Paging 3. `paging-runtime` is the Android artifact — `Pager` is constructed here, in the
+    // only module that can see a DAO — and `room-paging` is what lets a `@Query` return a
+    // `PagingSource`. `paging-common` arrives transitively through both and through
+    // `:core:paging`, which is where the contract that names `PagingData` lives.
+    implementation(libs.androidx.paging.runtime)
+    implementation(libs.androidx.room.paging)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.datastore.preferences)

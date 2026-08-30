@@ -20,7 +20,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
 /**
- * Values every module shares, in one place so that a bump is one edit rather than thirteen.
+ * Values every module shares, in one place so that a bump is one edit rather than fourteen.
  */
 object BoilerplateBuild {
     const val COMPILE_SDK = 35
@@ -93,7 +93,7 @@ internal fun Project.configureUnitTests() {
  * is the repository root in every module, which is what keeps path-scoped rules matching the
  * same way from wherever they are evaluated: the `ForbiddenImport` rule is scoped by a glob over
  * the `core/domain` path, and a per-module base path would make that glob mean something
- * different in each of thirteen places.
+ * different in each of fourteen places.
  *
  * That glob is deliberately not written out here. A KDoc block ends at the first `*` followed by
  * a slash, so a path glob quoted inside one closes the comment and turns the rest of the file

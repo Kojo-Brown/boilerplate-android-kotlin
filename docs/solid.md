@@ -16,11 +16,12 @@ change. The domain layer that repair introduced has its own pinned page,
 
 ## The surface that was audited
 
-Eight types carry the repository role, and the audit is the whole set:
+Ten types carry the repository role, and the audit is the whole set:
 
 | Type | Abstraction | Implementation | Bound in | Module |
 | --- | --- | --- | --- | --- |
 | `UserRepository` | interface, framework-free | `UserRepositoryImpl`, wrapped by three decorators | `RepositoryModule` | `:core:domain` / `:data` |
+| `PagedUserRepository` | interface, returns `Flow<PagingData<User>>` | `PagedUserRepositoryImpl` | `PagingModule` | `:core:paging` / `:data` |
 | `GoogleAuthRepository` | interface, takes an `android.content.Context` | `GoogleAuthRepositoryImpl` | `GoogleAuthModule` | `:core:auth` |
 | `ThemePreferencesRepository` | **none — a concrete class** | itself | injected directly | `:data` |
 
@@ -37,6 +38,16 @@ is checked to have no framework reference at all — and it cannot live in `:dat
 answer while that parameter is on the interface. Inverting the parameter would let the
 abstraction move down to `:core:domain` and `:core:auth` disappear into `:data`, which is a
 second reason to fix finding 2 beyond the one the finding itself gives.
+
+**`PagedUserRepository` is why `:core:paging` exists**, and it is the same shape of problem
+one abstraction over. A paged read is `Flow<PagingData<User>>`, `PagingData` is an `androidx`
+type, and `:core:domain` is checked to carry no framework reference at all — so this could not
+be a seventh method on `UserRepository` however much it belongs next to `getUsers()`. It cannot
+live in `:data` either, because a feature will consume it and no feature may see `:data`. That
+leaves a module of its own, exactly as `GoogleAuthRepository` did. The difference is that
+`:core:auth` exists because of a leak worth fixing (finding 2) while this one is not a leak:
+there is no framework-free way to express a paged read that does not amount to reimplementing
+Paging. See [`paging.md`](./paging.md) and finding 9.
 
 `CachingUserRepository`, `RetryingUserRepository` and `TelemetryUserRepository` are counted as
 implementations of `UserRepository`, because that is what they are: each one is a repository a
@@ -304,6 +315,7 @@ with no default is the same principle applied to the thread pool.
 | 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — still two (`saveUser`, `syncUser`). The decorators wrap all six, and wrapping is not calling: they added no caller |
 | 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | **Fixed** for both — `SyncStrategy` multibinding, and `decorateUserRepository` for cache/retry/telemetry. The fetch-and-write body itself is still closed |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
+| 9 | ISP / DIP | The user read is two abstractions — `UserRepository` and `PagedUserRepository` — and a caller has to know which one it wants | Recorded, not a defect: see below |
 
 **Findings 2 and 4 were originally attributed to the layering lint rule, and that was
 optimistic.** The rule as landed is scoped to `**/core/domain/**`, which is the scope the item
@@ -318,6 +330,16 @@ its path:
   `ui.theme` first. Only once it has somewhere framework-free to live does a rule have
   anything to enforce. See the closing section of
   [`clean-architecture.md`](./clean-architecture.md).
+
+**Finding 9 is recorded so that the split is a decision on this page rather than an accident
+of where a type had to go.** Two abstractions over one entity is the shape that usually means
+an interface was segregated for the wrong reason, so it is worth saying plainly why it is not
+that here: `getUsers()` returns every cached row on every change and `users()` returns a stream
+of pages, and neither can be expressed in terms of the other. A caller genuinely has to pick,
+and picking wrongly is visible — an unbounded list rendered from `getUsers()` re-maps the whole
+table per edit; a five-row list behind a `Pager` pays for machinery it never uses. What the
+split does cost is that `FakeUserRepository` no longer models the whole user surface, so a
+future consumer of both needs two doubles.
 
 Findings 3, 5 and 8 have no item in this phase that will pick them up. They are recorded
 rather than fixed because an audit that quietly repaired what it found would leave nothing

@@ -615,12 +615,103 @@ def top_level_names(source: Path) -> set[str]:
     return names
 
 
-def close_selection(selected: list[Path], inherited: set[str]) -> tuple[list[Path], set[str]]:
-    """Drop any selected file importing an app symbol the selection does not provide, repeatedly.
+# Comments and string literals, so that a name can be looked for in code alone. Leftmost-match
+# wins in an alternation, so `"http://x"` is consumed as a string and `// see "x"` as a comment
+# without the order of these branches mattering.
+COMMENTS_AND_STRINGS = re.compile(
+    r'"""(?:.|\n)*?"""'
+    r'|"(?:\\.|[^"\\\n])*"'
+    r"|'(?:\\.|[^'\\\n])*'"
+    r"|//[^\n]*"
+    r"|/\*(?:.|\n)*?\*/",
+)
+
+
+def code_only(text: str) -> str:
+    """[text] with every comment and string literal blanked out, positions otherwise unchanged."""
+    return COMMENTS_AND_STRINGS.sub(" ", text)
+
+
+# A declaration at column zero, which is the only kind that is genuinely top-level.
+#
+# [top_level_names] deliberately allows leading whitespace, because it answers "is this import
+# satisfied?" and over-collecting there is free: nobody imports a local `val`. It is not free
+# for [missing_sibling], which matches by *simple* name — the local `val scope` inside
+# `HomeScreen`'s composable was collected as `feature.home.scope` and then matched the word
+# "scope" in `HomeViewModel`, dropping a file the harness had compiled for months. Hence a
+# second, stricter pattern rather than a shared one.
+TOP_LEVEL_DECLARATION = re.compile(
+    r"^(?:public |internal |private |abstract |open |sealed |data |value |enum |annotation "
+    r"|inline |external |expect |actual |suspend |operator |infix )*"
+    r"(?:fun\s+interface|class|interface|object|fun|val|var|typealias)\s+"
+    r"(?:<[^>]*>\s*)?"
+    r"(?:[\w.<>?, \[\]]+\.)?"
+    r"([A-Za-z_]\w*)",
+    re.M,
+)
+
+
+def package_declarations(sources: list[Path]) -> dict[str, set[str]]:
+    """Every top-level name each package declares, over sources whether or not they compile here.
+
+    The input to [missing_sibling]. Built from the module's whole source set rather than from
+    the selection, because the point is to know about the declarations the selection *dropped*.
+    """
+    declarations: dict[str, set[str]] = {}
+    for source in sources:
+        text = code_only(source.read_text())
+        match = PACKAGE.search(text)
+        package = match.group(1) if match else ""
+        for name in TOP_LEVEL_DECLARATION.findall(text):
+            declarations.setdefault(package, set()).add(f"{package}.{name}")
+    return declarations
+
+
+def missing_sibling(source: Path, provided: set[str], siblings: dict[str, set[str]]) -> str | None:
+    """The name this file uses from its own package that the selection does not provide, if any.
+
+    An import is not the only way to name an app symbol: a declaration in the file's *own*
+    package needs none, so `close_selection`'s import walk cannot see it. That is not a corner
+    case — `UserFieldSetConverterTest` sits in the same package as the Room `@TypeConverter` it
+    instantiates, so when the converter was left to CI the test was still selected, failed to
+    compile, and took `:data`'s whole test compilation with it. The harness reported that as a
+    failure rather than as a skip, which is the opposite of what it exists to do.
+
+    Matched by simple name against the file's *code*, with comments and string literals
+    removed first. Stripping them is not a nicety: this file's neighbours are named constantly
+    in KDoc — "see `GoogleAuthRepositoryImpl`" — and matching those dropped `:feature:home`,
+    `:feature:scanner` and half of `:core:ui` from a run that had compiled all of them.
+
+    What is left is still coarse, and errs in the safe direction: a false positive skips a file
+    and prints it under `not run here`, where a false negative fails the run.
+    """
+    text = code_only(source.read_text())
+    match = PACKAGE.search(text)
+    package = match.group(1) if match else ""
+    own = top_level_names(source)
+    for name in sorted(siblings.get(package, set())):
+        if name in provided or name in own:
+            continue
+        simple = name.rsplit(".", 1)[1] if "." in name else name
+        if re.search(rf"\b{re.escape(simple)}\b", text):
+            return name
+    return None
+
+
+def close_selection(
+    selected: list[Path],
+    inherited: set[str],
+    siblings: dict[str, set[str]] | None = None,
+) -> tuple[list[Path], set[str]]:
+    """Drop any selected file naming an app symbol the selection does not provide, repeatedly.
+
+    Two ways a file can name one, and both are checked: an import of it, and a declaration in
+    the file's own package, which needs no import at all — see [missing_sibling].
 
     One pass is not enough: dropping `UserRepositoryImpl` makes every file importing *it*
     unsatisfied in turn.
     """
+    siblings = siblings or {}
     current = list(selected)
     while True:
         provided = set(inherited)
@@ -628,8 +719,8 @@ def close_selection(selected: list[Path], inherited: set[str]) -> tuple[list[Pat
             provided |= top_level_names(source)
         keep: list[Path] = []
         for source in current:
-            satisfied = True
-            for imported in IMPORT.findall(source.read_text()):
+            satisfied = missing_sibling(source, provided, siblings) is None
+            for imported in IMPORT.findall(source.read_text()) if satisfied else []:
                 if not imported.startswith(APP_PACKAGE + "."):
                     continue
                 candidate = imported
@@ -879,7 +970,9 @@ def main() -> int:
         for dependency in visible:
             inherited |= provided.get(dependency, set())
         candidates = [source for source in sources_in(module, "main") if selectable(source)]
-        selected, names = close_selection(candidates, inherited)
+        selected, names = close_selection(
+            candidates, inherited, package_declarations(sources_in(module, "main"))
+        )
         provided[path] = names
         total_main += len(sources_in(module, "main"))
         picked_main += len(selected)
@@ -911,7 +1004,14 @@ def main() -> int:
         for dependency in visible:
             inherited |= provided.get(dependency, set())
         candidates = [source for source in sources_in(module, "test") if selectable(source)]
-        selected, _ = close_selection(candidates, inherited)
+        # Both source sets: a test file's package is usually one its `main` also declares, and a
+        # `main` declaration the selection dropped is exactly what the test must not be compiled
+        # without.
+        selected, _ = close_selection(
+            candidates,
+            inherited,
+            package_declarations(sources_in(module, "main") + sources_in(module, "test")),
+        )
         total_test += len(sources_in(module, "test"))
         picked_test += len(selected)
         skipped_test += [
