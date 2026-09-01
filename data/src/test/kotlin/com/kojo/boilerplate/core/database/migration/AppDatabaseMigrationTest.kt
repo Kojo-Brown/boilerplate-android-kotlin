@@ -176,8 +176,9 @@ class AppDatabaseMigrationTest {
                 schema.allQueries.forEach { db.execSQL(it) }
             }
 
-            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) =
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
                 error("A database created at $version was asked to upgrade to $newVersion")
+            }
         }
         val configuration = SupportSQLiteOpenHelper.Configuration.builder(context)
             .name(DATABASE_NAME)

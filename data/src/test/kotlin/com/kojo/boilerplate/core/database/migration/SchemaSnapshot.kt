@@ -52,11 +52,14 @@ data class TableSnapshot(
     val columns: List<ColumnSnapshot>,
     val indices: List<IndexSnapshot>,
 ) {
-    fun render(): String = buildString {
-        appendLine("TABLE $name")
-        columns.forEach { appendLine("  ${it.render()}") }
-        indices.forEach { appendLine("  ${it.render()}") }
-    }
+    /**
+     * Deliberately not `buildString`: inside its lambda the receiver is a `StringBuilder`, and
+     * `CharSequence.indices` — the extension giving a string's index range — wins over this
+     * class's own [indices] property, so the body silently iterated an `IntRange`.
+     */
+    fun render(): String =
+        (listOf("TABLE $name") + columns.map { "  ${it.render()}" } + indices.map { "  ${it.render()}" })
+            .joinToString("\n")
 }
 
 /**
