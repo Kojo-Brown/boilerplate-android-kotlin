@@ -26,6 +26,24 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
 
         /**
+         * Every migration this database knows about, in one place.
+         *
+         * There is exactly one list because there are two callers — `DatabaseModule`, which
+         * builds the database the app runs on, and `AppDatabaseMigrationTest`, which is the
+         * only thing that ever executes a migration. Two lists would let the test pass while
+         * the app shipped without the migration it was testing, which is the one arrangement
+         * worse than having no test at all.
+         *
+         * `everyVersionStepHasAMigration` checks this against the exported schema versions, so
+         * a `Migration` written and left unregistered fails the build rather than the upgrade.
+         *
+         * A `List` rather than the `Array` `addMigrations` takes as a vararg, so that neither
+         * caller needs a spread operator — which copies the array at every call site and which
+         * detekt's `SpreadOperator` rule flags for that reason.
+         */
+        val ALL_MIGRATIONS: List<Migration> get() = listOf(MIGRATION_1_2, MIGRATION_2_3)
+
+        /**
          * Adds the two columns conflict resolution needs, without touching the rows.
          *
          * Both are `NOT NULL DEFAULT`, which is what lets this be two `ALTER TABLE`s rather

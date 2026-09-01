@@ -26,14 +26,18 @@ object DatabaseModule {
      */
     @Provides
     @Singleton
-    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(
+    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
+        val builder = Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             "boilerplate.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
-            .build()
+        // `AppDatabase.ALL_MIGRATIONS` rather than the two constants written out here: it is the
+        // same list `AppDatabaseMigrationTest` runs, and the point of there being one list is
+        // that the app cannot ship without a migration the suite proved works.
+        AppDatabase.ALL_MIGRATIONS.forEach { builder.addMigrations(it) }
+        return builder.build()
+    }
 
     @Provides
     fun provideUserDao(db: AppDatabase): UserDao = db.userDao()
