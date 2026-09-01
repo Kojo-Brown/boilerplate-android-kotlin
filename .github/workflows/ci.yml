@@ -67,6 +67,37 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./gradlew compileDebugKotlin --stacktrace
 
+      # The exported schemas under data/schemas are what AppDatabaseMigrationTest starts every
+      # migration from, so a version bump whose schema was generated and never committed turns
+      # that whole suite into a test of nothing — it would migrate from the newest file it has
+      # and pass. Room writes the schemas during KSP, which the step above ran; this checks that
+      # what it just wrote is what the commit carries.
+      #
+      # Both halves are needed: a changed file shows up in `git diff`, and a brand-new version's
+      # file is untracked, which `git diff` does not see at all.
+      #
+      # On a Gradle cache hit `:data:copyRoomSchemas` reports NO-SOURCE, because KSP did not
+      # re-run and so wrote no schema, and this step then compares the commit against itself.
+      # That is not a hole: KSP's inputs are `:data`'s sources, so a run where it did not re-run
+      # is a run where the schema could not have changed. The step only ever has something to
+      # say on the runs where it could.
+      - name: Room schemas are committed
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          untracked="$(git ls-files --others --exclude-standard -- data/schemas)"
+          if [ -n "$untracked" ]; then
+            echo "$untracked"
+            echo "::error::Room exported a schema that is not in the commit. Run the build locally and add data/schemas."
+            exit 1
+          fi
+          if ! git diff --exit-code -- data/schemas; then
+            echo "::error::data/schemas differs from what Room just generated. Commit the regenerated schema."
+            exit 1
+          fi
+          echo "Exported schemas match the commit:"
+          git ls-files -- data/schemas
+
       - name: lintDebug
         if: ${{ !cancelled() }}
         run: ./gradlew lintDebug --stacktrace

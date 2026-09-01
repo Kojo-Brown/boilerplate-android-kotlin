@@ -60,6 +60,13 @@ credentials = "1.5.0"
 googleid = "1.1.1"
 mockk = "1.13.14"
 junit-jupiter = "5.11.4"
+# Robolectric is here for exactly one thing: `AppDatabaseMigrationTest`, which needs a real
+# SQLite database and a real `Context` and has nowhere else to run — `androidTest` never
+# executes in this repository (Phase 12's emulator matrix is still unchecked), so a migration
+# suite written as an instrumented test would be a gate that never fires. 4.16.1 is the newest
+# stable release and the first line that ships an `android-all` image for API 35, which is this
+# repository's `compileSdk` and what `@Config(sdk = …)` in that test asks for.
+robolectric = "4.16.1"
 # 0.4.0 and 0.5.x are both published, and both are the wrong pin for Kotlin 2.1.0.
 # 0.5.0/0.5.1 are compiled against kotlin-stdlib 2.3.0, whose metadata this compiler
 # cannot read at all; 0.4.0 is on 2.1.20, which reads fine but drags the stdlib ahead
@@ -192,6 +199,10 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 junit-jupiter-api = { group = "org.junit.jupiter", name = "junit-jupiter-api", version.ref = "junit-jupiter" }
 junit-jupiter-engine = { group = "org.junit.jupiter", name = "junit-jupiter-engine", version.ref = "junit-jupiter" }
 junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engine", version.ref = "junit-jupiter" }
+# `RobolectricTestRunner` is a JUnit 4 runner, so it reaches the JUnit Platform through the
+# vintage engine above — which is already on every module's test runtime for the JUnit 4
+# classes that predate the JUnit 5 move.
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 # Adaptive
 androidx-material3-adaptive-navigation-suite = { group = "androidx.compose.material3", name = "material3-adaptive-navigation-suite" }

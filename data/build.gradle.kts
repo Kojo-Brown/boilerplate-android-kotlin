@@ -18,6 +18,16 @@ android {
     buildFeatures {
         buildConfig = true
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric reads the merged manifest, resources and assets through the
+            // `com.android.tools.test_config.properties` file AGP only writes when this is on.
+            // Without it `RobolectricTestRunner` cannot find a package name and fails every
+            // test in `AppDatabaseMigrationTest` before a line of it runs.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 // The Room Gradle Plugin registers `room` on the project, not on the `android` extension, so
@@ -72,6 +82,11 @@ dependencies {
 
     testImplementation(project(":core:testing"))
     testImplementation(libs.okhttp.mockwebserver)
+    // `AppDatabaseMigrationTest` opens real SQLite databases off `src/test`, which needs an
+    // Android runtime in the JVM test JVM. This is the only module that has one, and the
+    // dependency stays here rather than in `sharedTestDependencies()` for that reason: the
+    // other thirteen modules would pay Robolectric's startup cost for nothing.
+    testImplementation(libs.robolectric)
 
     // `UserDaoTest` stands up an in-memory Room database and reaches for
     // `InstrumentationRegistry`, which arrives with the Compose test rig's `androidx.test`
