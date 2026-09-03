@@ -16,12 +16,13 @@ change. The domain layer that repair introduced has its own pinned page,
 
 ## The surface that was audited
 
-Ten types carry the repository role, and the audit is the whole set:
+Twelve types carry the repository role, and the audit is the whole set:
 
 | Type | Abstraction | Implementation | Bound in | Module |
 | --- | --- | --- | --- | --- |
 | `UserRepository` | interface, framework-free | `UserRepositoryImpl`, wrapped by three decorators | `RepositoryModule` | `:core:domain` / `:data` |
 | `PagedUserRepository` | interface, returns `Flow<PagingData<User>>` | `PagedUserRepositoryImpl` | `PagingModule` | `:core:paging` / `:data` |
+| `PendingUserChangeRepository` | interface, one method, framework-free | `PendingUserChangeRepositoryImpl`, undecorated | `RepositoryModule` | `:core:domain` / `:data` |
 | `GoogleAuthRepository` | interface, takes an `android.content.Context` | `GoogleAuthRepositoryImpl` | `GoogleAuthModule` | `:core:auth` |
 | `ThemePreferencesRepository` | **none — a concrete class** | itself | injected directly | `:data` |
 
@@ -48,6 +49,15 @@ leaves a module of its own, exactly as `GoogleAuthRepository` did. The differenc
 `:core:auth` exists because of a leak worth fixing (finding 2) while this one is not a leak:
 there is no framework-free way to express a paged read that does not amount to reimplementing
 Paging. See [`paging.md`](./paging.md) and finding 9.
+
+**`PendingUserChangeRepository` is a split by judgement rather than by language.** Unlike the
+two above it, `pushPendingChanges` *could* have been a seventh method on `UserRepository`: it
+takes and returns nothing the domain layer cannot name. It is separate because all three
+decorators would then have had to answer for it and all three answers would have been wrong — a
+cache that suppressed a write would lose an edit, in-process retry is the wrong timescale for a
+push that has to survive the process, and only telemetry would have been merely unnecessary. Its
+own KDoc argues each one. See [idempotency](./idempotency.md), and finding 6 below for what it
+does to the arithmetic there.
 
 `CachingUserRepository`, `RetryingUserRepository` and `TelemetryUserRepository` are counted as
 implementations of `UserRepository`, because that is what they are: each one is a repository a
@@ -238,6 +248,13 @@ view models — which between them call exactly one method — are tested throug
 has to model the whole thing, and a seventh method would enlarge every one of those tests
 without any of them wanting it.
 
+**The idempotency item is the first one to have declined to add that seventh method.** The push
+needed a home, `pushPendingChanges` would have read perfectly well next to `saveUser`, and it
+went onto `PendingUserChangeRepository` instead — one method, one implementation, no decorators,
+and nothing added to the six that `FakeUserRepository` and `ObserveUserProfileUseCaseTest`'s
+hand-written double already carry. The cost is a second interface for a caller to know about,
+which is the trade finding 9 records for `PagedUserRepository` and is the same trade here.
+
 The profile view models were the sharpest case: each needed `(String) -> Flow<User?>` and
 nothing else, and each depended on a six-method interface to get it. Both now depend on
 `ObserveUserProfileUseCase`, which is the single-method surface they wanted.
@@ -312,7 +329,7 @@ with no default is the same principle applied to the thread pool.
 | 3 | DIP | `ThemePreferencesRepository` has no interface and `MainActivity` depends on the concrete type | Open |
 | 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | Open |
 | 5 | LSP | `FakeUserRepository.syncUser`/`syncCurrentUser` do not cache, and unknown ids succeed with a fabricated user | Open |
-| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — still two (`saveUser`, `syncUser`). The decorators wrap all six, and wrapping is not calling: they added no caller |
+| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — still one (`saveUser`; `syncUser` gained `ObserveUserProfileUseCase`). Still six methods: the idempotency item put its push on a separate interface rather than making it seven |
 | 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | **Fixed** for both — `SyncStrategy` multibinding, and `decorateUserRepository` for cache/retry/telemetry. The fetch-and-write body itself is still closed |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
 | 9 | ISP / DIP | The user read is two abstractions — `UserRepository` and `PagedUserRepository` — and a caller has to know which one it wants | Recorded, not a defect: see below |

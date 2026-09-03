@@ -227,16 +227,24 @@ class SolidContractTest {
          * is an `androidx` type and `UserRepository` lives in a layer that carries none, so the
          * paged read could not have been a seventh method there even if splitting were the
          * wrong call. See finding 9 in docs/solid.md.
+         *
+         * `PendingUserChangeRepository` is a third one, and the split there is a judgement
+         * rather than a language constraint: `pushPendingChanges` could have been a seventh
+         * method on `UserRepository` and was kept out because all three decorators would have
+         * had to implement it and all three answers would have been wrong. Its own KDoc gives
+         * them one at a time.
          */
         val AUDITED_REPOSITORIES = listOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository",
             "com.kojo.boilerplate.core.auth.GoogleAuthRepositoryImpl",
             "com.kojo.boilerplate.core.data.paging.PagedUserRepositoryImpl",
+            "com.kojo.boilerplate.core.data.repository.PendingUserChangeRepositoryImpl",
             "com.kojo.boilerplate.core.data.repository.UserRepositoryImpl",
             "com.kojo.boilerplate.core.data.repository.decorator.CachingUserRepository",
             "com.kojo.boilerplate.core.data.repository.decorator.RetryingUserRepository",
             "com.kojo.boilerplate.core.data.repository.decorator.TelemetryUserRepository",
             "com.kojo.boilerplate.core.datastore.ThemePreferencesRepository",
+            "com.kojo.boilerplate.core.domain.repository.PendingUserChangeRepository",
             "com.kojo.boilerplate.core.domain.repository.UserRepository",
             "com.kojo.boilerplate.core.paging.PagedUserRepository",
         )
@@ -244,6 +252,8 @@ class SolidContractTest {
         val AUDITED_ABSTRACTION_METHODS = mapOf(
             "com.kojo.boilerplate.core.auth.GoogleAuthRepository" to listOf("signIn", "signOut"),
             "com.kojo.boilerplate.core.paging.PagedUserRepository" to listOf("users"),
+            "com.kojo.boilerplate.core.domain.repository.PendingUserChangeRepository" to
+                listOf("pushPendingChanges"),
             "com.kojo.boilerplate.core.domain.repository.UserRepository" to listOf(
                 "getUser",
                 "getUsers",
@@ -273,6 +283,8 @@ class SolidContractTest {
             ),
             "com.kojo.boilerplate.core.paging.PagedUserRepository" to
                 listOf("com.kojo.boilerplate.core.data.paging.PagedUserRepositoryImpl"),
+            "com.kojo.boilerplate.core.domain.repository.PendingUserChangeRepository" to
+                listOf("com.kojo.boilerplate.core.data.repository.PendingUserChangeRepositoryImpl"),
         )
 
         /** Finding 3. `MainActivity` injects this by its concrete type. */

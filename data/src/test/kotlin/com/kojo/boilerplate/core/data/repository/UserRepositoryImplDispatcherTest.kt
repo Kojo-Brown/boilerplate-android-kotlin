@@ -3,8 +3,8 @@ package com.kojo.boilerplate.core.data.repository
 import com.kojo.boilerplate.core.database.dao.UserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
 import com.kojo.boilerplate.core.domain.model.User
-import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlin.coroutines.ContinuationInterceptor
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -88,7 +88,7 @@ class UserRepositoryImplDispatcherTest {
     private val dao = RecordingUserDao(entity)
 
     private fun repository(api: UserApi = RespondingUserApi(dto)) =
-        UserRepositoryImpl(dao, api, MergeConflictResolver(), ioDispatcher)
+        userRepositoryOver(dao, api, ioDispatcher)
 
     @Test
     fun `getUsers runs its query and row mapping on the injected dispatcher`() =
@@ -196,6 +196,10 @@ class UserRepositoryImplDispatcherTest {
         override suspend fun delete(entity: UserEntity) {
             written.removeAll { it.id == entity.id }
         }
+
+        // Abstract on `UserDao`, so it has to be here; this suite does not push anything.
+        override suspend fun findPendingChanges(): List<UserEntity> =
+            written.filter { it.locallyChanged.isNotEmpty() }
     }
 
     private class RespondingUserApi(private val dto: UserDto) : UserApi {
@@ -206,5 +210,13 @@ class UserRepositoryImplDispatcherTest {
         // an empty page.
         override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> =
             error("getUsers is not used by this test")
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 }

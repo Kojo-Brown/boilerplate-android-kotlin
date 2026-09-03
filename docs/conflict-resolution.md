@@ -200,10 +200,13 @@ quietly make an unversioned backend stop updating rows.
 
 ## What this does not do
 
-- **Push.** Nothing here sends a local edit anywhere, so a field that stays divergent keeps
-  beating the server's value on this device on every sync, forever. Merging is the read half of
-  a bidirectional sync and it is only half; the write half is an outbox, and it is what turns
-  "unpushed" from a permanent state into a transient one.
+- **Push.** Nothing *here* sends a local edit anywhere — merging is the read half of a
+  bidirectional sync, and it is only half. The write half landed with the item after this one
+  and is [idempotency](./idempotency.md): the background sync pushes the pending fields before
+  it fetches, each under the client-generated key the row is holding, which is what turns
+  "unpushed" from a permanent state into a transient one. What is still true here is that a
+  resolver never pushes and never renames a mutation; it can shrink a row's pending set or
+  clear it, and the key follows the set.
 - **Merge within a field.** Two clients editing one display name still produce a winner rather
   than a combination. Character-level merging needs an operational transform or a CRDT, which
   is a different class of machinery and a different data model.

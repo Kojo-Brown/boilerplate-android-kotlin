@@ -8,6 +8,7 @@ import com.kojo.boilerplate.core.domain.sync.conflict.LastWriteWinsConflictResol
 import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.domain.sync.conflict.UserField
 import com.kojo.boilerplate.core.network.api.UserApi
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -30,6 +31,10 @@ import org.junit.jupiter.api.Test
 class UserRepositoryImplConflictTest {
 
     private val testDispatcher = StandardTestDispatcher()
+
+    // Named keys rather than UUIDs, so an assertion about *which* mutation a row is holding is
+    // writable at all. See SequentialIdempotencyKeyGenerator.
+    private val idempotencyKeys = SequentialIdempotencyKeyGenerator()
 
     private val ada = User(
         id = "1",
@@ -63,7 +68,7 @@ class UserRepositoryImplConflictTest {
         dao: FakeUserDao,
         response: UserDto,
         resolver: ConflictResolver = MergeConflictResolver(),
-    ) = UserRepositoryImpl(dao, StubUserApi(response), resolver, testDispatcher)
+    ) = userRepositoryOver(dao, StubUserApi(response), testDispatcher, resolver, idempotencyKeys)
 
     // --- saveUser records the edit -------------------------------------------------------
 
@@ -230,5 +235,13 @@ class UserRepositoryImplConflictTest {
         // an empty page.
         override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> =
             error("getUsers is not used by this test")
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 }

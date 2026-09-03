@@ -32,6 +32,18 @@ class FakeUserDao(initialEntities: List<UserEntity> = emptyList()) : UserDao() {
     override suspend fun findById(id: String): UserEntity? =
         _entities.value.firstOrNull { it.id == id }
 
+    /**
+     * The real query is `WHERE locallyChanged != ''`, which is SQL for "the stored set is not
+     * the empty one" — `UserFieldSetConverter` writes the empty set as the empty string. Here
+     * the set has not been through the converter, so the equivalent test is on the set itself.
+     *
+     * Ordered by id like the query it stands in for. Nothing asserts on the order, but a fake
+     * that returns rows in insertion order while the database returns them sorted is a
+     * difference that shows up as a test passing here and failing on a device.
+     */
+    override suspend fun findPendingChanges(): List<UserEntity> =
+        _entities.value.filter { it.locallyChanged.isNotEmpty() }.sortedBy { it.id }
+
     override suspend fun upsert(entity: UserEntity) {
         _entities.update { current ->
             val index = current.indexOfFirst { it.id == entity.id }

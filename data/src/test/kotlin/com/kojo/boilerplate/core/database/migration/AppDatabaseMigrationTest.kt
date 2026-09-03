@@ -12,6 +12,7 @@ import java.io.File
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -168,6 +169,67 @@ class AppDatabaseMigrationTest {
         assertNull(cursor)
     }
 
+    /**
+     * `MIGRATION_3_4`'s backfill, which is the one migration in this database that writes data.
+     *
+     * A version-3 database can already hold rows with pending fields — `saveUser` has marked
+     * them since version 2 and nothing has ever pushed one — and the invariant the push path
+     * reasons from is that a pending row has a key. Adding the column and leaving it NULL would
+     * strand exactly those edits: the push skips a row it cannot name, and minting a name at
+     * send time is the one thing that would undo the whole guarantee.
+     */
+    @Test
+    fun migratingFromVersion3NamesTheEditsItFindsAndNothingElse() = runTest {
+        createDatabaseAt(VERSION_BEFORE_IDEMPOTENCY_KEYS) { db ->
+            db.execSQL(
+                "INSERT INTO users (id, displayName, email, avatarUrl, version, locallyChanged) " +
+                    "VALUES ('dirty', 'Ada', 'ada@example.com', NULL, 7, 'DISPLAY_NAME')",
+            )
+            db.execSQL(
+                "INSERT INTO users (id, displayName, email, avatarUrl, version, locallyChanged) " +
+                    "VALUES ('clean', 'Grace', 'grace@example.com', NULL, 7, '')",
+            )
+        }
+
+        val rows = withMigratedDatabase { database ->
+            listOf("dirty", "clean").associateWith { requireNotNull(database.userDao().findById(it)) }
+        }
+
+        assertNotNull(
+            "A row carrying an unpushed edit must come out of the upgrade with a key, or the " +
+                "push has nothing safe to call it",
+            rows.getValue("dirty").pendingChangeKey,
+        )
+        assertNull(
+            "A row with nothing pending must not be named — a key here is a push waiting to " +
+                "send a change nobody made",
+            rows.getValue("clean").pendingChangeKey,
+        )
+    }
+
+    /**
+     * Two rows, two names. `hex(randomblob(16))` is evaluated per row rather than once for the
+     * statement; a constant would give every stranded edit on the device the same name, and a
+     * server that deduplicates would apply the first and drop the rest.
+     */
+    @Test
+    fun migratingFromVersion3NamesEachEditSeparately() = runTest {
+        createDatabaseAt(VERSION_BEFORE_IDEMPOTENCY_KEYS) { db ->
+            listOf("a", "b").forEach { id ->
+                db.execSQL(
+                    "INSERT INTO users (id, displayName, email, avatarUrl, version, locallyChanged) " +
+                        "VALUES ('$id', 'Ada', '$id@example.com', NULL, 7, 'DISPLAY_NAME')",
+                )
+            }
+        }
+
+        val keys = withMigratedDatabase { database ->
+            listOf("a", "b").map { requireNotNull(database.userDao().findById(it)).pendingChangeKey }
+        }
+
+        assertTrue("Both rows were named the same thing: $keys", keys.toSet().size == 2)
+    }
+
     /** Builds the database file at [version] from the schema Room exported for it. */
     private fun createDatabaseAt(version: Int, seed: (SupportSQLiteDatabase) -> Unit = {}) {
         val schema = ExportedSchema.read(schemaDirectory, version)
@@ -247,6 +309,9 @@ class AppDatabaseMigrationTest {
 
         /** The version that introduced `users.version` and `users.locallyChanged`. */
         private const val VERSION_WITH_CONFLICT_COLUMNS = 2
+
+        /** The last version before `users.pendingChangeKey` existed. */
+        private const val VERSION_BEFORE_IDEMPOTENCY_KEYS = 3
 
         private const val SEEDED_SERVER_VERSION = 7L
     }

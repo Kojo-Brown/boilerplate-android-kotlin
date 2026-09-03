@@ -211,7 +211,10 @@ networkBoundResource(query = { getUser(id).retryWithBackoff() }, refresh = { …
   refresh button. A `users?ids=` endpoint would change the answer.
 - **Writes.** This is a read pattern. Reconciling a local edit with a row that changed on the
   server is [conflict resolution](./conflict-resolution.md), which is the item that followed
-  this one. Getting the edit *to* the server is still an outbox, and still open.
+  this one. Getting the edit *to* the server is [idempotency](./idempotency.md), which is the
+  item after that: the background sync pushes every row with pending fields before it fetches,
+  each under a client-generated key that survives the process, so a retry that arrives hours
+  later applies the change once rather than again.
 - **Paging.** `RemoteMediator` is the same idea over a windowed query and is its own item.
 - **Row age.** Nothing in Room records when a row was written, so "stale" here means "the
   refresh this subscription ran did not land", never "this row is four days old". This said

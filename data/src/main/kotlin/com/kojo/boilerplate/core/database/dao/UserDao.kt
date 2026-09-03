@@ -33,6 +33,28 @@ abstract class UserDao {
     @Query("SELECT * FROM users WHERE id = :id")
     abstract suspend fun findById(id: String): UserEntity?
 
+    /**
+     * Every row holding an edit the server has not acknowledged.
+     *
+     * The push queue, and it is the `users` table itself rather than a table beside it — see
+     * `PendingUserChangeRepository` for why one unsent mutation per row is the right bound for
+     * a profile edit and the wrong one for anything that accumulates.
+     *
+     * `locallyChanged != ''` is the emptiness test in the storage format's own terms:
+     * `UserFieldSetConverter` joins the set with commas, so the empty set is the empty string
+     * and nothing else can be. Comparing against `''` rather than reading every row and
+     * filtering in Kotlin keeps the scan in SQLite, which matters on the only caller there is —
+     * a background worker over a table of every user the app has ever cached, almost none of
+     * which have anything pending.
+     *
+     * Ordered by [UserEntity.id] so a push covers the rows in a stable order. Nothing depends on
+     * *which* order, but an unordered query lets the same set of rows come back differently
+     * between runs, and a flaky ordering is a flaky test the day someone asserts on the first
+     * request.
+     */
+    @Query("SELECT * FROM users WHERE locallyChanged != '' ORDER BY id ASC")
+    abstract suspend fun findPendingChanges(): List<UserEntity>
+
     @Upsert
     abstract suspend fun upsert(entity: UserEntity)
 

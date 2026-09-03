@@ -89,6 +89,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   writes, and the three places this departs from the codelab: why the cursor is one row rather
   than a key per user, why a refresh refills the table instead of clearing it, and why a page
   goes through the same conflict resolver every other write does.
+- [Idempotent sync requests](./docs/idempotency.md) — a client-generated key per mutation, so a
+  retry after a lost response applies the change once: why the key is stored rather than derived
+  from the change, why it is minted at save time and never at send time, and why an
+  acknowledgement compares keys before clearing anything.
 - [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
