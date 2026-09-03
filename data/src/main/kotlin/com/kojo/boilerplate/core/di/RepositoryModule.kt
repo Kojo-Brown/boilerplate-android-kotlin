@@ -1,9 +1,13 @@
 package com.kojo.boilerplate.core.di
 
 import com.kojo.boilerplate.core.coroutines.ApplicationScope
+import com.kojo.boilerplate.core.data.repository.PendingUserChangeRepositoryImpl
 import com.kojo.boilerplate.core.data.repository.UserRepositoryImpl
 import com.kojo.boilerplate.core.data.repository.decorator.decorateUserRepository
+import com.kojo.boilerplate.core.data.sync.UuidIdempotencyKeyGenerator
+import com.kojo.boilerplate.core.domain.repository.PendingUserChangeRepository
 import com.kojo.boilerplate.core.domain.repository.UserRepository
+import com.kojo.boilerplate.core.domain.sync.IdempotencyKeyGenerator
 import com.kojo.boilerplate.core.telemetry.LogcatRepositoryTelemetry
 import com.kojo.boilerplate.core.telemetry.RepositoryTelemetry
 import dagger.Binds
@@ -32,6 +36,30 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindRepositoryTelemetry(impl: LogcatRepositoryTelemetry): RepositoryTelemetry
+
+    /**
+     * Swap this binding to change how a mutation is named — but read
+     * [UuidIdempotencyKeyGenerator]'s KDoc first: the two obvious alternatives, a hash of the
+     * change and a counter, are each broken in a way that only shows up as a silently dropped
+     * edit.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindIdempotencyKeyGenerator(
+        impl: UuidIdempotencyKeyGenerator,
+    ): IdempotencyKeyGenerator
+
+    /**
+     * Bound undecorated, unlike [UserRepository] above, and
+     * `PendingUserChangeRepository`'s KDoc gives the reason for each of the three layers it does
+     * without: a cache would suppress a write, in-process retry is the wrong scale for a push
+     * that has to survive the process, and telemetry is the one real loss.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindPendingUserChangeRepository(
+        impl: PendingUserChangeRepositoryImpl,
+    ): PendingUserChangeRepository
 
     companion object {
 

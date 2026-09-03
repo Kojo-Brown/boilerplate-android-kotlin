@@ -5,13 +5,10 @@ import androidx.paging.LoadType
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
 import com.kojo.boilerplate.core.common.safeCall
+import com.kojo.boilerplate.core.data.repository.resolvedEntity
 import com.kojo.boilerplate.core.database.dao.UserPagingDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
-import com.kojo.boilerplate.core.database.entity.toEntity
-import com.kojo.boilerplate.core.database.entity.toVersioned
-import com.kojo.boilerplate.core.domain.sync.conflict.ConflictResolution
 import com.kojo.boilerplate.core.domain.sync.conflict.ConflictResolver
-import com.kojo.boilerplate.core.domain.sync.conflict.VersionedUser
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.toVersioned
 import javax.inject.Inject
@@ -122,6 +119,13 @@ class UsersRemoteMediator @Inject constructor(
      * user and preserves the order the server sent them in. The lambda handed to
      * [UserPagingDao.commitPage] is pure and non-suspending, as that method requires: it runs
      * on the transaction's thread.
+     *
+     * A fetched page goes through [resolvedEntity] — the same resolution the single-row fetch
+     * and the push both use. It used to be a private copy of those six lines here, and the copy
+     * is what let this path quietly stop carrying a row's idempotency key when the column was
+     * added: a page that merged over an unpushed edit would have kept the edit and dropped the
+     * name for it, stranding the change. Nothing noticed until `toEntity` was made to require
+     * the key, which is what that parameter is for.
      */
     private suspend fun fetchAndStore(page: Int, perPage: Int): Boolean {
         val response = userApi.getUsers(page = page, perPage = perPage)
@@ -131,17 +135,11 @@ class UsersRemoteMediator @Inject constructor(
         pagingDao.commitPage(
             nextPage = if (endOfPaginationReached) null else page + 1,
             userIds = remote.keys.toList(),
-            resolve = { id, local -> resolveRow(remote.getValue(id), local) },
+            resolve = { id, local -> conflictResolver.resolvedEntity(local, remote.getValue(id)) },
         )
 
         return endOfPaginationReached
     }
-
-    private fun resolveRow(remote: VersionedUser, local: UserEntity?): UserEntity? =
-        when (val resolution = conflictResolver.resolve(local?.toVersioned(), remote)) {
-            ConflictResolution.KeepLocal -> null
-            is ConflictResolution.Write -> resolution.record.toEntity()
-        }
 
     private companion object {
         /** The API is 1-indexed; page 1 is the beginning of the list. */

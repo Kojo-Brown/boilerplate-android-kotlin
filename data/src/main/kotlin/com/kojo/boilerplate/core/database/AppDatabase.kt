@@ -13,7 +13,7 @@ import com.kojo.boilerplate.core.database.entity.UserPageKeyEntity
 
 @Database(
     entities = [UserEntity::class, UserPageKeyEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(UserFieldSetConverter::class)
@@ -41,7 +41,8 @@ abstract class AppDatabase : RoomDatabase() {
          * caller needs a spread operator — which copies the array at every call site and which
          * detekt's `SpreadOperator` rule flags for that reason.
          */
-        val ALL_MIGRATIONS: List<Migration> get() = listOf(MIGRATION_1_2, MIGRATION_2_3)
+        val ALL_MIGRATIONS: List<Migration>
+            get() = listOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         /**
          * Adds the two columns conflict resolution needs, without touching the rows.
@@ -96,6 +97,50 @@ abstract class AppDatabase : RoomDatabase() {
                         "`id` INTEGER NOT NULL, " +
                         "`nextPage` INTEGER, " +
                         "PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        /**
+         * Adds the idempotency key that names a row's unsent edit, and — unlike the two
+         * migrations above — writes data, because leaving these rows alone would be wrong.
+         *
+         * ## Why the backfill is not optional
+         *
+         * `UserEntity.pendingChangeKey` is non-null exactly when `locallyChanged` is non-empty,
+         * and a version-3 database can hold rows that are already dirty: `saveUser` has marked
+         * fields since version 2 and nothing has ever pushed them. Adding a bare NULL column
+         * would create rows breaking that invariant on the first launch after an upgrade, and
+         * the push would have to choose between skipping them — an edit stranded forever — and
+         * minting a key at send time, which is the one thing a key must never be, because a
+         * key minted per attempt names a different mutation on every retry.
+         *
+         * ## Why any key is the right key for them
+         *
+         * These edits have never been sent. There was no code that could send them, so no
+         * server has seen a mutation under any name, and there is nothing for a key to
+         * collide with or to have to match. The first name assigned is therefore free, and
+         * assigning it here — once, at upgrade — is what makes it stable across the retries
+         * that follow.
+         *
+         * `hex(randomblob(16))` is SQLite's own 128 random bits, the same width as the UUID
+         * `UuidIdempotencyKeyGenerator` produces at runtime. It is deliberately *not* derived
+         * from the row (`'migrated-' || id` and the like): a device that upgrades, pushes, is
+         * restored from a backup taken before the upgrade, and upgrades again would mint the
+         * same key for what is by then a different edit, and the server would recognise the
+         * name and drop the change.
+         *
+         * The `WHERE` matters as much as the `SET`. Applying a key to every row would give
+         * clean rows one too, and `findPendingChanges` selects on `locallyChanged` rather than
+         * on the key — so nothing would break loudly, and the invariant the rest of the code
+         * reasons from would simply be false.
+         */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE users ADD COLUMN pendingChangeKey TEXT")
+                db.execSQL(
+                    "UPDATE users SET pendingChangeKey = lower(hex(randomblob(16))) " +
+                        "WHERE locallyChanged != ''",
                 )
             }
         }

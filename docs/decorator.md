@@ -160,3 +160,19 @@ decorators and get none of it. See [offline-first](./offline-first.md).
    prompt to write the argument down here.
 4. Add its class to `SolidContractTest.AUDITED_REPOSITORIES` and `AUDITED_IMPLEMENTATIONS`; a
    decorator is a `UserRepository` implementation and the audit counts it as one.
+
+## What this stack deliberately does not wrap
+
+`PendingUserChangeRepository` — the push of unsent local edits — is bound undecorated, and it
+is worth saying why here rather than only in its own KDoc, because "everything goes through the
+stack" is the reasonable thing to assume after reading this page.
+
+Two of the three layers would be actively wrong on a write. **Caching** answers "has this been
+fetched recently enough to skip?", and a pending edit is never not worth sending — a write
+suppressed by a freshness window is an edit lost. **Retry** is the near miss: a push does want
+retrying, but the backoff here covers a few seconds, and what a push has to survive is an
+offline device, a killed app, and an attempt hours later in a different process. That is
+WorkManager's job, and it is what the idempotency key makes safe
+([idempotency](./idempotency.md)). **Telemetry** is the one real loss, and it is a loss taken
+rather than argued for: it is not worth a three-layer stack around a one-method interface until
+something asks to see the numbers.

@@ -22,7 +22,9 @@ BoilerplateApp.onCreate ── ensurePeriodicSyncScheduled() ──▶ Backgroun
                                                                      │
                                     PerformBackgroundSyncUseCase(runAttemptCount)       (:core:domain)
                                                                      │
-                                    SyncStrategyFactory.create(CURRENT_USER).sync()
+                              PendingUserChangeRepository.pushPendingChanges()   ── push, first
+                                                                     │
+                                    SyncStrategyFactory.create(CURRENT_USER).sync()  ── then pull
                                                                      │
                                        BackgroundSyncOutcome ──▶ Result.success/retry/failure
 ```
@@ -30,12 +32,28 @@ BoilerplateApp.onCreate ── ensurePeriodicSyncScheduled() ──▶ Backgroun
 | Type | Module | What it is for |
 | --- | --- | --- |
 | `BackgroundSyncScheduler` | `:core:domain` | "This app keeps the account fresh in the background", with no WorkManager in the sentence |
-| `PerformBackgroundSyncUseCase` | `:core:domain` | What a background run syncs, what counts as done, when to stop retrying |
+| `PerformBackgroundSyncUseCase` | `:core:domain` | What a background run syncs, in which direction, what counts as done, when to stop retrying |
+| `PendingUserChangeRepository` | `:core:domain` | The push half — this device's unsent edits, each under the key its row holds ([idempotency](./idempotency.md)) |
 | `BackgroundSyncOutcome` | `:core:domain` | `ListenableWorker.Result` with the framework taken out, so the decision is JVM-testable |
 | `UserSyncSchedule` | `:data` | The interval, flex window, constraints, backoff and unique name |
 | `UserSyncWorker` | `:data` | A `CoroutineWorker` that hands the run over and translates the answer |
 | `WorkManagerBackgroundSyncScheduler` | `:data` | Enqueues the request as unique periodic work |
 | `BackgroundSyncModule` | `:data` | Binds the scheduler and provides the `WorkManager` instance |
+
+## A run is a push and then a pull
+
+The run used to be a fetch and nothing else. It now sends this device's unsent edits first, and
+the order is load-bearing rather than tidy: under `ConflictPolicy.LAST_WRITE_WINS` a fetch that
+ran first would take the server's row wholesale and clear the pending fields, so a change the
+user made would be destroyed before anything ever tried to send it. Under `MERGE` the edit
+survives either order, and pushing first is still the earliest moment it can reach the account's
+other devices.
+
+Both halves count toward the same answer. A run that could not send an edit has not succeeded
+just because there was also nothing new to fetch — a device holding an unsent change is the
+state a background sync exists to get out of — so a shortfall in either direction spends an
+attempt. See [idempotency](./idempotency.md) for why sending the same edit on the next attempt
+does not apply it twice.
 
 ## The three things the spec item names
 

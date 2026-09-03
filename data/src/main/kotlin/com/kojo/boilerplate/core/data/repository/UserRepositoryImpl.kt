@@ -5,14 +5,13 @@ import com.kojo.boilerplate.core.coroutines.FanOutResult
 import com.kojo.boilerplate.core.coroutines.IoDispatcher
 import com.kojo.boilerplate.core.coroutines.mapConcurrentlyCatching
 import com.kojo.boilerplate.core.database.dao.UserDao
+import com.kojo.boilerplate.core.database.entity.UserEntity
 import com.kojo.boilerplate.core.database.entity.toDomain
 import com.kojo.boilerplate.core.database.entity.toEntity
-import com.kojo.boilerplate.core.database.entity.toVersioned
 import com.kojo.boilerplate.core.domain.model.User
 import com.kojo.boilerplate.core.domain.repository.UserRepository
+import com.kojo.boilerplate.core.domain.sync.IdempotencyKeyGenerator
 import com.kojo.boilerplate.core.domain.sync.conflict.ConflictPolicy
-import com.kojo.boilerplate.core.domain.sync.conflict.ConflictResolution
-import com.kojo.boilerplate.core.domain.sync.conflict.ConflictResolver
 import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.domain.sync.conflict.UserField
 import com.kojo.boilerplate.core.domain.sync.conflict.VersionedUser
@@ -20,7 +19,6 @@ import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.toVersioned
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -46,23 +44,25 @@ import kotlinx.coroutines.withContext
  *
  * ## Every write goes through the conflict resolver
  *
- * Both directions. A fetched row meets [conflictResolver] because a response is not
- * automatically newer than what is stored — see `docs/conflict-resolution.md` — and a local
- * edit meets it because [saveUser] has to record *which* fields it changed for the resolver to
- * have anything to merge later. Neither path upserts directly; the read-modify-write is
+ * Both directions. A fetched row meets the resolver because a response is not automatically
+ * newer than what is stored — see `docs/conflict-resolution.md` — and a local edit meets it
+ * because [saveUser] has to record *which* fields it changed for the resolver to have anything
+ * to merge later. Neither path upserts directly; the read-modify-write is
  * [UserDao.upsertResolving], inside a transaction, because concurrent syncs of one id are
- * ordinary here.
+ * ordinary here. The fetched half of that lives in [writer], which the push path shares.
  *
  * @param ioDispatcher deliberately has no default. A default would let a caller construct
  *   this without one, and every test that did would silently run against the real IO pool.
- * @param conflictResolver the app's single policy, selected in `ConflictResolverModule`. A
- *   constructor parameter and not a lookup, for the same reason [ioDispatcher] is: it is what
- *   lets a test state which policy it is asserting about.
+ * @param writer the commit path for anything the server sends back, carrying the app's single
+ *   conflict policy. A constructor parameter and not a lookup, for the same reason
+ *   [ioDispatcher] is: it is what lets a test state which policy it is asserting about.
+ * @param idempotencyKeys names the mutation each local edit creates. See [saveUser].
  */
 class UserRepositoryImpl @Inject constructor(
     private val userDao: UserDao,
     private val userApi: UserApi,
-    private val conflictResolver: ConflictResolver,
+    private val writer: ResolvingUserWriter,
+    private val idempotencyKeys: IdempotencyKeyGenerator,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : UserRepository {
 
@@ -103,6 +103,32 @@ class UserRepositoryImpl @Inject constructor(
      * A row that does not exist yet is created with every field pending. It has never been
      * synced, so none of its values came from the server, and the first fetch to arrive is a
      * genuine conflict with all three rather than a fast-forward over them.
+     *
+     * ## Why the edit is named, and when the name changes
+     *
+     * This is where a mutation is created, so this is where it is named: the row gets an
+     * idempotency key, and every attempt to push it carries that key until the server
+     * acknowledges it. The rule is one line and both halves of it are load-bearing —
+     * **a new key when, and only when, the payload changes.**
+     *
+     * *When*, because the key promises the server that two requests carrying it ask for the
+     * same thing. A second edit to a row whose first edit is still unsent asks for something
+     * different; reusing the key would let a server that had already seen the first request
+     * recognise the second as a duplicate and drop it, and the app would have shown the user a
+     * change it then quietly abandoned.
+     *
+     * *Only when*, because a key that changes for any other reason is not a name. A save that
+     * writes the values already stored — a screen re-submitting an unchanged form, a retry of
+     * `saveUser` itself — produces the identical payload, so it keeps the identical key and
+     * stays the same single mutation. Without that, a push in flight would be renamed
+     * underneath itself and its acknowledgement would no longer match the row, costing a
+     * second round trip to send a change the server already has.
+     *
+     * The payload is the pending fields and their local values, which is exactly what
+     * `updateUserRequest` sends. Nothing else can change it: a fetch can only shrink the
+     * pending set (`MergeConflictResolver` intersects, `LastWriteWinsConflictResolver` clears),
+     * and it cannot alter the value of a field it left pending. That is what makes the key
+     * derivable here, once, rather than recomputed at send time.
      */
     override suspend fun saveUser(user: User) {
         withContext(ioDispatcher) {
@@ -116,17 +142,41 @@ class UserRepositoryImpl @Inject constructor(
                     user = user,
                     version = local?.version ?: 0L,
                     locallyChanged = changed,
-                ).toEntity()
+                ).toEntity(pendingChangeKey = keyFor(local, user, changed))
             }
         }
     }
 
+    /**
+     * The key the row should carry after this save: the one it already had when nothing about
+     * the mutation changed, a fresh one when something did, and none at all when the save left
+     * nothing pending.
+     *
+     * The middle case is the interesting one and it is deliberately conservative — it keeps the
+     * old key only when the pending set is identical *and* every field in it holds the value
+     * being written. Anything else mints, including a set that shrank, which cannot happen from
+     * here but would be a new payload if it ever did.
+     *
+     * The `?: idempotencyKeys.newKey()` on the last line is not reachable through any sequence
+     * of calls: a row with a non-empty pending set always has a key. It is there because the
+     * column is nullable and a total expression is cheaper than an assumption — and minting is
+     * the safe answer if the impossible happens, where reusing `null` would send a push with no
+     * name on it.
+     */
+    private fun keyFor(local: UserEntity?, user: User, changed: Set<UserField>): String? = when {
+        changed.isEmpty() -> null
+        local == null -> idempotencyKeys.newKey()
+        changed != local.locallyChanged -> idempotencyKeys.newKey()
+        changed.any { it.differs(local.toDomain(), user) } -> idempotencyKeys.newKey()
+        else -> local.pendingChangeKey ?: idempotencyKeys.newKey()
+    }
+
     override suspend fun syncCurrentUser(): Result<User> = withContext(ioDispatcher) {
-        safeCall { cache(userApi.getCurrentUser().toVersioned()) }
+        safeCall { writer.commit(userApi.getCurrentUser().toVersioned()) }
     }
 
     override suspend fun syncUser(id: String): Result<User> = withContext(ioDispatcher) {
-        safeCall { cache(userApi.getUser(id).toVersioned()) }
+        safeCall { writer.commit(userApi.getUser(id).toVersioned()) }
     }
 
     /**
@@ -149,52 +199,7 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun syncUsers(ids: List<String>): FanOutResult<String, User> =
         withContext(ioDispatcher) {
             ids.distinct().mapConcurrentlyCatching { id ->
-                cache(userApi.getUser(id).toVersioned())
+                writer.commit(userApi.getUser(id).toVersioned())
             }
         }
-
-    /**
-     * Commits a freshly fetched [remote] to the local cache, as far as the conflict policy
-     * allows, and returns what the cache holds afterwards.
-     *
-     * ## The return value is the stored row, not the response
-     *
-     * `syncUser` returns `Result<User>` and a caller reads it as "the user, now". When the
-     * resolver declines the write — a stale response, or a local edit that beat it — the
-     * response is precisely what the store does *not* hold, and handing it back would let a
-     * caller render a value that Room will never emit. Returning what
-     * [UserDao.upsertResolving] committed keeps the two answers the same.
-     *
-     * Under [ConflictPolicy.MERGE] that value can be a third thing: neither the response nor
-     * the previous row, but the merge of them.
-     *
-
-     * The request itself stays cancellable — leaving a screen mid-flight should abandon it.
-     * The write does not: by the time it runs the response is already in hand, and letting
-     * a cancellation drop it wastes the round trip and leaves the cache holding data the
-     * app has just proved to be stale. The upsert is a bounded, idempotent local write, so
-     * this is [NonCancellable]'s intended use — finishing a short commit that has already
-     * started — and not a way to make `sync` as a whole uncancellable.
-     *
-     * [NonCancellable] is a [kotlinx.coroutines.Job], and nothing else. Reading
-     * `withContext(NonCancellable)` as "and this part runs somewhere safe" is the trap: it
-     * replaces the job and inherits everything else, so the dispatcher it runs on is
-     * whichever one is already installed. That is [ioDispatcher] because of the
-     * `withContext` at the call sites above, and was the caller's thread before them.
-     */
-    private suspend fun cache(remote: VersionedUser): User {
-        val stored = withContext(NonCancellable) {
-            userDao.upsertResolving(remote.user.id) { local ->
-                when (val resolution = conflictResolver.resolve(local?.toVersioned(), remote)) {
-                    ConflictResolution.KeepLocal -> null
-                    is ConflictResolution.Write -> resolution.record.toEntity()
-                }
-            }
-        }
-
-        // `upsertResolving` returns null only when there was no row and the resolver wrote
-        // nothing, which no resolver does: `resolve` with a null local always writes. The
-        // elvis is here because the DAO's signature permits it, not because it is reachable.
-        return stored?.toDomain() ?: remote.user
-    }
 }

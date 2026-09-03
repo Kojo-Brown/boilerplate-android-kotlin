@@ -1,7 +1,11 @@
 package com.kojo.boilerplate.core.network.api
 
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.PATCH
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -39,4 +43,42 @@ interface UserApi {
         @Query("page") page: Int,
         @Query("per_page") perPage: Int,
     ): List<UserDto>
+
+    /**
+     * Applies this client's pending edit to a user, at most once however many times it is sent.
+     *
+     * ## The header is the contract
+     *
+     * `Idempotency-Key` is the de-facto standard name for this — Stripe's, and what most APIs
+     * that offer the guarantee call it — and the guarantee it asks for is: *if you have seen
+     * this key before, do not apply the change again; return what you returned the first time.*
+     * The client's side of the bargain is that the key names one mutation for its whole life,
+     * across processes and across days, which is why [idempotencyKey] is read from the row
+     * rather than generated at the call site. See `docs/idempotency.md`.
+     *
+     * Against a server that ignores the header this degrades to an ordinary `PATCH`: correct
+     * while nothing is retried, and no worse than the app was before the header existed. That
+     * is worth stating because it is the only failure mode this client cannot detect —
+     * a server that does not dedupe answers exactly like one that does.
+     *
+     * ## Why `PATCH` and not `PUT`
+     *
+     * The body carries the fields this client changed, not a whole user. A `PUT` promises the
+     * representation is complete, and this client's copy of the fields it did *not* edit may be
+     * stale — sending them back is how a background sync silently reverts someone else's change
+     * to the same row.
+     *
+     * ## Why the response is a full [UserDto]
+     *
+     * It is what the row now is, server-side, including the version the write assigned it. That
+     * makes the acknowledgement a fetch as well as a confirmation: the caller commits it
+     * through the same conflict resolution as any other response, so a row whose pending set
+     * has moved on since the request was sent is reconciled rather than overwritten.
+     */
+    @PATCH("users/{id}")
+    suspend fun updateUser(
+        @Path("id") id: String,
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body update: UpdateUserRequest,
+    ): UserDto
 }

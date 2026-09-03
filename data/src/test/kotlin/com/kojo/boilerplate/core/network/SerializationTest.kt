@@ -1,11 +1,15 @@
 package com.kojo.boilerplate.core.network
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import com.kojo.boilerplate.core.domain.model.User
+import com.kojo.boilerplate.core.domain.sync.conflict.UserField
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.model.LoginRequest
 import com.kojo.boilerplate.core.network.model.TokenResponse
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
 import com.kojo.boilerplate.core.network.model.toDomain
+import com.kojo.boilerplate.core.network.model.updateUserRequest
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -182,5 +186,79 @@ class SerializationTest {
 
         val request = server.takeRequest()
         assertEquals("/users/u42", request.path)
+    }
+
+    @Test
+    fun `UpdateUserRequest names the changed fields and sends the rest as null`() {
+        val request = updateUserRequest(
+            user = User(
+                id = "u1",
+                displayName = "Ada",
+                email = "ada@example.com",
+                avatarUrl = "https://example.com/ada.jpg",
+            ),
+            changed = setOf(UserField.DISPLAY_NAME),
+        )
+
+        assertEquals(
+            """{"changed_fields":["display_name"],"display_name":"Ada","email":null,"avatar_url":null}""",
+            json.encodeToString(request),
+        )
+    }
+
+    /**
+     * The tri-state the `changed_fields` list exists to resolve: a cleared avatar and an avatar
+     * this update does not concern both serialise as `"avatar_url":null`, and only the list
+     * separates them. `encodeDefaults = true` is what rules out the usual answer, where an
+     * absent key means "unchanged" — see `UpdateUserRequest`.
+     */
+    @Test
+    fun `a cleared field and an untouched field differ only in changed_fields`() {
+        val user = User(id = "u1", displayName = "Ada", email = "ada@example.com", avatarUrl = null)
+
+        val cleared = json.encodeToString(updateUserRequest(user, setOf(UserField.AVATAR_URL)))
+        val untouched = json.encodeToString(updateUserRequest(user, setOf(UserField.EMAIL)))
+
+        assertEquals(
+            """{"changed_fields":["avatar_url"],"display_name":null,"email":null,"avatar_url":null}""",
+            cleared,
+        )
+        assertEquals(
+            """{"changed_fields":["email"],"display_name":null,"email":"ada@example.com","avatar_url":null}""",
+            untouched,
+        )
+    }
+
+    /**
+     * The header is the only part of this request the server acts on twice, so it is worth
+     * seeing it leave the client rather than trusting the annotation. A `@Header` misspelled, or
+     * written as a `@Query`, compiles and produces a `PATCH` that is not idempotent at all.
+     */
+    @Test
+    fun `UserApi updateUser sends the idempotency key as a header`() = runTest {
+        val body = """{"id":"u42","display_name":"Ada","email":"ada@example.com","version":8}"""
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+
+        val dto = userApi.updateUser(
+            id = "u42",
+            idempotencyKey = "11111111-2222-3333-4444-555555555555",
+            update = UpdateUserRequest(
+                changedFields = listOf("display_name"),
+                displayName = "Ada",
+                email = null,
+                avatarUrl = null,
+            ),
+        )
+
+        assertEquals(8L, dto.version)
+
+        val request = server.takeRequest()
+        assertEquals("PATCH", request.method)
+        assertEquals("/users/u42", request.path)
+        assertEquals("11111111-2222-3333-4444-555555555555", request.getHeader("Idempotency-Key"))
+        assertEquals(
+            """{"changed_fields":["display_name"],"display_name":"Ada","email":null,"avatar_url":null}""",
+            request.body.readUtf8(),
+        )
     }
 }

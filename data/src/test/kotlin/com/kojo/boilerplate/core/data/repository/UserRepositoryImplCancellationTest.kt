@@ -2,8 +2,8 @@ package com.kojo.boilerplate.core.data.repository
 
 import com.kojo.boilerplate.core.database.dao.UserDao
 import com.kojo.boilerplate.core.database.entity.UserEntity
-import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.network.api.UserApi
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -56,7 +56,7 @@ class UserRepositoryImplCancellationTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
+        val repository = userRepositoryOver(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val job = launch { repository.syncUser("1") }
         writeStarted.await()
@@ -75,7 +75,7 @@ class UserRepositoryImplCancellationTest {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
         val userDao = GatedUserDao(writeStarted, releaseWrite)
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
+        val repository = userRepositoryOver(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val job = launch { repository.syncCurrentUser() }
         writeStarted.await()
@@ -92,11 +92,10 @@ class UserRepositoryImplCancellationTest {
         runTest {
             val requestStarted = CompletableDeferred<Unit>()
             val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-            val repository = UserRepositoryImpl(
-                userDao,
-                HangingUserApi(requestStarted),
-                MergeConflictResolver(),
-                ioDispatcher(),
+            val repository = userRepositoryOver(
+                dao = userDao,
+                api = HangingUserApi(requestStarted),
+                dispatcher = ioDispatcher(),
             )
 
             val job = launch { repository.syncUser("1") }
@@ -112,7 +111,7 @@ class UserRepositoryImplCancellationTest {
     @Test
     fun `syncUser caches the fetched user when it is not cancelled`() = runTest {
         val userDao = GatedUserDao(CompletableDeferred(), CompletableDeferred(Unit))
-        val repository = UserRepositoryImpl(userDao, RespondingUserApi(dto), MergeConflictResolver(), ioDispatcher())
+        val repository = userRepositoryOver(userDao, RespondingUserApi(dto), ioDispatcher())
 
         val result = repository.syncUser("1")
 
@@ -149,6 +148,10 @@ class UserRepositoryImplCancellationTest {
         override suspend fun delete(entity: UserEntity) {
             written.removeAll { it.id == entity.id }
         }
+
+        // Abstract on `UserDao`, so it has to be here; this suite does not push anything.
+        override suspend fun findPendingChanges(): List<UserEntity> =
+            written.filter { it.locallyChanged.isNotEmpty() }
     }
 
     private class RespondingUserApi(private val dto: UserDto) : UserApi {
@@ -159,6 +162,14 @@ class UserRepositoryImplCancellationTest {
         // an empty page.
         override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> =
             error("getUsers is not used by this test")
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 
     private class HangingUserApi(
@@ -172,5 +183,13 @@ class UserRepositoryImplCancellationTest {
             requestStarted.complete(Unit)
             awaitCancellation()
         }
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 }

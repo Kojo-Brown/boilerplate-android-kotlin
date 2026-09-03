@@ -13,6 +13,7 @@ import com.kojo.boilerplate.core.domain.sync.conflict.ConflictResolver
 import com.kojo.boilerplate.core.domain.sync.conflict.MergeConflictResolver
 import com.kojo.boilerplate.core.domain.sync.conflict.UserField
 import com.kojo.boilerplate.core.network.api.UserApi
+import com.kojo.boilerplate.core.network.model.UpdateUserRequest
 import com.kojo.boilerplate.core.network.model.UserDto
 import java.io.IOException
 import kotlinx.coroutines.test.runTest
@@ -293,11 +294,27 @@ class UsersRemoteMediatorTest {
 
         override suspend fun getCurrentUser(): UserDto = error("not used by this test")
         override suspend fun getUser(id: String): UserDto = error("not used by this test")
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 
     private class FailingUserApi(private val failure: Throwable) : UserApi {
         override suspend fun getUsers(page: Int, perPage: Int): List<UserDto> = throw failure
         override suspend fun getCurrentUser(): UserDto = error("not used by this test")
         override suspend fun getUser(id: String): UserDto = error("not used by this test")
+
+        // Not part of what this suite exercises. `error` rather than a fabricated response so
+        // a test that drifts onto the push path fails loudly instead of quietly succeeding.
+        override suspend fun updateUser(
+            id: String,
+            idempotencyKey: String,
+            update: UpdateUserRequest,
+        ): UserDto = error("updateUser is not used by this test")
     }
 }

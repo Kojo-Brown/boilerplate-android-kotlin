@@ -2,6 +2,7 @@ package com.kojo.boilerplate.core.domain.usecase
 
 import com.kojo.boilerplate.core.common.safeCall
 import com.kojo.boilerplate.core.domain.model.RefreshOutcome
+import com.kojo.boilerplate.core.domain.repository.PendingUserChangeRepository
 import com.kojo.boilerplate.core.domain.sync.BackgroundSyncOutcome
 import com.kojo.boilerplate.core.domain.sync.SyncMode
 import com.kojo.boilerplate.core.domain.sync.SyncStrategyFactory
@@ -31,6 +32,22 @@ import javax.inject.Inject
  * [SyncMode.CURRENT_USER] is one request whatever happened before, which is why
  * `CurrentUserSyncStrategy` was written for this item and has been bound, tested and
  * unreached since. This is its caller.
+ *
+ * ### Decision 1b: it pushes before it pulls
+ *
+ * A sync has two directions and this runs both, in that order, and the order is not arbitrary.
+ *
+ * Under [com.kojo.boilerplate.core.domain.sync.conflict.ConflictPolicy.LAST_WRITE_WINS], a pull
+ * that runs first *destroys* an unsent edit: the fetched row wins wholesale, the pending fields
+ * are cleared, and the change the user made is gone before anything ever tried to send it. That
+ * is the whole argument on its own. Under `MERGE` the edit survives either order, and pushing
+ * first is still the better one: it is the earliest moment the change can reach the account's
+ * other devices, and it means the pull that follows is reconciling against a server that has
+ * already been told.
+ *
+ * Both halves count toward the same answer. A run that pushed nothing because the network was
+ * down has not succeeded just because there was also nothing to fetch, and a device holding an
+ * unsent edit is the state a background sync exists to get out of — see Decision 2.
  *
  * ### Decision 2: a partial failure is a retry, and an exception is too
  *
@@ -70,6 +87,7 @@ import javax.inject.Inject
  * gives the wrong picture of how long a failing sync keeps trying for.
  */
 class PerformBackgroundSyncUseCase @Inject constructor(
+    private val pendingUserChanges: PendingUserChangeRepository,
     private val syncStrategies: SyncStrategyFactory,
 ) {
 
@@ -88,13 +106,15 @@ class PerformBackgroundSyncUseCase @Inject constructor(
             "attempt is ListenableWorker.runAttemptCount and starts at 0, was $attempt"
         }
 
-        val outcome = safeCall {
-            syncStrategies.create(BACKGROUND_SYNC_MODE).sync(NO_CALLER_SELECTION)
+        val shortfall = safeCall {
+            val pushed = pendingUserChanges.pushPendingChanges()
+            val refreshed = syncStrategies.create(BACKGROUND_SYNC_MODE).sync(NO_CALLER_SELECTION)
+            pushed.failed + refreshed.failed
         }
 
-        return outcome.fold(
-            onSuccess = { refresh ->
-                if (refresh.failed == 0) BackgroundSyncOutcome.SUCCESS else retryOrGiveUp(attempt)
+        return shortfall.fold(
+            onSuccess = { missing ->
+                if (missing == 0) BackgroundSyncOutcome.SUCCESS else retryOrGiveUp(attempt)
             },
             onFailure = { retryOrGiveUp(attempt) },
         )
