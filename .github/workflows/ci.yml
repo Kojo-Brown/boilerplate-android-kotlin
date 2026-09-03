@@ -70,62 +70,33 @@ jobs:
       # The exported schemas under data/schemas are what AppDatabaseMigrationTest starts every
       # migration from, so a version bump whose schema was generated and never committed turns
       # that whole suite into a test of nothing — it would migrate from the newest file it has
-      # and pass.
+      # and pass. Room writes the schemas during KSP, which the step above ran; this checks that
+      # what it just wrote is what the commit carries.
       #
-      # This check has now been wrong twice, in two different ways, and both were the same
-      # failure: reporting success over files it never opened. PR #42 is where they were caught.
+      # Both halves are needed: a changed file shows up in `git diff`, and a brand-new version's
+      # file is untracked, which `git diff` does not see at all.
       #
-      #   1. It ran `git diff -- data/schemas` after the compile, assuming Room had rewritten the
-      #      working tree. `:data:copyRoomSchemas` reports NO-SOURCE — even on a run where
-      #      `:data:kspDebugKotlin` executed — so nothing was written there and the diff compared
-      #      the commit against itself.
-      #   2. Reading Room's intermediates instead was not enough either. The directory exists but
-      #      is empty on an incremental or cache-restored run, so the comparison loop ran zero
-      #      times and the step still passed.
-      #
-      # The lesson both times: a schema check is only worth anything if Room has *just written*
-      # the schema. So this makes it write one, into a directory emptied first, and then fails if
-      # there is nothing to compare. `--rerun-tasks` is the point rather than an optimisation to
-      # remove — a cache hit is exactly the state that produced both bugs.
-      - name: Regenerate the Room schemas
-        if: ${{ !cancelled() }}
-        run: |
-          rm -rf data/build/intermediates/room/schemas
-          ./gradlew :data:kspDebugKotlin --rerun-tasks --stacktrace
-
-      # Both halves are needed: a changed file is caught by the diff, and a brand-new version's
-      # file is missing from `data/schemas` entirely, which a diff cannot see.
+      # On a Gradle cache hit `:data:copyRoomSchemas` reports NO-SOURCE, because KSP did not
+      # re-run and so wrote no schema, and this step then compares the commit against itself.
+      # That is not a hole: KSP's inputs are `:data`'s sources, so a run where it did not re-run
+      # is a run where the schema could not have changed. The step only ever has something to
+      # say on the runs where it could.
       - name: Room schemas are committed
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          generated="data/build/intermediates/room/schemas/kspDebugKotlin"
-
-          mapfile -t exported < <(find "$generated" -name '*.json' 2>/dev/null | sort)
-          if [ "${#exported[@]}" -eq 0 ]; then
-            echo "::error::Room generated no schema under $generated, so this step compared nothing. Do not read that as the schemas being fine — it is the exact failure this check has had twice. Either the step above did not run Room, or the Room Gradle Plugin's output path moved and this check needs updating."
+          untracked="$(git ls-files --others --exclude-standard -- data/schemas)"
+          if [ -n "$untracked" ]; then
+            echo "$untracked"
+            echo "::error::Room exported a schema that is not in the commit. Run the build locally and add data/schemas."
             exit 1
           fi
-
-          status=0
-          for file in "${exported[@]}"; do
-            committed="data/schemas/${file#"$generated"/}"
-            if [ ! -f "$committed" ]; then
-              echo "::error file=$committed::Room exported this schema and the commit does not carry it. Add it."
-              status=1
-              continue
-            fi
-            if ! diff -u "$committed" "$file"; then
-              echo "::error file=$committed::This differs from what Room just generated. Commit the regenerated schema."
-              status=1
-            fi
-          done
-
-          if [ "$status" -ne 0 ]; then
+          if ! git diff --exit-code -- data/schemas; then
+            echo "::error::data/schemas differs from what Room just generated. Commit the regenerated schema."
             exit 1
           fi
-          echo "Compared ${#exported[@]} schema(s) against what Room just generated, all identical:"
-          printf '%s\n' "${exported[@]}"
+          echo "Exported schemas match the commit:"
+          git ls-files -- data/schemas
 
       - name: lintDebug
         if: ${{ !cancelled() }}

@@ -106,6 +106,46 @@ list in the test.
 4. `everyVersionStepHasAMigration` and `exportedSchemasAreContiguousAndReachTheCurrentVersion`
    fail if either step 2 or step 3 is skipped, so neither can be forgotten quietly.
 
+**Step 3 is not checked by CI, whatever the CI step's name suggests.** Read the next section
+before trusting it.
+
+## The `Room schemas are committed` CI step does not verify the schemas
+
+It is named as though it does, it passes, and on the evidence below it is not checking anything.
+This is written down rather than fixed because two attempts at fixing it failed in CI, and a
+half-diagnosed replacement that fails closed would block every merge instead.
+
+What was observed on PR #42, which added version 4:
+
+- `4.json` was committed with an `identityHash` of 32 zeros, typed by hand — the scheduled agent
+  cannot run Room's compiler at all, because `dl.google.com` answers 403 under its egress policy
+  and neither the Android SDK nor any androidx artifact resolves.
+- The step ran, printed *"Exported schemas match the commit"*, listed `4.json` among the files,
+  and passed. `:data:kspDebugKotlin` had **executed** on that run — not `FROM-CACHE`, not
+  `UP-TO-DATE` — and `:data:copyRoomSchemas` still reported `NO-SOURCE`, so nothing was written
+  into `data/schemas` and `git diff -- data/schemas` compared the commit against itself. The
+  step's own comment says `NO-SOURCE` only happens on a cache hit; that is not what happened.
+- Reading Room's intermediates instead (`data/build/intermediates/room/schemas/kspDebugKotlin`)
+  did not help: the directory exists and is empty, so a comparison loop over it ran zero times
+  and the step passed again — the same defect wearing different clothes.
+- Forcing the issue with `rm -rf` on that directory plus
+  `./gradlew :data:kspDebugKotlin --rerun-tasks` (54 tasks, all executed, BUILD SUCCESSFUL) still
+  produced no schema file anywhere. The one run that *did* produce one was a temporary workflow
+  that additionally **deleted the committed `data/schemas/…/4.json` first**.
+
+That last point is the useful clue and the reason this is a gap rather than a fix: Room appears
+to write a schema only when the committed one is absent or would change, so on a correct tree
+there is nothing to compare, and on an incorrect one — the case the gate exists for — it is not
+clear from the outside why nothing was written either. Establishing which is which needs a run
+that deliberately commits a wrong schema and watches what Room does, which is an experiment
+rather than a patch.
+
+**Until then, a new `<version>.json` is only as trustworthy as the run that produced it.** The
+way to produce one from an environment without the SDK is the way PR #41 and PR #42 both did it:
+a temporary workflow that deletes the file, builds on a runner that has the SDK, and prints what
+Room writes. `827740dc482eb5dade88c8ae37706c32` — version 4's hash — came from exactly that, and
+is trustworthy for that reason and not because CI agreed with it.
+
 ## What is still not covered
 
 - **Auto-migrations.** None are declared; every step here is hand-written, which is the right
