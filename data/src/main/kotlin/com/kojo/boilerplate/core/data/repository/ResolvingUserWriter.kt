@@ -16,6 +16,29 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /**
+ * What the policy says should be stored for [remote], or `null` to leave the row alone.
+ *
+ * A top-level function rather than a method, because there are three callers and only two of
+ * them have a [ResolvingUserWriter]: `UsersRemoteMediator` commits a page inside
+ * `UserPagingDao.commitPage`'s own transaction and cannot borrow this class's. Three copies of
+ * these six lines was what the paged write already was, and the copy is what let the mediator
+ * quietly not carry an idempotency key — the compiler caught that one because
+ * [toEntity] takes the key as a required parameter, which is the entire reason it does.
+ *
+ * The key travels with the pending set it names — see [keyForResolvedPendingSet]. Pure and
+ * non-suspending, because every caller runs it on a database transaction's thread.
+ */
+internal fun ConflictResolver.resolvedEntity(
+    local: UserEntity?,
+    remote: VersionedUser,
+): UserEntity? = when (val resolution = resolve(local?.toVersioned(), remote)) {
+    ConflictResolution.KeepLocal -> null
+    is ConflictResolution.Write -> resolution.record.toEntity(
+        pendingChangeKey = resolution.record.keyForResolvedPendingSet(local?.pendingChangeKey),
+    )
+}
+
+/**
  * Commits a row that came back from the server, as far as the conflict policy allows.
  *
  * A class rather than a private method on `UserRepositoryImpl`, because there are now two
@@ -64,7 +87,7 @@ class ResolvingUserWriter @Inject constructor(
      * enters from inside one.
      */
     suspend fun commit(remote: VersionedUser): User =
-        write(remote) { local -> resolved(local, remote) }
+        write(remote) { local -> conflictResolver.resolvedEntity(local, remote) }
 
     /**
      * Commits the response to a push, clearing the pending edit that [sentKey] named.
@@ -99,22 +122,8 @@ class ResolvingUserWriter @Inject constructor(
             if (local?.pendingChangeKey == sentKey) {
                 remote.toEntity(pendingChangeKey = null)
             } else {
-                resolved(local, remote)
+                conflictResolver.resolvedEntity(local, remote)
             }
-        }
-
-    /**
-     * What the policy says should be stored, or `null` to leave the row alone.
-     *
-     * The key travels with the pending set it names — see
-     * [keyForResolvedPendingSet][com.kojo.boilerplate.core.database.entity.keyForResolvedPendingSet].
-     */
-    private fun resolved(local: UserEntity?, remote: VersionedUser): UserEntity? =
-        when (val resolution = conflictResolver.resolve(local?.toVersioned(), remote)) {
-            ConflictResolution.KeepLocal -> null
-            is ConflictResolution.Write -> resolution.record.toEntity(
-                pendingChangeKey = resolution.record.keyForResolvedPendingSet(local?.pendingChangeKey),
-            )
         }
 
     /**
