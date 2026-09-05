@@ -64,7 +64,15 @@ dependencies {
     implementation(libs.androidx.room.paging)
     ksp(libs.androidx.room.compiler)
 
+    // Both DataStore flavours, because this module has both kinds of store: the untyped
+    // key/value one behind the auth tokens and the theme, and the typed one behind
+    // `UserPreferencesDataSource`.
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.datastore)
+    // The generated preferences schema. `implementation` rather than `api` on purpose: a
+    // `UserPreferencesProto` is the shape of a file, and `UserPreferencesDataSource` maps it to
+    // the Kotlin models in `:core:common` so that nothing above this module ever names one.
+    implementation(project(":core:datastore-proto"))
 
     // WorkManager, plus the Hilt integration that lets a worker take constructor dependencies.
     // `hilt-compiler` is the second KSP processor in this module — Room's is the other — and it
@@ -85,7 +93,7 @@ dependencies {
     // `AppDatabaseMigrationTest` opens real SQLite databases off `src/test`, which needs an
     // Android runtime in the JVM test JVM. This is the only module that has one, and the
     // dependency stays here rather than in `sharedTestDependencies()` for that reason: the
-    // other thirteen modules would pay Robolectric's startup cost for nothing.
+    // other fourteen modules would pay Robolectric's startup cost for nothing.
     testImplementation(libs.robolectric)
 
     // `UserDaoTest` stands up an in-memory Room database and reaches for

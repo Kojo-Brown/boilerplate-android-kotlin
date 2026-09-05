@@ -7,6 +7,20 @@ coreKtx = "1.15.0"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 datastore = "1.1.1"
+# Protobuf, for the typed preferences schema in `:core:datastore-proto`. One version covers the
+# compiler (`protoc`, fetched as a native binary) and the runtime (`protobuf-javalite`), and
+# they must not drift: protobuf 4.x generated code validates the runtime's version in its static
+# initialiser and throws when the runtime is the older of the two. Verified at this version
+# offline — protoc emits Java that compiles at source level 8 and round-trips against the
+# javalite of the same release — because none of the Gradle gates can run in the agent's
+# environment.
+protobuf = "4.36.1"
+# The Gradle plugin is versioned separately from protobuf itself and moves far more slowly.
+# 0.9.6 is the newest of the 0.9.x line, which drives AGP through the original variant API
+# (`BaseVariant`, `registerJavaGeneratingTask`) that 8.7.3 still ships. 0.10.0 rewrote that onto
+# the new `AndroidComponentsExtension` sources API; it is the right destination, and it is a
+# change to make when AGP moves rather than alongside a first `.proto` file.
+protobufPlugin = "0.9.6"
 # 2.52 cannot read Kotlin 2.1 metadata — hiltJavaCompileDebug died with
 # "Unable to read Kotlin metadata due to unsupported metadata version", which
 # blocked lintDebug and testDebugUnitTest alike. 2.57.2 is the newest release
@@ -88,6 +102,14 @@ androidx-activity-compose = { group = "androidx.activity", name = "activity-comp
 
 # DataStore
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+# The typed half of the same release. `datastore-preferences` is this artifact plus a `Serializer`
+# for an untyped key/value map; taking both is not duplication, it is the two stores this app has.
+androidx-datastore = { group = "androidx.datastore", name = "datastore", version.ref = "datastore" }
+
+# Protobuf. `protoc` is declared as a library because that is how the protobuf Gradle plugin
+# takes it — an artifact coordinate it resolves and executes, not something on a classpath.
+protobuf-javalite = { group = "com.google.protobuf", name = "protobuf-javalite", version.ref = "protobuf" }
+protobuf-protoc = { group = "com.google.protobuf", name = "protoc", version.ref = "protobuf" }
 
 # Compose BOM
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
@@ -217,4 +239,5 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
+protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }

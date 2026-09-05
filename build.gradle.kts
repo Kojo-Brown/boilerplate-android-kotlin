@@ -13,6 +13,7 @@ plugins {
     alias(libs.plugins.hilt) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.room) apply false
+    alias(libs.plugins.protobuf) apply false
     alias(libs.plugins.detekt) apply false
 }
 
@@ -52,6 +53,14 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
     ":core:auth" to setOf(":core:common", ":core:testing"),
     ":core:domain" to setOf(":core:common", ":core:testing"),
     ":core:ui" to setOf(":core:common"),
+    // The typed-preferences schema. It depends on nothing in this repository and — unlike every
+    // other entry here — the interesting half of its rule is who may depend on *it*: only
+    // `:data`. A generated `UserPreferencesProto` is the shape of a file on disk, and a screen
+    // that could name one would eventually read a preference straight off the wire format
+    // rather than through the Kotlin model `UserPreferencesDataSource` maps it to. There is no
+    // "who may depend on me" direction in this map, so that is enforced by absence: no other
+    // module lists it, and adding it to one is the edit that has to be justified.
+    ":core:datastore-proto" to emptySet(),
     // The paged half of the user contract. It is its own module rather than three more
     // declarations in `:core:domain` because `PagingData` is an `androidx` type and
     // `:core:domain` is held to having none — by the `ForbiddenImport` detekt rule, by
@@ -65,6 +74,7 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
     ":data" to setOf(
         ":core:auth",
         ":core:common",
+        ":core:datastore-proto",
         ":core:domain",
         ":core:paging",
         ":core:testing",
