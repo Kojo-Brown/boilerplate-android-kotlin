@@ -1,6 +1,6 @@
 # Modularisation
 
-The app is fourteen Gradle modules. This page is what each one is for, what it may depend on,
+The app is fifteen Gradle modules. This page is what each one is for, what it may depend on,
 and — the part worth reading — what the split actually bought, because most of the reasons
 usually given for modularising an Android app did not apply here.
 
@@ -24,7 +24,7 @@ usually given for modularising an Android app did not apply here.
                                      │
                                 :core:common
 
-  :data ──▶ :core:domain, :core:paging, :core:auth, :core:common
+  :data ──▶ :core:domain, :core:paging, :core:auth, :core:common, :core:datastore-proto
                                        (and nothing depends on :data but :app)
   :core:testing ──▶ :core:auth, :core:common, :core:domain   (test configurations only)
 ```
@@ -37,6 +37,7 @@ usually given for modularising an Android app did not apply here.
 | `:core:auth` | no | `GoogleAuthRepository` and its Credential Manager implementation. |
 | `:core:paging` | no | `PagedUserRepository` — the paged user contract, and nothing else. It exists because `PagingData` is an `androidx` type and `:core:domain` may not name one. |
 | `:core:ui` | yes | The theme, the shared widgets, the adaptive scaffold, and the `UdfViewModel`/`UiState`/`ObserveAsEvents` vocabulary. |
+| `:core:datastore-proto` | no | One `.proto` file: the on-disk schema for the typed preferences, and the protoc/javalite wiring that turns it into classes. No hand-written source. Only `:data` may depend on it. |
 | `:core:testing` | no | Fakes and JUnit rules, in `src/main` so other modules' tests can see them. Test configurations only. |
 | `:data` | no | Room, DataStore, Retrofit/OkHttp, the connectivity monitor, and the Hilt modules that bind them. |
 | `:feature:*` | yes | One screen family each. Siblings; none may depend on another. |
@@ -108,6 +109,16 @@ so `UserDao`, `Retrofit` and `DataStore` are not on any feature's compile classp
 already the convention and it was already true; it is now a fact about the build rather than
 something a reviewer has to notice.
 
+**A module boundary can also be a build boundary.** `:core:datastore-proto` is the first module
+here that exists for a reason that has nothing to do with architecture: it holds the typed
+preferences schema, and protoc's output is *Java source generated during the build*. `:data`
+runs two KSP processors — Room's and Hilt's — and a generated-source directory that KSP reads
+without declaring a dependency on the task that writes it is either a Gradle implicit-dependency
+failure or a race, depending on the day. Keeping protoc in a module with no annotation processor
+removes the question instead of answering it. The layering the module also gets — nothing but
+`:data` may name a `UserPreferencesProto`, so no screen can read a preference off the wire
+format — is real, and it is the second reason rather than the first.
+
 **Manifest permissions moved to the modules that need them.** `CAMERA` is declared by the two
 camera features and `ACCESS_NETWORK_STATE` by `:data`, and the merger assembles the set. The
 permissions an APK asks for are now a consequence of the modules it includes.
@@ -118,7 +129,7 @@ permissions an APK asks for are now a consequence of the modules it includes.
 Parallel module compilation will not be measurable at this size, and anyone reading this page
 for a large app should know that the wins above are structural, not performance.
 
-**Thirteen build files where there was one.** That cost is paid down by `build-logic`: the
+**Fifteen build files where there was one.** That cost is paid down by `build-logic`: the
 convention plugins in [`build-logic/convention`](../build-logic/convention) hold the compile
 SDK, the Java and Kotlin targets, the unit-test setup, detekt and the Compose dependency floor,
 so a module's own build file is its namespace and its dependencies and nothing else. The

@@ -6,7 +6,7 @@ Modern Android app starter following Google's recommended architecture.
 
 ## Modules
 
-Thirteen Gradle modules, with the layering enforced by `./gradlew checkModuleDependencies`
+Fifteen Gradle modules, with the layering enforced by `./gradlew checkModuleDependencies`
 rather than by convention. [`docs/modularisation.md`](./docs/modularisation.md) is the full
 map and the reasoning; the short version:
 
@@ -20,6 +20,7 @@ map and the reasoning; the short version:
 | `:core:auth` | `GoogleAuthRepository` and its Credential Manager implementation. |
 | `:core:navigation` | The typed route contract. |
 | `:core:common` | `Result`/`safeCall`, coroutine utilities, event bus, telemetry seam. Depends on nothing. |
+| `:core:datastore-proto` | The typed preferences schema — one `.proto` file and the protoc wiring for it. Only `:data` depends on it. |
 | `:core:testing` | Fakes and JUnit rules, on test configurations only. |
 
 Shared build configuration lives in [`build-logic/convention`](./build-logic/convention), so a
@@ -63,7 +64,7 @@ module's own build file is its namespace and its dependencies and nothing else.
 - [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
   costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
   `@Immutable` promises the compiler that nothing verifies.
-- [Modularisation](./docs/modularisation.md) — the fourteen-module graph, what each module
+- [Modularisation](./docs/modularisation.md) — the fifteen-module graph, what each module
   may depend on and what enforces it, and what the split actually bought (a domain layer that
   is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned
   out to be one too many).
@@ -93,6 +94,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   retry after a lost response applies the change once: why the key is stored rather than derived
   from the change, why it is minted at save time and never at send time, and why an
   acknowledgement compares keys before clearing anything.
+- [Typed preferences](./docs/preferences.md) — Proto DataStore over a `.proto` schema: what it
+  buys over the untyped key/value store next to it, why the generated types stop at
+  `UserPreferencesDataSource`, and the three ways a preferences file changes shape without
+  anybody migrating it.
 - [Repository decorators](./docs/decorator.md) — cache, retry and telemetry as layers around
   an unchanged `UserRepositoryImpl`: what each position in the stack buys, why a retry that
   `runCatching`s a `Result` never retries, and why a shared in-flight request has to be owned
@@ -114,7 +119,7 @@ module's own build file is its namespace and its dependencies and nothing else.
 4. Run on emulator (API 26+) or device
 
 Every Gradle gate is unqualified — `./gradlew compileDebugKotlin`, `lintDebug`, `detekt`,
-`testDebugUnitTest` — and runs in all fourteen modules. `./gradlew checkModuleDependencies`
+`testDebugUnitTest` — and runs in all fifteen modules. `./gradlew checkModuleDependencies`
 checks the layering on its own and takes seconds.
 
 ## CI

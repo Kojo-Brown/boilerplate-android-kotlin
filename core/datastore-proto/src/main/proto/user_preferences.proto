@@ -1,0 +1,103 @@
+// The on-disk schema for the app's typed preferences.
+//
+// This file *is* the schema. Preferences DataStore has no schema at all — a key is a string
+// paired with a type at the call site, so `stringPreferencesKey("theme_mode")` read as an int
+// throws at runtime and a key renamed in one of two places silently reads back a default.
+// Everything below is checked by the compiler instead, in both directions, because the
+// accessors are generated from this file rather than written twice.
+//
+// ## Rules for changing it
+//
+// Field numbers are the wire format. proto3 has no required fields and no defaults, so an
+// old build reading a new file skips the fields it does not know and a new build reading an
+// old file sees the zero value for anything absent — but only while the numbers keep meaning
+// what they meant.
+//
+//   - Never renumber a field, and never reuse a number a deleted field had. `reserved` the
+//     number instead, which makes reuse a compile error rather than a device that reads one
+//     field as another.
+//   - Renaming a field is safe on the wire and breaks the Kotlin that reads it, which is the
+//     right way round.
+//   - Every enum needs its zero value to be the "unset" one, because that is what a field
+//     absent from the file decodes to. `SYNC_POLICY_UNSPECIFIED` is not a policy; it is the
+//     app saying "this device has never chosen", and `UserPreferencesDataSource` is where
+//     that becomes a default.
+//
+// There is no version field. proto3's own compatibility rules cover the migrations a
+// preferences file actually goes through — a field added, a field abandoned — and a version
+// int would only be read by code that already has to handle both shapes.
+
+syntax = "proto3";
+
+package com.kojo.boilerplate.core.datastore.proto;
+
+// `java_multiple_files` puts each message in its own class rather than nesting all of them
+// inside a `UserPreferencesOuterClass` wrapper. `java_package` matches the Gradle module's
+// namespace so the generated classes land where every other class in the module would.
+option java_package = "com.kojo.boilerplate.core.datastore.proto";
+option java_multiple_files = true;
+
+// Even with `java_multiple_files`, protoc emits one more class to hold the file's descriptor,
+// and it names that class after the file: `user_preferences.proto` would produce
+// `UserPreferences`. That is the name of the Kotlin model in `:core:common` that these
+// messages are mapped to, and two types called `UserPreferences` on one classpath is a
+// confusion worth one line to avoid.
+option java_outer_classname = "UserPreferencesSchema";
+
+// How much the background sync is allowed to cost the user.
+//
+// Deliberately an enum rather than the two booleans it replaces (`wifi_only`,
+// `allow_metered`): two booleans have four states and only three are meaningful, so one of
+// them is a bug nobody can write a test for. An enum makes the impossible state
+// unrepresentable on disk as well as in memory.
+enum SyncPolicyProto {
+  // Never chosen on this device. Decodes from a file that predates the field, and from a
+  // brand-new file. `SyncPolicy.Default` is what the app resolves it to.
+  SYNC_POLICY_PROTO_UNSPECIFIED = 0;
+
+  // Sync only over a connection the user is not paying by the byte for.
+  SYNC_POLICY_PROTO_UNMETERED_ONLY = 1;
+
+  // Sync over anything, including a metered mobile connection.
+  SYNC_POLICY_PROTO_ANY_NETWORK = 2;
+}
+
+// The sync half of the preferences, nested rather than flattened into `UserPreferencesProto`.
+//
+// Nesting is the thing Preferences DataStore cannot express: these three fields are read and
+// written together by the sync scheduler and by nothing else, and a nested message is what
+// lets that stay one value with one lock rather than three keys that can be half-updated.
+message SyncPreferencesProto {
+  // What the user allows the background sync to run over.
+  SyncPolicyProto policy = 1;
+
+  // Whether the background sync additionally waits for the device to be charging.
+  //
+  // A separate field rather than a fourth enum constant: it composes with either policy, so
+  // folding it in would double the enum every time another constraint is added.
+  bool only_while_charging = 2;
+
+  // When the last sync completed without error, as milliseconds since the Unix epoch, or 0
+  // when none ever has.
+  //
+  // `int64` rather than `google.protobuf.Timestamp`: the well-known types live in
+  // `protobuf-javalite`'s companion artifact and this is the only timestamp in the schema.
+  // 0 is unambiguous here — it is 1970, which is not a time any sync completed.
+  int64 last_successful_sync_epoch_millis = 3;
+}
+
+// Everything the app remembers about how this user wants it to behave.
+//
+// One message, one file, one `DataStore`. Splitting preferences across several files buys
+// nothing — DataStore's writes are already serialised per file and the whole thing is a few
+// dozen bytes — and costs the atomicity that makes "these two settings changed together"
+// true after a crash.
+message UserPreferencesProto {
+  // The sync settings. Absent in a file written before this field existed, which decodes to
+  // a `SyncPreferencesProto` with every field at its zero value — the same thing a fresh
+  // install gets, which is why the defaults are resolved in one place in Kotlin.
+  SyncPreferencesProto sync = 1;
+
+  // Whether the user has been through onboarding. Only ever set forward.
+  bool onboarding_complete = 2;
+}

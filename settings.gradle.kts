@@ -32,6 +32,9 @@ include(":app")
 
 include(":core:auth")
 include(":core:common")
+// The typed-preferences schema and nothing else: one `.proto` file, protoc, and the lite
+// runtime. Its own build file says why it is not part of `:data`.
+include(":core:datastore-proto")
 include(":core:domain")
 include(":core:navigation")
 include(":core:paging")
