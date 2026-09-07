@@ -64,6 +64,10 @@ module's own build file is its namespace and its dependencies and nothing else.
 - [Immutability and Compose stability](./docs/immutability.md) — why a `List` property
   costs a screen its skipping, when `ImmutableList` and `PersistentList` differ, and what
   `@Immutable` promises the compiler that nothing verifies.
+- [Recomposition profiling](./docs/recomposition.md) — reading Layout Inspector's
+  recomposition and skip counts, why a callback that captures its view model is a question
+  about the compiler flags rather than about the code, and the `rememberEventSink` that makes
+  it a question about neither.
 - [Modularisation](./docs/modularisation.md) — the fifteen-module graph, what each module
   may depend on and what enforces it, and what the split actually bought (a domain layer that
   is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned

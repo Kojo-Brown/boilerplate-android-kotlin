@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,6 +55,10 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // One stable reference for every callback below, so that none of them captures the view
+    // model. Whether that capture costs a recomposition depends on a compiler default rather
+    // than on this file — see `rememberEventSink` and `docs/recomposition.md`.
+    val onEvent = rememberEventSink(viewModel)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -86,7 +91,7 @@ fun HomeScreen(
                 actions = {
                     RefreshAction(
                         inProgress = state.isRefreshing,
-                        onRefresh = { viewModel.onEvent(HomeUiEvent.RefreshClicked) },
+                        onRefresh = { onEvent(HomeUiEvent.RefreshClicked) },
                     )
                 },
             )
@@ -117,7 +122,7 @@ fun HomeScreen(
             SearchBar(
                 query = state.searchQuery,
                 onQueryChange = { query ->
-                    viewModel.onEvent(HomeUiEvent.SearchQueryChanged(query))
+                    onEvent(HomeUiEvent.SearchQueryChanged(query))
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -125,7 +130,7 @@ fun HomeScreen(
             )
             HomeBody(
                 content = state.content,
-                onRetry = { viewModel.onEvent(HomeUiEvent.RetryClicked) },
+                onRetry = { onEvent(HomeUiEvent.RetryClicked) },
                 onItemClick = { item -> onNavigateToProfile(item.id) },
             )
         }

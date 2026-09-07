@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +37,7 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onEvent = rememberEventSink(viewModel)
 
     Scaffold(
         topBar = {
@@ -54,7 +56,7 @@ fun ProfileScreen(
     ) { innerPadding ->
         ProfileContent(
             uiState = state,
-            onRetry = { viewModel.onEvent(ProfileUiEvent.RetryClicked) },
+            onRetry = { onEvent(ProfileUiEvent.RetryClicked) },
             modifier = Modifier.padding(innerPadding),
         )
     }
