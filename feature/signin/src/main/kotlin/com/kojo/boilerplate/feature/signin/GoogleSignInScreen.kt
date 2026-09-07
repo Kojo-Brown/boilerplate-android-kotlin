@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kojo.boilerplate.core.auth.GoogleUser
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import kotlinx.coroutines.launch
 
 @Composable
@@ -42,6 +43,7 @@ fun GoogleSignInScreen(
     viewModel: GoogleSignInViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onEvent = rememberEventSink(viewModel)
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -80,7 +82,7 @@ fun GoogleSignInScreen(
                     SignedInContent(
                         user = current.user,
                         onSignOut = {
-                            viewModel.onEvent(GoogleSignInUiEvent.SignOutClicked)
+                            onEvent(GoogleSignInUiEvent.SignOutClicked)
                         },
                     )
                 }
@@ -88,7 +90,7 @@ fun GoogleSignInScreen(
                 is GoogleSignInUiState.Idle -> {
                     SignInContent(
                         onSignInClick = {
-                            viewModel.onEvent(GoogleSignInUiEvent.SignInClicked(context))
+                            onEvent(GoogleSignInUiEvent.SignInClicked(context))
                         },
                     )
                 }

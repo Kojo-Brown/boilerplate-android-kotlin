@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 
 @Composable
 fun ProfileDetailPane(
@@ -33,6 +34,7 @@ fun ProfileDetailPane(
         ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onEvent = rememberEventSink(viewModel)
 
     Box(modifier = modifier.fillMaxSize()) {
         // `when (val current = state)` rather than `when (state)`: the delegated property is
@@ -48,7 +50,7 @@ fun ProfileDetailPane(
             is ProfileUiState.Error -> {
                 ProfileDetailErrorContent(
                     message = current.message,
-                    onRetry = { viewModel.onEvent(ProfileUiEvent.RetryClicked) },
+                    onRetry = { onEvent(ProfileUiEvent.RetryClicked) },
                     modifier = Modifier.align(Alignment.Center),
                 )
             }

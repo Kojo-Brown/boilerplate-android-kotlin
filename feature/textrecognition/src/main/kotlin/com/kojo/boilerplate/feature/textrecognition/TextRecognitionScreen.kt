@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import java.util.concurrent.Executors
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -74,12 +75,13 @@ fun TextRecognitionScreen(
     viewModel: TextRecognitionViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onEvent = rememberEventSink(viewModel)
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (!granted) viewModel.onEvent(TextRecognitionUiEvent.CameraPermissionDenied)
+        if (!granted) onEvent(TextRecognitionUiEvent.CameraPermissionDenied)
     }
 
     LaunchedEffect(Unit) {
@@ -104,7 +106,7 @@ fun TextRecognitionScreen(
                 actions = {
                     if (state.scan is TextScanState.Scanning) {
                         IconButton(
-                            onClick = { viewModel.onEvent(TextRecognitionUiEvent.FlashToggled) },
+                            onClick = { onEvent(TextRecognitionUiEvent.FlashToggled) },
                         ) {
                             Icon(
                                 imageVector = if (state.isFlashEnabled) {
@@ -134,12 +136,10 @@ fun TextRecognitionScreen(
                     TextRecognitionCameraPreview(
                         isFlashEnabled = state.isFlashEnabled,
                         onTextDetected = { fullText, blocks ->
-                            viewModel.onEvent(
-                                TextRecognitionUiEvent.TextDetected(fullText, blocks),
-                            )
+                            onEvent(TextRecognitionUiEvent.TextDetected(fullText, blocks))
                         },
                         onError = { message ->
-                            viewModel.onEvent(TextRecognitionUiEvent.CameraFailed(message))
+                            onEvent(TextRecognitionUiEvent.CameraFailed(message))
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -150,7 +150,7 @@ fun TextRecognitionScreen(
                     TextDetectedContent(
                         scan = scan,
                         onResumeScanning = {
-                            viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+                            onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -169,7 +169,7 @@ fun TextRecognitionScreen(
                     ErrorContent(
                         message = scan.message,
                         onRetry = {
-                            viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+                            onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
                         },
                         modifier = Modifier
                             .fillMaxSize()

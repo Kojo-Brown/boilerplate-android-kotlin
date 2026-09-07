@@ -125,10 +125,14 @@ no annotation on purpose.
 ## What stability does *not* cover
 
 **Lambdas.** Function types are stable and Compose memoizes them at the call site, so
-`AdaptiveNavItem.onClick` costs the class nothing. What the compiler does not inspect is what
-the lambda *captures*: a lambda closing over an unstable value is recreated on every
-composition, and a nav item built from it is a new object each pass regardless of how the
-class is annotated. `remember` the lambda, or hoist the capture.
+`AdaptiveNavItem.onClick` costs the class nothing. What decides the rest is what the lambda
+*captures*, and that is not a question about the class at all: with strong skipping off, a
+lambda closing over an unstable value is not memoized and is recreated on every composition,
+so a nav item built from it is a new object each pass however the class is annotated. Strong
+skipping — the default this project compiles with — memoizes it instead, keyed on that capture
+by identity. Either way the fix is the same: `remember` the lambda, or hoist the capture so
+there is no unstable one to key on. [recomposition.md](recomposition.md) is the whole of that
+argument, with the profiling procedure that produces the counts.
 
 **The data layer.** `FanOut.kt` builds its results in an `ArrayList` and returns a `List`,
 which is correct: nothing there is a Compose input, and a mutable local builder is the right

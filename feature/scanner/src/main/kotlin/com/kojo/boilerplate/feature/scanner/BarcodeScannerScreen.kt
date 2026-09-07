@@ -63,6 +63,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,12 +73,13 @@ fun BarcodeScannerScreen(
     viewModel: BarcodeScannerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onEvent = rememberEventSink(viewModel)
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (!granted) viewModel.onEvent(BarcodeScannerUiEvent.CameraPermissionDenied)
+        if (!granted) onEvent(BarcodeScannerUiEvent.CameraPermissionDenied)
     }
 
     LaunchedEffect(Unit) {
@@ -102,7 +104,7 @@ fun BarcodeScannerScreen(
                 actions = {
                     if (state.scan is BarcodeScanState.Scanning) {
                         IconButton(
-                            onClick = { viewModel.onEvent(BarcodeScannerUiEvent.FlashToggled) },
+                            onClick = { onEvent(BarcodeScannerUiEvent.FlashToggled) },
                         ) {
                             Icon(
                                 imageVector = if (state.isFlashEnabled) {
@@ -132,12 +134,10 @@ fun BarcodeScannerScreen(
                     CameraPreview(
                         isFlashEnabled = state.isFlashEnabled,
                         onBarcodeDetected = { rawValue, format ->
-                            viewModel.onEvent(
-                                BarcodeScannerUiEvent.BarcodeDetected(rawValue, format),
-                            )
+                            onEvent(BarcodeScannerUiEvent.BarcodeDetected(rawValue, format))
                         },
                         onError = { message ->
-                            viewModel.onEvent(BarcodeScannerUiEvent.CameraFailed(message))
+                            onEvent(BarcodeScannerUiEvent.CameraFailed(message))
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -148,7 +148,7 @@ fun BarcodeScannerScreen(
                     BarcodeResultContent(
                         scan = scan,
                         onResumeScanning = {
-                            viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+                            onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
                         },
                         modifier = Modifier
                             .fillMaxSize()
@@ -169,7 +169,7 @@ fun BarcodeScannerScreen(
                     ErrorContent(
                         message = scan.message,
                         onRetry = {
-                            viewModel.onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
+                            onEvent(BarcodeScannerUiEvent.ResumeScanningClicked)
                         },
                         modifier = Modifier
                             .fillMaxSize()
