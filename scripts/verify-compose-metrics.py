@@ -163,6 +163,19 @@ class ModuleReport:
     def found_unskippable(self) -> int:
         return sum(1 for c in self.composables if c.is_unskippable)
 
+    @property
+    def unstable_parameters(self) -> int:
+        """Unstable parameters across the named composables.
+
+        Not gated on, and printed because of what the `not skipping` column turned out to be
+        worth here. This build compiles with strong skipping, under which a composable with
+        unstable parameters is still skippable — compared by instance rather than by value —
+        so every named composable in this app is skippable while `AppNavHost` alone takes
+        three unstable ones. A green run means "nothing recomposes unconditionally", not
+        "nothing is unstable", and without this column the difference is invisible.
+        """
+        return sum(len(c.unstable_parameters) for c in self.composables)
+
 
 @dataclass(frozen=True)
 class AllowlistEntry:
@@ -465,7 +478,7 @@ def summarise(reports: list[ModuleReport]) -> list[str]:
     """
     header = (
         f"{'module':<28}{'composables':>12}{'restartable':>12}{'skippable':>10}"
-        f"{'unstable':>9}{'read':>7}{'not skipping':>14}"
+        f"{'read':>7}{'not skipping':>14}{'unstable params':>17}"
     )
     lines = [header, "-" * len(header)]
     for report in sorted(reports, key=lambda r: r.module):
@@ -475,9 +488,9 @@ def summarise(reports: list[ModuleReport]) -> list[str]:
             f"{metrics.get('totalComposables', 0):>12}"
             f"{metrics.get('restartableComposables', 0):>12}"
             f"{metrics.get('skippableComposables', 0):>10}"
-            f"{metrics.get('inferredUnstableClasses', 0):>9}"
             f"{len(report.composables):>7}"
             f"{report.found_unskippable:>14}"
+            f"{report.unstable_parameters:>17}"
         )
     return lines
 

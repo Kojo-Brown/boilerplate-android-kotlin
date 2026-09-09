@@ -184,6 +184,31 @@ logic reviewable in an environment where the Compose compiler cannot run at all.
 before the compile, so a broken verifier is reported in seconds rather than after twenty
 minutes of Gradle.
 
+### What a green run means under strong skipping
+
+Every named composable in this app is skippable, and the first run of this gate that read the
+reports correctly reported zero violations. That is a real result, but it is a weaker one than
+it sounds, and the reason is [strong skipping](recomposition.md).
+
+`AppNavHost` takes three unstable parameters — `appEvents: Flow<AppEvent>`,
+`navController: NavHostController`, `startDestination: AppDestination` — and the compiler
+still marks it `skippable`. Under strong skipping an unstable parameter does not cost
+skippability; it is compared by instance identity instead of by value. So the skippability
+rule fires on a narrower set than it would have before Kotlin 2.0 made strong skipping the
+default: a composable that returns a non-`Unit` value, and not much else in a codebase written
+like this one.
+
+Two consequences worth holding onto:
+
+- **A green run means "nothing recomposes unconditionally", not "nothing is unstable".** The
+  `unstable params` column is in the summary for exactly that reason — it is the number that
+  does not go quiet under strong skipping, and it is what
+  [`immutability.md`](immutability.md) is about.
+- **This gate is worth most when the flag changes.** A single `composeCompiler { }` line
+  turning strong skipping off would make a large fraction of these composables non-skippable
+  overnight, and this is what would say so on the pull request that did it rather than in a
+  jank report months later.
+
 ## What this does not cover
 
 **It is a static verdict, not a measurement.** "Skippable" means the runtime *may* skip, given
