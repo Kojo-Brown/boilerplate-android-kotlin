@@ -7,6 +7,10 @@ The companion page is [`immutability.md`](immutability.md), which covers the sta
 *types* a composable takes. This one covers the stability of the *lambdas* it is handed, which
 is the half no annotation can fix and no `data class` can express.
 
+Both are arguments about how to write the code. [`compose-metrics.md`](compose-metrics.md) is
+what checks the argument held: the compiler's per-composable skippability verdict, gated in CI.
+Read that first when a screen is slow — it costs a build rather than a device.
+
 ## Turning the counts on
 
 Recomposition counts come from Layout Inspector, and they are off by default.

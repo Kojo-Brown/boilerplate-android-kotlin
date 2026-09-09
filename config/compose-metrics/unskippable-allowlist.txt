@@ -1,0 +1,24 @@
+# Composables that the Compose compiler reports as restartable but not skippable, and that
+# are staying that way.
+#
+# Read by scripts/verify-compose-metrics.py, which CI runs over the compiler's own reports.
+# One entry per line:
+#
+#     :module ComposableName  # why it cannot skip and why that is acceptable
+#
+# The reason is not decoration — the parser rejects an entry without one. A bare name is how
+# an allowlist becomes permanent: six months later nobody can tell whether the exemption was
+# a considered trade-off or the quickest way past a red build.
+#
+# Entries are checked in both directions. An entry that matches nothing fails the gate too,
+# so a composable that starts skipping takes its exemption with it rather than leaving a line
+# here that silently covers whatever is named the same thing next.
+#
+# Before adding one, the two fixes worth trying first:
+#
+#   - An unstable parameter declared in this repository is a `@Immutable`/`@Stable` question,
+#     and `StabilityContractTest` already states the contract. A `List` is the usual culprit;
+#     `kotlinx.collections.immutable.ImmutableList` is the usual answer.
+#   - An unstable parameter from a library is a parameter that should probably not be crossing
+#     the boundary. A composable taking a `NavHostController` can nearly always take the two
+#     lambdas it actually calls instead, which is also what makes it previewable.
