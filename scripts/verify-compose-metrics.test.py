@@ -16,6 +16,7 @@ Usage: scripts/verify-compose-metrics.test.py
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -73,15 +74,28 @@ stable class HomeUiState {
 }
 """
 
-METRICS = """\
-{
-  "skippableComposables": 1,
-  "restartableComposables": 2,
-  "totalComposables": 2,
-  "inferredUnstableClasses": 1,
-  "totalClasses": 2
+# The `-module.json` half of each fixture, matching the `-composables.txt` half above it.
+# They are stated rather than counted from the text: the point of `assert_parse_is_complete`
+# is that the two files are independent descriptions of one compilation, and a fixture that
+# derived one from the other would test nothing.
+METRICS = {
+    "SKIPPABLE": {"totalComposables": 1, "restartableComposables": 1, "skippableComposables": 1},
+    "UNSKIPPABLE": {
+        "totalComposables": 1,
+        "restartableComposables": 1,
+        "skippableComposables": 0,
+    },
+    "READONLY_AND_INLINE": {
+        "totalComposables": 2,
+        "restartableComposables": 0,
+        "skippableComposables": 0,
+    },
+    "AWKWARD_DECLARATIONS": {
+        "totalComposables": 3,
+        "restartableComposables": 3,
+        "skippableComposables": 0,
+    },
 }
-"""
 
 
 class Repo:
@@ -104,7 +118,14 @@ class Repo:
         self._write_settings()
         return self
 
-    def reports(self, path: str, *, composables: str, classes: str = CLASSES) -> "Repo":
+    def reports(
+        self,
+        path: str,
+        *,
+        composables: str,
+        metrics: dict[str, int],
+        classes: str = CLASSES,
+    ) -> "Repo":
         directory = self.root.joinpath(*path.strip(":").split(":"), "build")
         name = path.strip(":").replace(":", "_")
         (directory / "compose-reports").mkdir(parents=True, exist_ok=True)
@@ -116,7 +137,8 @@ class Repo:
             classes, encoding="utf-8"
         )
         (directory / "compose-metrics" / f"{name}_debug-module.json").write_text(
-            METRICS, encoding="utf-8"
+            json.dumps({**metrics, "inferredUnstableClasses": 1, "totalClasses": 2}),
+            encoding="utf-8",
         )
         return self
 
@@ -131,6 +153,11 @@ class Repo:
         (self.root / "settings.gradle.kts").write_text(
             f'rootProject.name = "Fixture"\n{includes}\n', encoding="utf-8"
         )
+
+
+def fixture(name: str) -> dict:
+    """The two halves of a fixture — the report text and the compiler counts that match it."""
+    return {"composables": globals()[name], "metrics": METRICS[name]}
 
 
 def run(repo: Repo) -> subprocess.CompletedProcess[str]:
@@ -170,14 +197,14 @@ def check(name: str, repo_builder, *, expect_exit: int, expect_in_output: str = 
 
 check(
     "a module whose composables all skip passes",
-    lambda repo: repo.module(":feature:home").reports(":feature:home", composables=SKIPPABLE),
+    lambda repo: repo.module(":feature:home").reports(":feature:home", **fixture("SKIPPABLE")),
     expect_exit=0,
 )
 
 check(
     "a restartable composable that cannot skip fails",
     lambda repo: repo.module(":feature:profile").reports(
-        ":feature:profile", composables=UNSKIPPABLE
+        ":feature:profile", **fixture("UNSKIPPABLE")
     ),
     expect_exit=1,
     expect_in_output=":feature:profile ProfileScreen",
@@ -186,7 +213,7 @@ check(
 check(
     "the failure names the unstable parameter",
     lambda repo: repo.module(":feature:profile").reports(
-        ":feature:profile", composables=UNSKIPPABLE
+        ":feature:profile", **fixture("UNSKIPPABLE")
     ),
     expect_exit=1,
     expect_in_output="unstable parameter: unstable state: ProfileUiState",
@@ -195,7 +222,7 @@ check(
 check(
     "the failure names the member that made the parameter unstable",
     lambda repo: repo.module(":feature:profile").reports(
-        ":feature:profile", composables=UNSKIPPABLE
+        ":feature:profile", **fixture("UNSKIPPABLE")
     ),
     expect_exit=1,
     expect_in_output="ProfileUiState.val badges: List<Badge>",
@@ -204,7 +231,7 @@ check(
 check(
     "an allowed composable with a reason passes",
     lambda repo: repo.module(":feature:profile")
-    .reports(":feature:profile", composables=UNSKIPPABLE)
+    .reports(":feature:profile", **fixture("UNSKIPPABLE"))
     .allowlist(":feature:profile ProfileScreen  # the badge list is server-ordered\n"),
     expect_exit=0,
 )
@@ -212,7 +239,7 @@ check(
 check(
     "an allowlist entry without a reason fails",
     lambda repo: repo.module(":feature:profile")
-    .reports(":feature:profile", composables=UNSKIPPABLE)
+    .reports(":feature:profile", **fixture("UNSKIPPABLE"))
     .allowlist(":feature:profile ProfileScreen\n"),
     expect_exit=1,
     expect_in_output="has no `# reason`",
@@ -221,7 +248,7 @@ check(
 check(
     "a malformed allowlist line fails",
     lambda repo: repo.module(":feature:profile")
-    .reports(":feature:profile", composables=UNSKIPPABLE)
+    .reports(":feature:profile", **fixture("UNSKIPPABLE"))
     .allowlist("ProfileScreen  # missing the module\n"),
     expect_exit=1,
     expect_in_output="expected `:module ComposableName",
@@ -230,7 +257,7 @@ check(
 check(
     "an allowlist entry that matches nothing fails",
     lambda repo: repo.module(":feature:home")
-    .reports(":feature:home", composables=SKIPPABLE)
+    .reports(":feature:home", **fixture("SKIPPABLE"))
     .allowlist(":feature:home HomeScreen  # it skips now, so this line should be gone\n"),
     expect_exit=1,
     expect_in_output="no longer match anything",
@@ -240,7 +267,7 @@ check(
     "a Compose module that reported nothing fails",
     lambda repo: repo.module(":feature:home")
     .module(":feature:profile")
-    .reports(":feature:home", composables=SKIPPABLE),
+    .reports(":feature:home", **fixture("SKIPPABLE")),
     expect_exit=1,
     expect_in_output=":feature:profile",
 )
@@ -249,13 +276,13 @@ check(
     "a module without the Compose plugin is not expected to report",
     lambda repo: repo.module(":feature:home")
     .module(":core:domain", compose=False)
-    .reports(":feature:home", composables=SKIPPABLE),
+    .reports(":feature:home", **fixture("SKIPPABLE")),
     expect_exit=0,
 )
 
 check(
     "readonly and inline composables are not restartable and are not flagged",
-    lambda repo: repo.module(":core:ui").reports(":core:ui", composables=READONLY_AND_INLINE),
+    lambda repo: repo.module(":core:ui").reports(":core:ui", **fixture("READONLY_AND_INLINE")),
     expect_exit=0,
 )
 
@@ -268,7 +295,7 @@ check(
 
 check(
     "a parameterless, a generic and an anonymous composable are all seen",
-    lambda repo: repo.module(":core:ui").reports(":core:ui", composables=AWKWARD_DECLARATIONS)
+    lambda repo: repo.module(":core:ui").reports(":core:ui", **fixture("AWKWARD_DECLARATIONS"))
     .allowlist(
         ":core:ui EmptySignature  # no parameters, so nothing to make it skippable\n"
         ":core:ui GenericRow  # the type parameter is unstable at every call site\n"
@@ -277,10 +304,74 @@ check(
     expect_in_output=":core:ui <anonymous>",
 )
 
+# The regression tests for the bug this gate shipped with. On its first CI run the compiler
+# reported 164 composables of which 47 did not skip; the script read 45 of them, found no
+# violation, and passed. Both halves of that are checked here against the compiler's own
+# counts, because both halves fail *green* and nothing else in this file would notice.
+check(
+    "a report the parser under-reads fails against the compiler's count",
+    lambda repo: repo.module(":feature:home").reports(
+        ":feature:home",
+        composables=SKIPPABLE,
+        metrics={
+            "totalComposables": 5,
+            "restartableComposables": 5,
+            "skippableComposables": 5,
+        },
+    ),
+    expect_exit=1,
+    expect_in_output="reported 5 composable(s)",
+)
+
+check(
+    "the right number of composables with the wrong flags read still fails",
+    lambda repo: repo.module(":feature:home").reports(
+        ":feature:home",
+        composables=SKIPPABLE,
+        metrics={
+            "totalComposables": 1,
+            "restartableComposables": 1,
+            "skippableComposables": 0,
+        },
+    ),
+    expect_exit=1,
+    expect_in_output="this script read 1 and found 0",
+)
+
+check(
+    "a parse mismatch quotes the report it could not read",
+    lambda repo: repo.module(":feature:home").reports(
+        ":feature:home",
+        composables=SKIPPABLE,
+        metrics={
+            "totalComposables": 5,
+            "restartableComposables": 5,
+            "skippableComposables": 5,
+        },
+    ),
+    expect_exit=1,
+    expect_in_output="the head of the report this was read from",
+)
+
+check(
+    "an unparseable declaration line is named in the failure",
+    lambda repo: repo.module(":feature:home").reports(
+        ":feature:home",
+        composables="composable-in-some-future-format HomeScreen\n",
+        metrics={
+            "totalComposables": 1,
+            "restartableComposables": 1,
+            "skippableComposables": 1,
+        },
+    ),
+    expect_exit=1,
+    expect_in_output="composable-in-some-future-format HomeScreen",
+)
+
 check(
     "comments and blank lines in the allowlist are ignored",
     lambda repo: repo.module(":feature:profile")
-    .reports(":feature:profile", composables=UNSKIPPABLE)
+    .reports(":feature:profile", **fixture("UNSKIPPABLE"))
     .allowlist(
         "# a header\n\n   \n:feature:profile ProfileScreen  # the badge list is server-ordered\n"
     ),

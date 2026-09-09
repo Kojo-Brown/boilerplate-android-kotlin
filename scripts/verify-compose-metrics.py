@@ -56,6 +56,11 @@ METRICS_DIR = "compose-metrics"
 
 DEFAULT_ALLOWLIST = Path("config/compose-metrics/unskippable-allowlist.txt")
 
+# How much of a report to quote when the parser and the compiler disagree about it. Enough to
+# show the shape of the format, not so much that a CI log becomes the file.
+SAMPLE_LINES = 24
+UNRECOGNISED_LINES = 12
+
 COMPOSE_PLUGIN_IDS = (
     "boilerplate.android.application.compose",
     "boilerplate.android.library.compose",
@@ -129,6 +134,24 @@ class ModuleReport:
     composables: list[Composable] = field(default_factory=list)
     unstable_classes: dict[str, list[str]] = field(default_factory=dict)
     metrics: dict[str, int] = field(default_factory=dict)
+    #: Declaration-position lines the parser did not recognise, and the head of the first
+    #: report file. Both exist only to make a parse failure diagnosable from the CI log.
+    unrecognised: list[str] = field(default_factory=list)
+    sample: list[str] = field(default_factory=list)
+
+    @property
+    def expected_composables(self) -> int:
+        return self.metrics.get("totalComposables", 0)
+
+    @property
+    def expected_unskippable(self) -> int:
+        return self.metrics.get("restartableComposables", 0) - self.metrics.get(
+            "skippableComposables", 0
+        )
+
+    @property
+    def found_unskippable(self) -> int:
+        return sum(1 for c in self.composables if c.is_unskippable)
 
 
 @dataclass(frozen=True)
@@ -161,8 +184,18 @@ def compose_modules(root: Path) -> list[str]:
     return modules
 
 
-def parse_composables(module: str, text: str) -> list[Composable]:
+def parse_composables(module: str, text: str) -> tuple[list[Composable], list[str]]:
+    """Parse one `-composables.txt`, returning what was understood and what was not.
+
+    The second half is not decoration. The first version of this script read 45 of the 164
+    composables the compiler reported and passed, having flagged none of the 47 the same
+    reports said do not skip — an audit that looked at a quarter of the code and said the
+    code was fine. Every line in declaration position that does not parse is collected here
+    so that `assert_parse_is_complete` can say what it did not understand instead of quietly
+    understanding less.
+    """
     composables: list[Composable] = []
+    unrecognised: list[str] = []
     current: Composable | None = None
     parameters: list[Parameter] = []
 
@@ -183,6 +216,8 @@ def parse_composables(module: str, text: str) -> list[Composable]:
             if match:
                 flags = frozenset(match.group("flags").split())
                 current = Composable(module, match.group("name"), flags, ())
+            elif line.strip() not in (")", "}"):
+                unrecognised.append(line.rstrip())
             continue
         if current is None:
             continue
@@ -197,7 +232,7 @@ def parse_composables(module: str, text: str) -> list[Composable]:
             )
 
     flush()
-    return composables
+    return composables, unrecognised
 
 
 def parse_unstable_classes(text: str) -> dict[str, list[str]]:
@@ -244,7 +279,12 @@ def read_reports(root: Path, modules: list[str]) -> tuple[list[ModuleReport], li
 
         report = ModuleReport(module)
         for path in composable_files:
-            report.composables += parse_composables(module, path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            if not report.sample:
+                report.sample = text.splitlines()[:SAMPLE_LINES]
+            parsed, unrecognised = parse_composables(module, text)
+            report.composables += parsed
+            report.unrecognised += unrecognised
         for path in class_files:
             report.unstable_classes.update(parse_unstable_classes(path.read_text(encoding="utf-8")))
         for path in metric_files:
@@ -283,6 +323,57 @@ def read_allowlist(path: Path) -> tuple[list[AllowlistEntry], list[str]]:
     return entries, errors
 
 
+def assert_parse_is_complete(reports: list[ModuleReport]) -> list[str]:
+    """Check the reader against the compiler's own count of what it wrote.
+
+    This is the check on the check, and it exists because the version without it shipped
+    green. `-module.json` and `-composables.txt` are two descriptions of the same
+    compilation: the first counts composables and how many of them skip, the second names
+    them. If this script's reading of the second disagrees with the first, the disagreement
+    is this script's — and it is the kind that passes rather than fails, because a composable
+    the parser never saw is a composable with no violation to report.
+
+    Both halves are asserted. Equal totals with a different unskippable count would mean the
+    flags are being read wrongly; a lower total with the right count would mean whole entries
+    are being dropped. Neither is survivable for an audit whose whole output is "nothing to
+    report".
+    """
+    failures = []
+    for report in sorted(reports, key=lambda r: r.module):
+        found, expected = len(report.composables), report.expected_composables
+        found_unskippable, expected_unskippable = (
+            report.found_unskippable,
+            report.expected_unskippable,
+        )
+        if found == expected and found_unskippable == expected_unskippable:
+            continue
+
+        detail = [
+            f"  {report.module}: the compiler reported {expected} composable(s) of which "
+            f"{expected_unskippable} do not skip; this script read {found} and found "
+            f"{found_unskippable}.",
+        ]
+        if report.unrecognised:
+            detail.append("      lines in declaration position that did not parse:")
+            detail += [f"        {line}" for line in report.unrecognised[:UNRECOGNISED_LINES]]
+            if len(report.unrecognised) > UNRECOGNISED_LINES:
+                detail.append(f"        ... and {len(report.unrecognised) - UNRECOGNISED_LINES} more")
+        else:
+            detail.append("      no line failed to parse, so entries are being missed entirely.")
+        detail.append("      the head of the report this was read from:")
+        detail += [f"        {line}" for line in report.sample]
+        failures += detail
+
+    if not failures:
+        return []
+    return [
+        "This script's reading of -composables.txt disagrees with the compiler's own counts\n"
+        "  in -module.json. The gate is not auditing what it claims to audit — fix the parser\n"
+        "  in scripts/verify-compose-metrics.py before trusting a green run:\n"
+        + "\n".join(failures)
+    ]
+
+
 def describe(composable: Composable, report: ModuleReport) -> list[str]:
     lines = [f"  {composable.module} {composable.name}"]
     unstable = composable.unstable_parameters
@@ -300,16 +391,28 @@ def describe(composable: Composable, report: ModuleReport) -> list[str]:
 
 
 def summarise(reports: list[ModuleReport]) -> list[str]:
-    header = f"{'module':<28}{'composables':>12}{'skippable':>11}{'restartable':>13}{'unstable classes':>19}"
+    """The compiler's counts beside this script's, per module.
+
+    `read` and `not skipping` are what the parser made of `-composables.txt`; the columns to
+    their left are what the compiler said in `-module.json`. Printing both on a green run is
+    deliberate: the numbers that would have exposed the parse bug were available in the very
+    first CI log, and only the compiler's half was printed.
+    """
+    header = (
+        f"{'module':<28}{'composables':>12}{'restartable':>12}{'skippable':>10}"
+        f"{'unstable':>9}{'read':>7}{'not skipping':>14}"
+    )
     lines = [header, "-" * len(header)]
     for report in sorted(reports, key=lambda r: r.module):
         metrics = report.metrics
         lines.append(
             f"{report.module:<28}"
             f"{metrics.get('totalComposables', 0):>12}"
-            f"{metrics.get('skippableComposables', 0):>11}"
-            f"{metrics.get('restartableComposables', 0):>13}"
-            f"{metrics.get('inferredUnstableClasses', 0):>19}"
+            f"{metrics.get('restartableComposables', 0):>12}"
+            f"{metrics.get('skippableComposables', 0):>10}"
+            f"{metrics.get('inferredUnstableClasses', 0):>9}"
+            f"{len(report.composables):>7}"
+            f"{report.found_unskippable:>14}"
         )
     return lines
 
@@ -346,6 +449,8 @@ def main(argv: list[str]) -> int:
             "  them with:\n"
             "    ./gradlew compileDebugKotlin -PcomposeCompilerReports=true --no-build-cache"
         )
+
+    failures += assert_parse_is_complete(reports)
 
     unskippable = [c for report in reports for c in report.composables if c.is_unskippable]
     allowed = {(e.module, e.name): e for e in entries}

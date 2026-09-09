@@ -123,6 +123,18 @@ green.
 3. **An allowlist entry that no longer matches anything.** An exemption that outlives its
    composable is worse than no exemption: it silently covers whatever is named the same thing
    next.
+4. **A disagreement between the two files.** `-module.json` counts the composables and how
+   many of them skip; `-composables.txt` names them. They describe the same compilation, so if
+   this script's reading of the second does not match the first — in either the total or the
+   number that do not skip — the reading is wrong and the gate is auditing less than it claims.
+
+That fourth rule is not hypothetical. The first version of this gate shipped without it and
+passed on its first CI run: the compiler had reported 164 composables of which 47 do not skip,
+the parser read 45 of them and found no violation, and the run went green having looked at a
+quarter of the code. Only the compiler's own numbers were printed, so the evidence that the
+gate was broken was sitting in the log of the run that passed. The summary now prints both
+counts side by side on every run, and a mismatch quotes the lines it could not parse and the
+head of the report they came from.
 
 Every entry in the allowlist carries a reason and the parser rejects one that does not. The two
 fixes worth trying before adding an entry:
