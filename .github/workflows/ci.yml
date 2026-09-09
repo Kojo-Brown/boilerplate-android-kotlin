@@ -24,6 +24,15 @@ concurrency:
 permissions:
   contents: read
 
+# Turns on the Compose compiler's stability metrics and reports, which
+# `scripts/verify-compose-metrics.py` gates on below. `ORG_GRADLE_PROJECT_<name>` is Gradle's
+# own way of setting a project property from the environment, and it is set here — at the
+# workflow, not on the one step that needs it — on purpose: the property changes the compiler
+# arguments, so a job where only some invocations carried it would recompile every Compose
+# module each time a step switched it on or off.
+env:
+  ORG_GRADLE_PROJECT_composeCompilerReports: "true"
+
 jobs:
   gates:
     name: modules · compile · lint · detekt · test
@@ -61,11 +70,34 @@ jobs:
       - name: checkModuleDependencies
         run: ./gradlew checkModuleDependencies --stacktrace
 
+      # Two seconds, no SDK and no Gradle needed, and it runs before the compile so a broken
+      # verifier is reported immediately rather than twenty minutes later. The failure paths
+      # are the reason that script exists and a green build exercises none of them.
+      - name: verify-compose-metrics.py self-test
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-compose-metrics.test.py
+
       # No project path on any of these: the tasks exist in every module, so one invocation
       # covers all fifteen and a module added later is picked up without an edit here.
+      #
+      # `--no-build-cache` is here for the Compose reports and nowhere else. Their destinations
+      # are internal compiler-plugin options rather than declared outputs of this task, so a
+      # compile restored from the build cache writes none of them — and the cache is shared
+      # across runs by setup-gradle, so the second CI run on a branch is exactly where that
+      # would bite. The next step fails rather than passing quietly when it happens, which is
+      # the point, but a gate that goes red for a caching reason is a gate people learn to
+      # re-run. Only this invocation pays for it; every step below reuses what it produced.
       - name: compileDebugKotlin
         if: ${{ !cancelled() }}
-        run: ./gradlew compileDebugKotlin --stacktrace
+        run: ./gradlew compileDebugKotlin --no-build-cache --stacktrace
+
+      # SPEC.md Phase 10 item 2. The compiler decides, per composable, whether it can be
+      # skipped on recomposition, and records that in a report nobody reads. StabilityContractTest
+      # holds the state types to `@Immutable`/`@Stable`; this holds the composables built out of
+      # them to actually skipping, which is the claim those annotations exist to buy.
+      - name: Compose compiler metrics
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-compose-metrics.py
 
       # The exported schemas under data/schemas are what AppDatabaseMigrationTest starts every
       # migration from, so a version bump whose schema was generated and never committed turns
@@ -122,6 +154,8 @@ jobs:
             **/build/reports/detekt/
             **/build/reports/tests/
             **/build/test-results/
+            **/build/compose-reports/
+            **/build/compose-metrics/
           if-no-files-found: ignore
           retention-days: 7
 

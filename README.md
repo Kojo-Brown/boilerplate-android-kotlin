@@ -68,6 +68,9 @@ module's own build file is its namespace and its dependencies and nothing else.
   recomposition and skip counts, why a callback that captures its view model is a question
   about the compiler flags rather than about the code, and the `rememberEventSink` that makes
   it a question about neither.
+- [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
+  writes and nobody reads, turned into a CI gate: every restartable composable skips or is
+  named, with a reason, in an allowlist that fails when it stops matching.
 - [Modularisation](./docs/modularisation.md) — the fifteen-module graph, what each module
   may depend on and what enforces it, and what the split actually bought (a domain layer that
   is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned

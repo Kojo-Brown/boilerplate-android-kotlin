@@ -10,6 +10,10 @@ which walks the state graph reachable from every view model and fails the build 
 contract is broken — so this page cannot drift from the code without `testDebugUnitTest`
 going red.
 
+That test is a check on the *types*. Whether the composables built out of them actually skip is
+the compiler's own verdict, and CI reads it: see
+[`compose-metrics.md`](compose-metrics.md).
+
 ## What stability buys
 
 Compose recomposes a function when its inputs change. Deciding *whether* they changed is

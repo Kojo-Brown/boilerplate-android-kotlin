@@ -16,6 +16,7 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.withType
+import org.jetbrains.kotlin.compose.compiler.gradle.ComposeCompilerGradlePluginExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
@@ -177,6 +178,52 @@ internal fun Project.configureCompose() {
         add("androidTestImplementation", libs.findLibrary("androidx-ui-test-junit4").get())
         add("androidTestImplementation", libs.findLibrary("kotlinx-coroutines-test").get())
     }
+
+    configureComposeCompilerReports()
+}
+
+/**
+ * Points the Compose compiler's stability metrics and reports at this module's build directory,
+ * when the build is asked for them.
+ *
+ * ### What these files are
+ *
+ * The Compose compiler infers a stability for every class it sees and decides, per composable,
+ * whether the function can be *skipped* when it is recomposed with the arguments it already has.
+ * Both decisions are made silently and neither shows up in a build log. These two options make
+ * the compiler write them down: `compose-reports` gets the human-readable `-classes.txt` and
+ * `-composables.txt`, `compose-metrics` gets the per-module `-module.json` counts.
+ *
+ * `StabilityContractTest` already holds every type reachable from a `StateFlow` to the
+ * `@Immutable`/`@Stable` contract, and it does that by reflection over compiled classes. What it
+ * cannot see is the other half of the question: whether a composable actually *skips*. A screen
+ * can be built entirely from annotated state and still recompose on every frame because one
+ * parameter is an androidx type the compiler treats as unstable — a fact that exists only in
+ * these reports. `scripts/verify-compose-metrics.py` is what reads them in CI.
+ *
+ * ### Why it is opt-in
+ *
+ * The destinations are `FilesSubpluginOption`s of the default (`INTERNAL`) kind, so the Kotlin
+ * compile task does not declare them as outputs. Two things follow, and both are the reason the
+ * property exists rather than the reports simply always being on:
+ *
+ * - Setting them changes the compiler arguments, which changes the compile task's cache key. A
+ *   developer building locally would recompile every Compose module the first time they ran a
+ *   command that had them on and again the first time they ran one that had them off.
+ * - Because they are not declared outputs, a compile task restored from the build cache writes
+ *   no reports at all. That is not a hole the way it would be for a value read from them — the
+ *   verifier fails on a module that did not report — but it is why CI runs the compile step that
+ *   generates them with `--no-build-cache`, and why the property is set for the whole workflow
+ *   rather than on one step, so every Gradle invocation in a job agrees about the arguments.
+ */
+private fun Project.configureComposeCompilerReports() {
+    val requested = providers.gradleProperty(COMPOSE_REPORTS_PROPERTY).orNull
+    if (requested?.toBooleanStrictOrNull() != true) return
+
+    extensions.configure<ComposeCompilerGradlePluginExtension> {
+        reportsDestination.set(layout.buildDirectory.dir(COMPOSE_REPORTS_DIR))
+        metricsDestination.set(layout.buildDirectory.dir(COMPOSE_METRICS_DIR))
+    }
 }
 
 /**
@@ -289,3 +336,17 @@ private fun assertSawVariantClasspaths(names: List<String>) {
 }
 
 private const val TEST_TIMEOUT_MINUTES = 10L
+
+/**
+ * The Gradle property that turns the Compose compiler's stability reports on. CI sets it for the
+ * whole workflow as `ORG_GRADLE_PROJECT_composeCompilerReports`; locally it is
+ * `-PcomposeCompilerReports=true`.
+ */
+private const val COMPOSE_REPORTS_PROPERTY = "composeCompilerReports"
+
+// Both directory names are also spelled in scripts/verify-compose-metrics.py, which reads what
+// the compiler writes here. They are asserted there rather than shared: the verifier runs
+// without Gradle on the classpath, and a name that only one of the two knows about surfaces as
+// "no module reported", which is a failure and not a silent pass.
+private const val COMPOSE_REPORTS_DIR = "compose-reports"
+private const val COMPOSE_METRICS_DIR = "compose-metrics"
