@@ -28,6 +28,14 @@ has touched.
 3. **The allowlist has no stale entries.** An entry that no longer matches a violation is a
    failure, not a no-op: an allowlist that is never pruned stops describing the code and
    starts hiding the next regression.
+4. **The report was understood.** Anything in declaration position this script cannot parse
+   fails the run, because the output of an audit like this is "nothing to report" and every
+   way of reading less produces exactly that. See `assert_parser_understood_the_report`.
+
+The composables this gates on are the **named** ones. `-composables.txt` prints top-level
+composable functions; `-module.json` counts every composable including lambdas, which have no
+name to print and no call site to fix — `:app` is 13 by the compiler's count and 2 by name.
+The summary prints both so the gap is visible rather than surprising.
 
 Usage:  scripts/verify-compose-metrics.py [--root DIR] [--allowlist FILE]
 
@@ -94,6 +102,10 @@ PARAMETER_RE = re.compile(
     r"^\s+(?P<stability>stable|unstable)?\s*(?P<name>\w+):\s*(?P<type>[^=]+?)\s*(?:=.*)?$"
 )
 
+# Quoted spans, removed before brackets are counted. A scheme is the common case —
+# `scheme("[androidx.compose.ui.UiComposable]")` balances, but a string is not obliged to.
+QUOTED_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
+
 # A class entry in -classes.txt, e.g.  `unstable class HomeUiState {`
 CLASS_RE = re.compile(r"^(?P<stability>\w+) class (?P<name>[^\s<{]+)")
 
@@ -148,12 +160,6 @@ class ModuleReport:
         return self.metrics.get("totalComposables", 0)
 
     @property
-    def expected_unskippable(self) -> int:
-        return self.metrics.get("restartableComposables", 0) - self.metrics.get(
-            "skippableComposables", 0
-        )
-
-    @property
     def found_unskippable(self) -> int:
         return sum(1 for c in self.composables if c.is_unskippable)
 
@@ -188,52 +194,100 @@ def compose_modules(root: Path) -> list[str]:
     return modules
 
 
+def bracket_depth(line: str) -> int:
+    """The net change in bracket nesting this line makes, ignoring quoted text."""
+    bare = QUOTED_RE.sub("", line)
+    return (
+        bare.count("(") - bare.count(")") + bare.count("{") - bare.count("}")
+    )
+
+
 def parse_composables(module: str, text: str) -> tuple[list[Composable], list[str]]:
     """Parse one `-composables.txt`, returning what was understood and what was not.
 
-    The second half is not decoration. The first version of this script read 45 of the 164
-    composables the compiler reported and passed, having flagged none of the 47 the same
-    reports said do not skip — an audit that looked at a quarter of the code and said the
-    code was fine. Every line in declaration position that does not parse is collected here
-    so that `assert_parse_is_complete` can say what it did not understand instead of quietly
-    understanding less.
+    ### Why this tracks brackets rather than indentation
+
+    The obvious reading — a declaration is a line at column zero, a parameter is an indented
+    one — is wrong, and wrong in the direction that loses composables without saying so. A
+    parameter's default value is printed as the compiler's own lowered IR, which can run to
+    twenty lines of `$composer` calls at arbitrary indentation, including at column zero:
+
+        restartable skippable scheme("[…]") fun AppNavHost(
+          unstable appEvents: Flow<AppEvent>
+          unstable navController: NavHostController? = @dynamic rememberNavController(
+          $composer   =   $composer  ,
+          $changed   =   0
+        )
+          unstable startDestination: AppDestination? = @dynamic SignIn
+        )
+
+    That first `)` is at column zero and closes `rememberNavController`, not `AppNavHost`.
+    Read by indentation it ends the composable early, and `startDestination` — an unstable
+    parameter, exactly the kind this gate exists to find — is attributed to nothing and
+    silently dropped. A `hiltViewModel(…, <block>{ … })` default does the same over a dozen
+    lines and leaves `}, $composer, 0b01110000 and $dirty shl 0b0011, 0b0001)` sitting in
+    declaration position.
+
+    Counting brackets makes the structure say where the parameter list ends, which is what
+    the compiler was expressing in the first place. Quoted spans come out first: a scheme
+    like `scheme("[androidx.compose.ui.UiComposable]")` happens to balance, but nothing
+    guarantees the next string will.
+
+    Anything in declaration position that is not a declaration is collected rather than
+    ignored, so `assert_parser_understood_the_report` can name it instead of the script
+    quietly understanding less than it did yesterday.
     """
     composables: list[Composable] = []
     unrecognised: list[str] = []
-    current: Composable | None = None
+    name: str | None = None
+    flags: frozenset[str] = frozenset()
     parameters: list[Parameter] = []
+    depth = 0
 
     def flush() -> None:
-        nonlocal current, parameters
-        if current is not None:
-            composables.append(
-                Composable(current.module, current.name, current.flags, tuple(parameters))
-            )
-        current, parameters = None, []
+        nonlocal name, parameters
+        if name is not None:
+            composables.append(Composable(module, name, flags, tuple(parameters)))
+        name, parameters = None, []
 
-    for line in text.splitlines():
+    for raw in text.splitlines():
+        line = raw.rstrip()
         if not line.strip():
             continue
-        if not line[0].isspace():
-            flush()
+
+        if depth == 0:
             match = DECLARATION_RE.match(line)
+            if match is None:
+                # A stray closing bracket, or the `): Function1<E, Unit>` a composable with a
+                # return type ends on — both are the tail of something already accounted for.
+                if not line.lstrip().startswith((")", "}")):
+                    unrecognised.append(line)
+                continue
+            flush()
+            flags = frozenset(SCHEME_RE.sub("", match.group("prefix")).split())
+            name = match.group("name")
+            depth = max(0, bracket_depth(line))
+            if depth == 0:
+                # `fun EmptySignature()` — the whole declaration on one line.
+                flush()
+            continue
+
+        # Inside the parameter list. Only its top level holds parameters; everything deeper
+        # is the body of a default value.
+        if depth == 1:
+            match = PARAMETER_RE.match(line)
             if match:
-                flags = frozenset(SCHEME_RE.sub("", match.group("prefix")).split())
-                current = Composable(module, match.group("name"), flags, ())
-            elif line.strip() not in (")", "}"):
-                unrecognised.append(line.rstrip())
-            continue
-        if current is None:
-            continue
-        match = PARAMETER_RE.match(line)
-        if match:
-            parameters.append(
-                Parameter(
-                    match.group("name"),
-                    match.group("type").strip(),
-                    match.group("stability") or "",
+                parameters.append(
+                    Parameter(
+                        match.group("name"),
+                        match.group("type").strip(),
+                        match.group("stability") or "",
+                    )
                 )
-            )
+        depth += bracket_depth(line)
+        if depth <= 0:
+            depth = 0
+            flush()
 
     flush()
     return composables, unrecognised
@@ -327,43 +381,50 @@ def read_allowlist(path: Path) -> tuple[list[AllowlistEntry], list[str]]:
     return entries, errors
 
 
-def assert_parse_is_complete(reports: list[ModuleReport]) -> list[str]:
-    """Check the reader against the compiler's own count of what it wrote.
+def assert_parser_understood_the_report(reports: list[ModuleReport]) -> list[str]:
+    """Check the reader against the report, so a parse failure cannot pass as a clean audit.
 
-    This is the check on the check, and it exists because the version without it shipped
-    green. `-module.json` and `-composables.txt` are two descriptions of the same
-    compilation: the first counts composables and how many of them skip, the second names
-    them. If this script's reading of the second disagrees with the first, the disagreement
-    is this script's — and it is the kind that passes rather than fails, because a composable
-    the parser never saw is a composable with no violation to report.
+    This is the check on the check, and it is here because the version without it shipped
+    green while dropping parameters — the gate's whole output is "nothing to report", so
+    every way of reading less produces exactly the answer that means everything is fine.
 
-    Both halves are asserted. Equal totals with a different unskippable count would mean the
-    flags are being read wrongly; a lower total with the right count would mean whole entries
-    are being dropped. Neither is survivable for an audit whose whole output is "nothing to
-    report".
+    Three things are asserted, and one deliberately is not.
+
+    - **Nothing in declaration position went unread.** This is the one that catches format
+      drift, and it is the one that caught the multi-line default values described in
+      `parse_composables`.
+    - **Every module named at least one composable.** A report this script understands
+      nothing of would otherwise be indistinguishable from a module with no UI in it.
+    - **No module named more composables than the compiler counted.** The named ones are a
+      subset of all of them; reading more than exist means entries are being invented, most
+      likely by matching something that is not a declaration.
+    - Not asserted: **equality with `totalComposables`.** They count different things.
+      `-composables.txt` names top-level composable functions; `-module.json` counts every
+      composable including lambdas, which have no name to print — `:app` has 13 by the
+      compiler's count and 2 with names. An equality here reads as a much stronger check than
+      it is and fails permanently on a correct parser, which is why it is written down as a
+      non-check rather than left out.
     """
     failures = []
     for report in sorted(reports, key=lambda r: r.module):
-        found, expected = len(report.composables), report.expected_composables
-        found_unskippable, expected_unskippable = (
-            report.found_unskippable,
-            report.expected_unskippable,
-        )
-        if found == expected and found_unskippable == expected_unskippable:
+        found, counted = len(report.composables), report.expected_composables
+        problem = None
+        if report.unrecognised:
+            problem = f"{len(report.unrecognised)} line(s) in declaration position did not parse"
+        elif found == 0:
+            problem = "no composable was read out of the report at all"
+        elif found > counted:
+            problem = f"read {found} named composable(s), more than the {counted} the compiler counted"
+        if problem is None:
             continue
 
-        detail = [
-            f"  {report.module}: the compiler reported {expected} composable(s) of which "
-            f"{expected_unskippable} do not skip; this script read {found} and found "
-            f"{found_unskippable}.",
-        ]
+        detail = [f"  {report.module}: {problem}."]
         if report.unrecognised:
-            detail.append("      lines in declaration position that did not parse:")
             detail += [f"        {line}" for line in report.unrecognised[:UNRECOGNISED_LINES]]
             if len(report.unrecognised) > UNRECOGNISED_LINES:
-                detail.append(f"        ... and {len(report.unrecognised) - UNRECOGNISED_LINES} more")
-        else:
-            detail.append("      no line failed to parse, so entries are being missed entirely.")
+                detail.append(
+                    f"        ... and {len(report.unrecognised) - UNRECOGNISED_LINES} more"
+                )
         detail.append("      the head of the report this was read from:")
         detail += [f"        {line}" for line in report.sample]
         failures += detail
@@ -371,9 +432,9 @@ def assert_parse_is_complete(reports: list[ModuleReport]) -> list[str]:
     if not failures:
         return []
     return [
-        "This script's reading of -composables.txt disagrees with the compiler's own counts\n"
-        "  in -module.json. The gate is not auditing what it claims to audit — fix the parser\n"
-        "  in scripts/verify-compose-metrics.py before trusting a green run:\n"
+        "This script did not understand the report it is gating on. Whatever it could not\n"
+        "  read is a composable with no violation to report, so this fails rather than\n"
+        "  passing — fix the parser in scripts/verify-compose-metrics.py:\n"
         + "\n".join(failures)
     ]
 
@@ -454,7 +515,7 @@ def main(argv: list[str]) -> int:
             "    ./gradlew compileDebugKotlin -PcomposeCompilerReports=true --no-build-cache"
         )
 
-    failures += assert_parse_is_complete(reports)
+    failures += assert_parser_understood_the_report(reports)
 
     unskippable = [c for report in reports for c in report.composables if c.is_unskippable]
     allowed = {(e.module, e.name): e for e in entries}

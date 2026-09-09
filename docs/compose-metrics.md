@@ -123,18 +123,49 @@ green.
 3. **An allowlist entry that no longer matches anything.** An exemption that outlives its
    composable is worse than no exemption: it silently covers whatever is named the same thing
    next.
-4. **A disagreement between the two files.** `-module.json` counts the composables and how
-   many of them skip; `-composables.txt` names them. They describe the same compilation, so if
-   this script's reading of the second does not match the first — in either the total or the
-   number that do not skip — the reading is wrong and the gate is auditing less than it claims.
+4. **Anything in declaration position it could not parse**, a module it read no composable
+   from at all, or a module where it read more composables than the compiler counted. The
+   output of this gate is "nothing to report", so every way of reading less produces exactly
+   the answer that means everything is fine. It has to fail on not understanding its input.
 
-That fourth rule is not hypothetical. The first version of this gate shipped without it and
-passed on its first CI run: the compiler had reported 164 composables of which 47 do not skip,
-the parser read 45 of them and found no violation, and the run went green having looked at a
-quarter of the code. Only the compiler's own numbers were printed, so the evidence that the
-gate was broken was sitting in the log of the run that passed. The summary now prints both
-counts side by side on every run, and a mismatch quotes the lines it could not parse and the
-head of the report they came from.
+That fourth rule is not hypothetical, and what it caught is worth writing down because the
+report is stranger than it looks. A parameter's default value is printed as the compiler's own
+lowered IR, and it can run to a dozen lines at any indentation, including column zero:
+
+```
+restartable skippable scheme("[…]") fun AppNavHost(
+  unstable appEvents: Flow<AppEvent>
+  unstable navController: NavHostController? = @dynamic rememberNavController(
+  $composer   =   $composer  ,
+  $changed   =   0
+)
+  unstable startDestination: AppDestination? = @dynamic SignIn
+)
+```
+
+That first `)` closes `rememberNavController`, not `AppNavHost`. The first version of this
+parser read the file by indentation, so it ended the composable there and dropped
+`startDestination` — an unstable parameter, which is the entire thing this gate looks for —
+without a word. The parser now tracks bracket depth, which is what the compiler was expressing
+in the first place.
+
+### The two files count different things
+
+`-composables.txt` prints **named** composable functions. `-module.json` counts **every**
+composable, lambdas included. In this app that is 164 by the compiler's count against 45 with
+names, and `:app` is the clearest case: 13 composables, 2 of them named — `AppNavHost` and
+`MainNavScaffold` — with the rest being the lambdas its navigation graph is built from.
+
+Nothing here asserts the two are equal, and the reason is worth stating because the equality
+looks like exactly the check this gate should have. It would fail permanently on a correct
+parser, and while it held it would read as a much stronger claim than it is. What the summary
+does instead is print both, on every run including green ones, so the gap is a number someone
+can look at rather than a surprise.
+
+The consequence is a real limit: a composable **lambda** that does not skip is counted by the
+compiler and not named in the report, so this gate cannot name it either. Those are slot
+content — there is no declaration to annotate and usually no call site to change — which is
+why gating on the named ones is the useful half. The count is in the summary.
 
 Every entry in the allowlist carries a reason and the parser rejects one that does not. The two
 fixes worth trying before adding an entry:
@@ -164,8 +195,12 @@ Layout Inspector's recomposition counts are the measurement, and
 Release compiles the same source with the same Compose plugin, so a stability difference
 between the two would be surprising, but it is not checked here.
 
+**Composable lambdas**, for the reason above: the compiler counts them, the report does not
+name them, so this gate cannot reach them.
+
 **Nothing gates on the aggregate numbers.** A baseline of
 `skippableComposables`/`totalComposables` per module would catch a slow slide that the
 per-composable rule permits — every individual composable staying accounted for while the
-allowlist grows. The counts are printed on every run so the trend is in the log; turning them
-into a threshold needs a few runs' worth of history first.
+allowlist grows — and it is the only thing that would put the lambdas above under any kind of
+budget. The counts are printed on every run so the trend is in the log; turning them into a
+threshold needs a few runs' worth of history first.

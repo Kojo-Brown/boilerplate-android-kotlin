@@ -63,9 +63,9 @@ restartable fun <anonymous>(
 """
 
 # The same two composables with the scheme clause before the flags rather than after them.
-# Which order the compiler emits is not something this script should depend on, and a regex
-# that fixed one order would silently read nothing at all under the other — which is the
-# leading suspect for the 45-of-164 the first version managed.
+# The real reports put it after, which is what the first version of the parser assumed; a
+# regex pinned to one order reads *nothing at all* under the other, so the order is a thing
+# this script deliberately does not depend on.
 SCHEME_FIRST = """\
 scheme("[androidx.compose.ui.UiComposable]") restartable skippable fun HomeScreen(
   stable state: HomeUiState
@@ -73,6 +73,51 @@ scheme("[androidx.compose.ui.UiComposable]") restartable skippable fun HomeScree
 scheme("[0, [0]]") restartable fun HomeContent(
   unstable rows: List<Row>
 )
+"""
+
+# Copied from :app's real report. The default value of `navController` is the compiler's own
+# lowered IR, and the `)` that closes `rememberNavController(` sits at column zero — read by
+# indentation it ends the composable three lines early and `startDestination`, an unstable
+# parameter and exactly what this gate exists to find, is attributed to nothing and dropped.
+MULTILINE_DEFAULT = """\
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun AppNavHost(
+  unstable appEvents: Flow<AppEvent>
+  stable modifier: Modifier? = @static Companion
+  unstable navController: NavHostController? = @dynamic rememberNavController(
+  $composer   =   $composer  ,\x20
+  $changed   =   0
+)
+  unstable startDestination: AppDestination? = @dynamic SignIn
+)
+restartable scheme("[androidx.compose.ui.UiComposable, [androidx.compose.ui.UiComposable]]") fun MainNavScaffold(
+  unstable navController: NavHostController
+  stable content: Function2<Composer, Int, Unit>
+)
+"""
+
+# The other shape the same problem takes, also from the real reports: a `<block>{ … }` default
+# that runs for a dozen lines and ends with a line beginning `}, $composer, …` in declaration
+# position. Ends with the `): ReturnType` a composable that returns something closes on.
+BLOCK_DEFAULT = """\
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun ProfileDetailPane(
+  stable userId: String
+  unstable viewModel: ProfileDetailPaneViewModel? = @dynamic hiltViewModel(null, userId, <block>{
+  $composer  .  startReplaceGroup  (  -461555555  )
+  sourceInformation  (  $composer  ,   "CC(remember):ProfileDetailPane.kt#9igjgp"  )
+  val   tmp0_group   =   $composer  .  cache  (  $dirty   and   0b1110   ==   0b0100  )     {
+    {         factory    :     Factory     ->
+      factory      .      create      (      userId      )
+    }
+
+  }
+
+  $composer  .  endReplaceGroup  (  )
+  tmp0_group  @  com.kojo.boilerplate.feature.profile.ProfileDetailPane
+}, $composer, 0b01110000 and $dirty shl 0b0011, 0b0001)
+)
+restartable skippable fun rememberEventSink(
+  stable onEvent: Function1<E, Unit>
+): Function1<E, Unit>
 """
 
 CLASSES = """\
@@ -87,10 +132,10 @@ stable class HomeUiState {
 }
 """
 
-# The `-module.json` half of each fixture, matching the `-composables.txt` half above it.
-# They are stated rather than counted from the text: the point of `assert_parse_is_complete`
-# is that the two files are independent descriptions of one compilation, and a fixture that
-# derived one from the other would test nothing.
+# The `-module.json` half of each fixture. Stated rather than counted from the text above it:
+# the two files describe the same compilation independently, and a fixture that derived one
+# from the other could not test a reader of both. The counts are deliberately not equal to the
+# number of entries — the compiler counts lambdas, the report names only top-level functions.
 METRICS = {
     "SKIPPABLE": {"totalComposables": 1, "restartableComposables": 1, "skippableComposables": 1},
     "UNSKIPPABLE": {
@@ -112,6 +157,18 @@ METRICS = {
         "totalComposables": 2,
         "restartableComposables": 2,
         "skippableComposables": 1,
+    },
+    # The compiler's counts include lambdas, so they run well ahead of the two and two named
+    # composables in these reports. That gap is real and is why nothing asserts equality.
+    "MULTILINE_DEFAULT": {
+        "totalComposables": 13,
+        "restartableComposables": 13,
+        "skippableComposables": 8,
+    },
+    "BLOCK_DEFAULT": {
+        "totalComposables": 32,
+        "restartableComposables": 32,
+        "skippableComposables": 20,
     },
 }
 
@@ -322,53 +379,60 @@ check(
     expect_in_output=":core:ui <anonymous>",
 )
 
-# The regression tests for the bug this gate shipped with. On its first CI run the compiler
-# reported 164 composables of which 47 did not skip; the script read 45 of them, found no
-# violation, and passed. Both halves of that are checked here against the compiler's own
-# counts, because both halves fail *green* and nothing else in this file would notice.
+# The regression tests for what this gate shipped with. Its first CI run was green while the
+# parser was reading a composable's parameters only until the first column-zero line inside a
+# default value. Everything below fails *green* without a check on the reader itself, which is
+# the only kind of failure that matters for an audit whose whole output is "nothing to report".
 check(
-    "a report the parser under-reads fails against the compiler's count",
-    lambda repo: repo.module(":feature:home").reports(
-        ":feature:home",
-        composables=SKIPPABLE,
-        metrics={
-            "totalComposables": 5,
-            "restartableComposables": 5,
-            "skippableComposables": 5,
-        },
-    ),
+    "a parameter after a multi-line default is still attributed to its composable",
+    lambda repo: repo.module(":app").reports(":app", **fixture("MULTILINE_DEFAULT")),
     expect_exit=1,
-    expect_in_output="reported 5 composable(s)",
+    expect_in_output="unstable parameter: unstable navController: NavHostController",
 )
 
 check(
-    "the right number of composables with the wrong flags read still fails",
+    "the composable after a multi-line default is still read",
+    lambda repo: repo.module(":app").reports(":app", **fixture("MULTILINE_DEFAULT")),
+    expect_exit=1,
+    expect_in_output=":app MainNavScaffold",
+)
+
+check(
+    "a block default and a return type do not leave unparsed declarations",
+    lambda repo: repo.module(":feature:profile").reports(
+        ":feature:profile", **fixture("BLOCK_DEFAULT")
+    ),
+    expect_exit=0,
+)
+
+check(
+    "a report nothing could be read from fails",
+    lambda repo: repo.module(":feature:home").reports(
+        ":feature:home",
+        composables="\n",
+        metrics={
+            "totalComposables": 9,
+            "restartableComposables": 9,
+            "skippableComposables": 9,
+        },
+    ),
+    expect_exit=1,
+    expect_in_output="no composable was read out of the report at all",
+)
+
+check(
+    "reading more composables than the compiler counted fails",
     lambda repo: repo.module(":feature:home").reports(
         ":feature:home",
         composables=SKIPPABLE,
         metrics={
-            "totalComposables": 1,
-            "restartableComposables": 1,
+            "totalComposables": 0,
+            "restartableComposables": 0,
             "skippableComposables": 0,
         },
     ),
     expect_exit=1,
-    expect_in_output="this script read 1 and found 0",
-)
-
-check(
-    "a parse mismatch quotes the report it could not read",
-    lambda repo: repo.module(":feature:home").reports(
-        ":feature:home",
-        composables=SKIPPABLE,
-        metrics={
-            "totalComposables": 5,
-            "restartableComposables": 5,
-            "skippableComposables": 5,
-        },
-    ),
-    expect_exit=1,
-    expect_in_output="the head of the report this was read from",
+    expect_in_output="more than the 0 the compiler counted",
 )
 
 check(
