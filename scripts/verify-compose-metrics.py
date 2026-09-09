@@ -78,10 +78,14 @@ INCLUDE_RE = re.compile(r"""^\s*include\(\s*["'](:[^"']+)["']\s*\)""", re.MULTIL
 # like one. Dropping either would be a silent miss — the entry would parse as nothing and the
 # composable would go unchecked while the run stayed green.
 DECLARATION_RE = re.compile(
-    r"^(?P<flags>(?:[a-z]+ )*)"
-    r"""(?:scheme\("[^"]*"\) )?"""
+    r"""^(?P<prefix>(?:[a-z]+ |scheme\("[^"]*"\) )*)"""
     r"fun (?:<[^>]*>\s*)?(?P<name>[^\s(]+)"
 )
+
+# Pulled out of the prefix before it is split into flags. It cannot be split on whitespace
+# with the rest: a scheme is a bracket expression that contains spaces of its own, as in
+# `scheme("[0, [0]]")`.
+SCHEME_RE = re.compile(r"""scheme\("[^"]*"\) """)
 
 # A parameter line, indented under a declaration, e.g.
 #   unstable state: HomeUiState
@@ -214,7 +218,7 @@ def parse_composables(module: str, text: str) -> tuple[list[Composable], list[st
             flush()
             match = DECLARATION_RE.match(line)
             if match:
-                flags = frozenset(match.group("flags").split())
+                flags = frozenset(SCHEME_RE.sub("", match.group("prefix")).split())
                 current = Composable(module, match.group("name"), flags, ())
             elif line.strip() not in (")", "}"):
                 unrecognised.append(line.rstrip())

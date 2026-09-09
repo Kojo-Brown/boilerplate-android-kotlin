@@ -62,6 +62,19 @@ restartable fun <anonymous>(
 )
 """
 
+# The same two composables with the scheme clause before the flags rather than after them.
+# Which order the compiler emits is not something this script should depend on, and a regex
+# that fixed one order would silently read nothing at all under the other — which is the
+# leading suspect for the 45-of-164 the first version managed.
+SCHEME_FIRST = """\
+scheme("[androidx.compose.ui.UiComposable]") restartable skippable fun HomeScreen(
+  stable state: HomeUiState
+)
+scheme("[0, [0]]") restartable fun HomeContent(
+  unstable rows: List<Row>
+)
+"""
+
 CLASSES = """\
 unstable class ProfileUiState {
   stable val name: String
@@ -94,6 +107,11 @@ METRICS = {
         "totalComposables": 3,
         "restartableComposables": 3,
         "skippableComposables": 0,
+    },
+    "SCHEME_FIRST": {
+        "totalComposables": 2,
+        "restartableComposables": 2,
+        "skippableComposables": 1,
     },
 }
 
@@ -366,6 +384,13 @@ check(
     ),
     expect_exit=1,
     expect_in_output="composable-in-some-future-format HomeScreen",
+)
+
+check(
+    "the scheme clause is read on either side of the flags",
+    lambda repo: repo.module(":feature:home").reports(":feature:home", **fixture("SCHEME_FIRST")),
+    expect_exit=1,
+    expect_in_output=":feature:home HomeContent",
 )
 
 check(
