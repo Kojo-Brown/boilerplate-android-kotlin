@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,6 +60,17 @@ fun HomeScreen(
     // model. Whether that capture costs a recomposition depends on a compiler default rather
     // than on this file — see `rememberEventSink` and `docs/recomposition.md`.
     val onEvent = rememberEventSink(viewModel)
+    // The app bar's action slot is its own recompose scope and the only thing it needs out of
+    // `state` is one Boolean — while `state` itself is replaced on every keystroke, because the
+    // text field is bound to `searchQuery` undebounced. Reading `state.isRefreshing` there makes
+    // the slot a reader of the whole object, so typing invalidates it and it re-runs to discover
+    // that the flag it renders has not moved.
+    //
+    // `derivedStateOf` is what narrows the dependency: a keystroke recomputes this one field
+    // read, the result compares equal, and the slot is not invalidated at all. It is the only
+    // place in the app where the trade pays — see `docs/derived-state.md` for the three
+    // candidates that look like this one and are not.
+    val isRefreshing by remember { derivedStateOf { state.isRefreshing } }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -90,7 +102,7 @@ fun HomeScreen(
                 title = { Text("Home") },
                 actions = {
                     RefreshAction(
-                        inProgress = state.isRefreshing,
+                        inProgress = isRefreshing,
                         onRefresh = { onEvent(HomeUiEvent.RefreshClicked) },
                     )
                 },

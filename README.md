@@ -68,6 +68,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   recomposition and skip counts, why a callback that captures its view model is a question
   about the compiler flags rather than about the code, and the `rememberEventSink` that makes
   it a question about neither.
+- [Derived state and `remember` keying](./docs/derived-state.md) — the one condition under
+  which `derivedStateOf` cuts work rather than adding it, the three call sites in this app that
+  look like they meet it and do not, and why an unkeyed `remember` over a parameter renders the
+  argument the screen was first given for as long as it stays composed.
 - [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
   writes and nobody reads, turned into a CI gate: every restartable composable skips or is
   named, with a reason, in an allowlist that fails when it stops matching.
