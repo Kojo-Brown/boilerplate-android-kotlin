@@ -1,6 +1,5 @@
 package com.kojo.boilerplate.architecture
 
-import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -70,18 +69,11 @@ class RecompositionContractTest {
     }
 
     private fun screensWithViewModels(): List<Screen> =
-        mainSourceFiles().mapNotNull { file ->
+        SourceTree.mainSources().mapNotNull { file ->
             val source = KotlinSource(file.readText())
             val parameter = VIEW_MODEL_PARAMETER.find(source.code)?.groupValues?.get(1)
-            parameter?.let { Screen(file.relativeTo(REPOSITORY_ROOT).invariantPath(), source, it) }
+            parameter?.let { Screen(file.repositoryPath(), source, it) }
         }
-
-    private fun mainSourceFiles(): List<File> =
-        REPOSITORY_ROOT.walkTopDown()
-            .onEnter { it.name !in SKIPPED_DIRECTORIES }
-            .filter { it.isFile && it.extension == "kt" }
-            .filter { MAIN_SOURCE_SET in it.invariantPath() }
-            .toList()
 
     /** A composable that takes a view model, and the name it gave that parameter. */
     private class Screen(
@@ -105,65 +97,6 @@ class RecompositionContractTest {
         }
     }
 
-    /**
-     * A Kotlin file with its comments and string literals blanked out, so that a match over
-     * [code] is a match on a declaration rather than on prose. Blanked rather than deleted:
-     * every offset stays where it was, so [lineOf] can still name the line a match is on.
-     */
-    private class KotlinSource(text: String) {
-
-        val code: String = blankNonCode(text)
-
-        fun lineOf(offset: Int): Int = code.take(offset).count { it == '\n' } + 1
-
-        private fun blankNonCode(text: String): String {
-            val out = StringBuilder(text.length)
-            var index = 0
-            while (index < text.length) {
-                val end = endOfNonCodeSpanAt(text, index)
-                if (end < 0) {
-                    out.append(text[index])
-                    index++
-                } else {
-                    // Newlines are kept so that line numbers survive; everything else becomes a
-                    // space, which cannot be part of an identifier and so cannot create a match.
-                    text.substring(index, end).forEach { out.append(if (it == '\n') '\n' else ' ') }
-                    index = end
-                }
-            }
-            return out.toString()
-        }
-
-        /** The offset just past the comment or literal starting at [index], or -1 if none does. */
-        private fun endOfNonCodeSpanAt(text: String, index: Int): Int = when {
-            text.startsWith("//", index) -> text.indexOf('\n', index).orEndOf(text)
-            text.startsWith("/*", index) -> text.indexOf("*/", index + 2).past(2, text)
-            text.startsWith("\"\"\"", index) -> text.indexOf("\"\"\"", index + 3).past(3, text)
-            text.startsWith("\"", index) -> endOfStringLiteral(text, index)
-            else -> -1
-        }
-
-        /** The offset past the closing quote, honouring `\"`. Interpolation is not read. */
-        private fun endOfStringLiteral(text: String, start: Int): Int {
-            var index = start + 1
-            while (index < text.length) {
-                when (text[index]) {
-                    '\\' -> index++
-                    '"' -> return index + 1
-                    '\n' -> return index
-                }
-                index++
-            }
-            return text.length
-        }
-
-        /** An unterminated comment or literal runs to the end of the file rather than failing. */
-        private fun Int.orEndOf(text: String): Int = if (this < 0) text.length else this
-
-        private fun Int.past(delimiter: Int, text: String): Int =
-            if (this < 0) text.length else this + delimiter
-    }
-
     private companion object {
 
         /**
@@ -176,10 +109,6 @@ class RecompositionContractTest {
         const val SINK_CALL = "rememberEventSink("
 
         val PERMITTED_SUFFIXES = listOf(":", ".state", ".effects")
-
-        val SKIPPED_DIRECTORIES = setOf("build", "build-logic", ".git", ".gradle", "scripts")
-
-        const val MAIN_SOURCE_SET = "/src/main/"
 
         val EXPECTED_SCREENS = listOf(
             "feature/home/src/main/kotlin/com/kojo/boilerplate/feature/home/HomeScreen.kt",
@@ -194,16 +123,5 @@ class RecompositionContractTest {
             "feature/textrecognition/src/main/kotlin/com/kojo/boilerplate/feature/" +
                 "textrecognition/TextRecognitionScreen.kt",
         )
-
-        /**
-         * Found by walking up rather than taken as a constant, because the working directory
-         * differs between the two things that run this: Gradle starts a test task in the module
-         * directory, the offline harness starts it at the repository root.
-         */
-        val REPOSITORY_ROOT: File = generateSequence(File("").absoluteFile) { it.parentFile }
-            .firstOrNull { File(it, "settings.gradle.kts").isFile }
-            ?: error("no settings.gradle.kts at or above ${File("").absolutePath}")
-
-        fun File.invariantPath(): String = path.replace(File.separatorChar, '/')
     }
 }

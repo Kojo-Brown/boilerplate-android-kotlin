@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -154,47 +155,66 @@ private enum class TopLevelDestination {
     HOME, SCANNER, TEXT_RECOGNITION
 }
 
+/**
+ * The navigation surface every top-level screen sits inside.
+ *
+ * The item list is built from exactly two things — which destination is current, and the
+ * controller the three callbacks navigate with — so it is remembered against exactly those two.
+ * Unkeyed, it would be three [AdaptiveNavItem] allocations and a fresh `persistentListOf` on
+ * every recomposition of this function, and the cost is not the allocations: `items` is the
+ * parameter [AdaptiveNavigationScaffold] skips on, `AdaptiveNavItem` is a data class, and
+ * `ImageVector` compares its whole path tree — so a structurally identical rebuild is a deep
+ * comparison of two Material icons per item, every pass, to conclude nothing changed. Keyed, it
+ * is one identity check.
+ *
+ * How often that happens is not up to this function. `useListDetailLayout()` returns a value, so
+ * it is not restartable, so the window-metrics state it reads is recorded against its *caller* —
+ * the `Home` entry below. Every posture or window-size update therefore recomposes that entry
+ * and re-invokes this, which during a drag-resize in split-screen is per frame.
+ */
 @Composable
 private fun MainNavScaffold(
     navController: NavHostController,
     currentTopLevel: TopLevelDestination,
     content: @Composable () -> Unit,
 ) {
-    val navItems = persistentListOf(
-        AdaptiveNavItem(
-            label = "Home",
-            icon = Icons.Default.Home,
-            selected = currentTopLevel == TopLevelDestination.HOME,
-            onClick = {
-                navController.navigate(AppDestination.Home) {
-                    popUpTo<AppDestination.Home> { inclusive = true }
-                    launchSingleTop = true
-                }
-            },
-        ),
-        AdaptiveNavItem(
-            label = "Scanner",
-            icon = Icons.Default.QrCodeScanner,
-            selected = currentTopLevel == TopLevelDestination.SCANNER,
-            onClick = {
-                navController.navigate(AppDestination.BarcodeScanner) {
-                    popUpTo<AppDestination.Home> { inclusive = false }
-                    launchSingleTop = true
-                }
-            },
-        ),
-        AdaptiveNavItem(
-            label = "Text",
-            icon = Icons.Default.DocumentScanner,
-            selected = currentTopLevel == TopLevelDestination.TEXT_RECOGNITION,
-            onClick = {
-                navController.navigate(AppDestination.TextRecognition) {
-                    popUpTo<AppDestination.Home> { inclusive = false }
-                    launchSingleTop = true
-                }
-            },
-        ),
-    )
+    val navItems = remember(navController, currentTopLevel) {
+        persistentListOf(
+            AdaptiveNavItem(
+                label = "Home",
+                icon = Icons.Default.Home,
+                selected = currentTopLevel == TopLevelDestination.HOME,
+                onClick = {
+                    navController.navigate(AppDestination.Home) {
+                        popUpTo<AppDestination.Home> { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            ),
+            AdaptiveNavItem(
+                label = "Scanner",
+                icon = Icons.Default.QrCodeScanner,
+                selected = currentTopLevel == TopLevelDestination.SCANNER,
+                onClick = {
+                    navController.navigate(AppDestination.BarcodeScanner) {
+                        popUpTo<AppDestination.Home> { inclusive = false }
+                        launchSingleTop = true
+                    }
+                },
+            ),
+            AdaptiveNavItem(
+                label = "Text",
+                icon = Icons.Default.DocumentScanner,
+                selected = currentTopLevel == TopLevelDestination.TEXT_RECOGNITION,
+                onClick = {
+                    navController.navigate(AppDestination.TextRecognition) {
+                        popUpTo<AppDestination.Home> { inclusive = false }
+                        launchSingleTop = true
+                    }
+                },
+            ),
+        )
+    }
 
     AdaptiveNavigationScaffold(items = navItems, content = content)
 }

@@ -119,11 +119,15 @@ Three experiments worth running, in the order they are worth running:
 1. **Type into the Home search field.** Watch `RefreshAction` and the `TopAppBar` — neither
    reads `searchQuery`, so both should show a Skip count climbing with each keystroke and a
    Composition count that does not move.
-2. **Tap rows in the two-pane layout on a tablet.** Watch the navigation rail. Selecting a user
-   invalidates the scope in `AppNavHost` that `MainNavScaffold` is called from, so the rail is
-   re-invoked on every tap; whether it *skips* depends on `content`, which is a composable
-   lambda capturing the selection. This is the one place a real measurement is most likely to
-   disagree with the analysis, and it is a scope-hoisting question rather than a lambda one.
+2. **Tap rows in the two-pane layout on a tablet.** Watch the navigation rail. The expectation
+   is that it does not move at all: `selectedUserId` is read inside the `content` lambda handed
+   to `MainNavScaffold`, and a composable lambda opens a restart group of its own, so the read
+   is recorded against the lambda rather than against the `composable<Home>` entry that declares
+   the state. A tap should therefore recompose the lambda and leave the scaffold un-invoked.
+   This was written here as the one experiment most likely to disagree with the analysis, on the
+   reading that the entry's own scope was invalidated;
+   [`derived-state.md`](derived-state.md#the-one-open-question-from-recompositionmd-resolved-on-paper)
+   settles it the other way and says what the rail *is* on the recomposition path of.
 3. **Pull-to-refresh with the list on screen.** `HomeContent.Users` is `@Immutable` over an
    `ImmutableList`, so a refresh that returns identical rows should skip the entire list rather
    than rebuild it — the claim `immutability.md` makes, measured.
