@@ -10,39 +10,42 @@ import com.kojo.boilerplate.core.testing.MainDispatcherExtension
 import com.kojo.boilerplate.core.testing.syncStrategyFactoryOver
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import io.mockk.slot
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.RegisterExtension
 
 /**
  * The network half of the home screen — `HomeUiEvent.RefreshClicked` and what it reports —
- * separate from [HomeViewModelTest], which covers the database-backed list and the search.
+ * separate from [HomeViewModelTest], which covers the paged list and the search.
  *
  * Every dispatcher here shares one scheduler, including `Dispatchers.Main`, so that the
  * coroutine the refresh launches into `viewModelScope` is on the same clock the test
  * advances. With `Main` on a scheduler of its own, `advanceUntilIdle()` would return with
- * the refresh still pending and the assertions would race it. That now covers the effect
+ * the refresh still pending and the assertions would race it. That covers the effect
  * channel as well: `emitEffect` sends from `viewModelScope`.
+ *
+ * ### The ids are given rather than read
+ *
+ * They used to come out of `state.value.content`, and half of this file was about keeping a
+ * collector alive so that there was a content to read. Under paging the rows on screen are a
+ * fact about the `LazyListState`, so they arrive on the event — see `HomeUiEvent.RefreshClicked`
+ * — and the tests that used to establish a filtered list before refreshing now just pass the
+ * ids. What the view model still owns, and what is asserted here, is the in-flight lock and the
+ * decision to report only a shortfall.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(MockKExtension::class)
@@ -59,9 +62,6 @@ class HomeViewModelRefreshTest {
 
     private val networkMonitor = FakeNetworkMonitor()
 
-    /** Keeps `state` hot; the states themselves are [HomeViewModelTest]'s subject, not this one's. */
-    private val rendered = mutableListOf<HomeUiState>()
-
     /** Everything the view model decided should happen once, in order. */
     private val effects = mutableListOf<HomeUiEffect>()
 
@@ -71,29 +71,28 @@ class HomeViewModelRefreshTest {
         User(id = "3", displayName = "Carol White", email = "carol@example.com"),
     )
 
-    @BeforeEach
-    fun setUp() {
-        every { userRepository.getUsers() } returns flowOf(testUsers)
-    }
+    private val visibleIds = testUsers.map { it.id }
 
     /**
-     * `state` is `WhileSubscribed`, so a refresh reads `HomeContent.Loading` and refreshes
-     * nothing unless something is collecting. Every test here needs a subscribed view model
-     * for the same reason the screen does.
+     * `state` is `WhileSubscribed`, so `isRefreshing` read with nothing collecting is the
+     * initial value however long the view model has been alive. Every assertion about the flag
+     * needs a subscribed view model for the same reason the screen is one.
      *
      * The effect collector is part of the same setup rather than opt-in per test: a `Channel`
      * buffers what nobody has taken yet, so a test that asserts "no effect was emitted"
      * without collecting would pass whether or not one was sent.
+     *
+     * The pages are deliberately *not* collected. Nothing in a refresh touches them — which is
+     * itself the point of the redesign, and would have been impossible to say before.
      */
     private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
         val viewModel = HomeViewModel(
-            userRepository = userRepository,
+            pagedUsers = FakePagedUserRepository(testUsers),
             refreshVisibleUsers = RefreshVisibleUsersUseCase(syncStrategyFactoryOver(userRepository)),
-            defaultDispatcher = UnconfinedTestDispatcher(testScheduler),
             networkMonitor = networkMonitor,
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.state.collect { rendered += it }
+            viewModel.state.collect { }
         }
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.effects.collect { effects += it }
@@ -113,47 +112,59 @@ class HomeViewModelRefreshTest {
     }
 
     @Test
-    fun `refresh fans out over the users currently on screen`() = runTest(mainDispatcher) {
+    fun `refresh fans out over the ids the screen supplied`() = runTest(mainDispatcher) {
         val requested = slot<List<String>>()
         coEvery { userRepository.syncUsers(capture(requested)) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         advanceUntilIdle()
 
-        assertEquals(listOf("1", "2", "3"), requested.captured)
+        assertEquals(visibleIds, requested.captured)
     }
 
     @Test
-    fun `refresh covers only the filtered users when a search is active`() =
-        runTest(mainDispatcher) {
-            val requested = slot<List<String>>()
-            coEvery { userRepository.syncUsers(capture(requested)) } returns
-                succeedWith(listOf(testUsers[0]))
-            val viewModel = buildSubscribedViewModel()
+    fun `refresh covers the viewport and not every page loaded`() = runTest(mainDispatcher) {
+        val requested = slot<List<String>>()
+        coEvery { userRepository.syncUsers(capture(requested)) } returns
+            succeedWith(listOf(testUsers[0]))
+        val viewModel = buildSubscribedViewModel()
 
-            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("alice"))
-            advanceTimeBy(SEARCH_SETTLE)
-            runCurrent()
-            viewModel.onEvent(HomeUiEvent.RefreshClicked)
-            advanceUntilIdle()
+        // What `LazyListState.layoutInfo.visibleItemsInfo` yields: the rows laid out, not the
+        // pages behind them. The fan-out makes one request per id, so a refresh defined over
+        // everything loaded would grow with the scroll — hundreds of requests to update the
+        // dozen rows in front of the reader.
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(listOf("1")))
+        advanceUntilIdle()
 
-            // Refreshing the whole table would be work the user did not ask for, on rows
-            // they cannot see.
-            assertEquals(listOf("1"), requested.captured)
-        }
+        assertEquals(listOf("1"), requested.captured)
+    }
+
+    @Test
+    fun `an empty viewport refreshes nothing`() = runTest(mainDispatcher) {
+        val viewModel = buildSubscribedViewModel()
+
+        // A list still loading, or one a search emptied. The use case skips the fan-out
+        // entirely rather than opening a scope to discover there is nothing in it.
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(emptyList()))
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userRepository.syncUsers(any()) }
+        assertFalse(viewModel.state.value.isRefreshing)
+    }
 
     @Test
     fun `a clean refresh reports nothing`() = runTest(mainDispatcher) {
         coEvery { userRepository.syncUsers(any()) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         advanceUntilIdle()
 
-        // The refreshed rows are already on screen — the list observes the database the
-        // repository wrote them to. "Everything worked" would be a message the user has to
-        // dismiss to get their screen back.
+        // The refreshed rows are already on screen — Room invalidates the `PagingSource` the
+        // repository wrote them through, so Paging re-presents them with nothing subscribing
+        // the list to anything. "Everything worked" would be a message the user has to dismiss
+        // to get their screen back.
         assertEquals(emptyList<HomeUiEffect>(), effects)
     }
 
@@ -169,7 +180,7 @@ class HomeViewModelRefreshTest {
             )
             val viewModel = buildSubscribedViewModel()
 
-            viewModel.onEvent(HomeUiEvent.RefreshClicked)
+            viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
             advanceUntilIdle()
 
             assertEquals(
@@ -191,7 +202,7 @@ class HomeViewModelRefreshTest {
         )
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(listOf("1")))
         advanceUntilIdle()
 
         assertEquals(1, effects.size)
@@ -207,7 +218,7 @@ class HomeViewModelRefreshTest {
         }
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         runCurrent()
         assertTrue(viewModel.state.value.isRefreshing)
 
@@ -225,10 +236,10 @@ class HomeViewModelRefreshTest {
         }
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         runCurrent()
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         gate.complete(Unit)
         advanceUntilIdle()
 
@@ -242,17 +253,12 @@ class HomeViewModelRefreshTest {
         coEvery { userRepository.syncUsers(any()) } returns succeedWith(testUsers)
         val viewModel = buildSubscribedViewModel()
 
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         advanceUntilIdle()
-        viewModel.onEvent(HomeUiEvent.RefreshClicked)
+        viewModel.onEvent(HomeUiEvent.RefreshClicked(visibleIds))
         advanceUntilIdle()
 
         // The in-flight guard must not latch.
         coVerify(exactly = 2) { userRepository.syncUsers(any()) }
-    }
-
-    private companion object {
-        /** Comfortably past the 300ms search debounce, so the filtered list has settled. */
-        val SEARCH_SETTLE: Duration = 400.milliseconds
     }
 }

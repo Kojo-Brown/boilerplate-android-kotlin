@@ -14,8 +14,16 @@ is made.
 
 | List | Slots | Shapes | Keys | `contentType` |
 | --- | --- | --- | --- | --- |
-| `HomeScreen.HomeUserList` | one `items` | one | `HomeItem.id` | none, deliberately |
+| `HomeScreen.HomeUserList` | one `items`, three `item` | four | `HomeItem.id` on the rows; `HomeListSlot` on the footers | `HomeListSlot` |
 | `TextRecognitionScreen.TextDetectedContent` | six `item`, one `itemsIndexed` | seven | named on the six; index on the blocks | `TextDetectedItem` |
+
+`HomeUserList` is in its second shape here. It used to be a single `items` call over a single card
+— one shape, and the table below still records why a content type would have bought nothing then.
+It became a mixed list when the paged stream arrived with it: a load-state footer is a second
+shape, so the rule that exempted it now applies to it. That transition is the argument for writing
+the rule as "a list that emits more than one kind of slot" rather than as "every list": the
+exemption expired on its own, at the commit that made it wrong, instead of having to be
+remembered.
 
 ## `contentType`: what the reuse pool is for
 
@@ -37,11 +45,17 @@ block cards, two buttons and a bottom spacer, all at the default type. `TextDete
 the seven shapes, and the one that matters is `Block`: it is the only slot there is ever more than
 one of, so it is the only one the pool can pay off on, and it now has a pool to itself.
 
-`HomeUserList` was **not** changed, and that is the point of the rule's shape. It emits one
-`items` call over one card, so every item in it already shares one content type; naming it would
-partition the pool into the single class it already was. `LazyListContractTest` therefore asks for
-a content type only of a list that emits more than one kind of slot — a rule whose fix is
-pointless is a rule people learn to satisfy rather than read.
+`HomeUserList` was **not** changed when this page was first written, and that is the point of the
+rule's shape. It emitted one `items` call over one card, so every item in it already shared one
+content type; naming it would have partitioned the pool into the single class it already was.
+`LazyListContractTest` therefore asks for a content type only of a list that emits more than one
+kind of slot — a rule whose fix is pointless is a rule people learn to satisfy rather than read.
+
+It is a mixed list now. Wiring it to the paged stream added a load-state footer — a spinner, a
+failed-append message with a retry, an end-of-list line — so the pool a user card is offered a slot
+table out of can now hold a footer's, which composes from scratch. `HomeListSlot` names the four
+shapes; the rows keep their `HomeItem.id` key and take `HomeListSlot.User` as their content type,
+which is the pair that says "identity is the user, shape is the card".
 
 ## `key`: what identity is for, and when the index is it
 
@@ -115,25 +129,25 @@ whoever first watches this list scroll on real hardware.
 
 ## What is not done here
 
-**No screen consumes the paged stream.** `HomeViewModel` still reads
-`UserRepository.getUsers()`, and `PagedUserRepository` still has no caller outside its tests —
-`prefetchDistance` above is therefore a setting on a list nothing renders yet.
-[`paging.md`](./paging.md) expected that wiring to arrive with this item, and it did not, because
-it is not one change:
+**~~No screen consumes the paged stream.~~** Done, in the Phase 9 item this note called for.
+`HomeScreen` renders it, and both blockers were settled where this page said they belonged rather
+than being worked around here:
 
-- **Search would have to move into the DAO.** `HomeViewModel` filters the full list in memory.
-  Filtering a `PagingData` cannot work — pages are loaded lazily, so an in-memory filter sees only
-  what has been loaded and shortens the list instead of searching it — so the `LIKE` has to become
-  part of `UserPagingDao.pagingSource()`, which changes the `PagedUserRepository` contract and the
-  mediator's relationship to it.
-- **The refresh fan-out loses its input.** `RefreshVisibleUsersUseCase` is called with the ids of
-  the users currently on screen, read from `state.value.content`. Under paging the loaded items
-  live in the presenter, not in the view model, so either the event carries the ids — putting
-  state in the composable, against `docs/state-and-events.md` — or the refresh stops meaning "what
-  I am looking at".
+- **Search moved into the DAO**, as a `LIKE` on `UserPagingDao.pagingSource`, which changed the
+  `PagedUserRepository` contract to take a query. It also turned out to change the mediator's
+  relationship to it, which this note did not foresee: a filtered `PagingSource` that keeps
+  appending walks the entire remote list, so a search runs with the `RemoteMediator` off and covers
+  what has been downloaded. [`paging.md`](./paging.md) has the argument.
+- **The refresh fan-out reads the viewport.** The event carries the ids, taken from
+  `LazyListState.layoutInfo` at the instant of the tap. That is not state in the composable —
+  nothing is held across a recomposition and nothing has to be cleared after it is read, which are
+  the two questions `docs/state-and-events.md` asks — and it is a better definition than the
+  alternative the note offered: "every page loaded" would make a refresh cost one request per row
+  ever scrolled past.
 
-Both are real design decisions with tests attached, and neither is about `LazyColumn` performance.
-They belong in the Phase 9 item that wires a screen to the paged stream.
+What was right about the note is why the item was split off at all. Neither decision is about
+`LazyColumn` performance, and folding them into this one would have buried two contract changes in
+a keys-and-content-types pass.
 
 **Nothing was measured.** See above: no device, no emulator, no Macrobenchmark. The claims here
 are about mechanisms, not about frame times on this app.

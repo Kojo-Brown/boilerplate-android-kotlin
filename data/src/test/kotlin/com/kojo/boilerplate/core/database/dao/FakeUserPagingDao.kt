@@ -33,7 +33,7 @@ class FakeUserPagingDao(
     /** The pagination cursor currently held, or `null` if no page has been committed. */
     val storedPageKey: UserPageKeyEntity? get() = key
 
-    override fun pagingSource(): PagingSource<Int, UserEntity> =
+    override fun pagingSource(pattern: String): PagingSource<Int, UserEntity> =
         error("A RemoteMediator never reads the PagingSource; Paging owns it.")
 
     override suspend fun pageKey(): UserPageKeyEntity? = key

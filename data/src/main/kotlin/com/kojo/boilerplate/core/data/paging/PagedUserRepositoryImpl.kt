@@ -6,6 +6,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
 import com.kojo.boilerplate.core.database.dao.UserPagingDao
+import com.kojo.boilerplate.core.database.dao.likePattern
 import com.kojo.boilerplate.core.database.entity.toDomain
 import com.kojo.boilerplate.core.domain.model.User
 import com.kojo.boilerplate.core.paging.PagedUserRepository
@@ -38,12 +39,37 @@ class PagedUserRepositoryImpl @Inject constructor(
      * `PagingSource` is single-use: Room invalidates it on every write to `users`, and Paging
      * calls the factory again for a fresh one. Passing an instance would leave the list frozen
      * at the first invalidation.
+     *
+     * ## Why a search turns the mediator off
+     *
+     * `remoteMediator` is `null` for every non-blank [query], and that one `takeIf` is the whole
+     * of what makes search terminate.
+     *
+     * Paging asks the mediator to `APPEND` when the `PagingSource` is running out of rows near
+     * the reader's position — it has no idea the query is filtered, and no way to ask the server
+     * for matches, because `GET /users` takes a page number and a page size and nothing else. So
+     * a searching list with the mediator attached does this: three matches come back, the
+     * prefetch window is nowhere near satisfied, an `APPEND` fetches page one, the rows land, the
+     * filtered source is invalidated, three matches come back again. It is a loop that walks the
+     * entire remote list — every page, through the conflict resolver, on a keystroke — and ends
+     * only when the server runs out. A query matching nothing pays the full cost for an empty
+     * screen.
+     *
+     * With it off, a search covers what has been downloaded, which is a promise that can be kept
+     * offline and in constant time. Filling the cache is what scrolling the unsearched list does,
+     * and it is unaffected: clearing the search restores the mediator for the next generation,
+     * which is the same generation boundary the new `PagingSource` already forces.
+     *
+     * The trade is that a user searching for someone on a page nobody has scrolled to sees no
+     * result. That is visible — the list is empty and says what it searched — where the
+     * alternative's cost is not, and closing it properly means a `?q=` on the endpoint rather
+     * than a client-side workaround pretending to be one. See `docs/paging.md`.
      */
     @OptIn(ExperimentalPagingApi::class)
-    override fun users(): Flow<PagingData<User>> = Pager(
+    override fun users(query: String): Flow<PagingData<User>> = Pager(
         config = PAGING_CONFIG,
-        remoteMediator = remoteMediator,
-        pagingSourceFactory = { pagingDao.pagingSource() },
+        remoteMediator = remoteMediator.takeIf { query.isBlank() },
+        pagingSourceFactory = { pagingDao.pagingSource(likePattern(query)) },
     ).flow.map { pagingData -> pagingData.map { it.toDomain() } }
 
     private companion object {

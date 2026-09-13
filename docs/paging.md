@@ -105,25 +105,95 @@ asked for — every page then looks short and the list stops after one. A server
 should either honour the requested size or be adapted to here explicitly; it is called out
 because it fails quietly, showing a list that is merely shorter than it should be.
 
-## What is not built yet
+## Searching a paged list
 
-**No screen consumes this.** `HomeViewModel` still reads `UserRepository.getUsers()`, which is
-the right shape for the handful of users it shows. Wiring a `LazyColumn` to
-`collectAsLazyPagingItems()` — with `key`, `contentType` and the load-state footer — was expected
-to arrive with the Phase 10 `LazyColumn` item, and did not: that item settled how the app's
-existing lists are keyed and typed and what `prefetchDistance` means for this `Pager`, and
-[`lazy-lists.md`](./lazy-lists.md) is where the result is. What it found is that the wiring is not
-one change. Two things have to be decided first, and neither is about lazy-list performance:
-search has to move out of `HomeViewModel`'s in-memory filter and into
-[`UserPagingDao.pagingSource`](../data/src/main/kotlin/com/kojo/boilerplate/core/database/dao/UserPagingDao.kt),
-because an in-memory filter over a `PagingData` sees only the pages already loaded and shortens
-the list rather than searching it; and `RefreshVisibleUsersUseCase`, which is called with the ids
-currently on screen, loses its input, because under paging the loaded items live in the presenter
-and not in the view model. Both change the contract in this file, so this is where that item
-belongs — it is listed as its own line in Phase 9.
+The search field filters the list, and where that filter runs is the decision worth reading.
+
+### It is a parameter of the query, not a predicate over the result
+
+`PagedUserRepository.users(query)` takes the query and passes it into
+[`UserPagingDao.pagingSource`](../data/src/main/kotlin/com/kojo/boilerplate/core/database/dao/UserPagingDao.kt)
+as a `LIKE` pattern. The obvious alternative — `PagingData.filter { … }` in the view model, or a
+`filter` on the list the screen renders — cannot work, and fails in a way that looks like it is
+working. A `PagingData` carries the pages that have been *loaded*, so a predicate over it searches
+the reader's scroll history: matches on page seven are invisible until something has fetched page
+seven. The list comes back short rather than filtered, and shorter the sooner the search is typed.
+
+The wildcards are escaped on the way in — see
+[`likePattern`](../data/src/main/kotlin/com/kojo/boilerplate/core/database/dao/SearchPattern.kt) —
+because `%` and `_` are a query language the user did not ask for and cannot see. A typed `%`
+would match everything, quietly clearing the filter; a typed `_` would match any character. A
+blank query becomes `%%`, so "not searching" is a pattern like any other and needs no second
+query, no nullable parameter and no branch in the SQL.
+
+### A search does not drive remote loading
+
+`remoteMediator` is `null` for every non-blank query. That one `takeIf` in `PagedUserRepositoryImpl`
+is what makes search terminate, and it is worth being explicit about what it gives up.
+
+Paging asks the mediator to `APPEND` when the `PagingSource` runs low near the reader's position.
+It has no idea the query is filtered, and no way to ask the server for matches: `GET /users` takes
+a page and a page size and nothing else. With the mediator attached, a search that matches three
+rows would append, fetch a page, commit it, invalidate the filtered source, still match three
+rows, and append again — walking the entire remote list, page by page, through the conflict
+resolver, on a keystroke. A query matching nothing pays the full cost for an empty screen.
+
+So a search covers **what has been downloaded**: a promise that can be kept offline, in constant
+time, and that the screen states plainly — the empty result says "no downloaded users match",
+which is a different sentence from "no users match" and is the true one. Filling the cache is what
+scrolling the unsearched list does.
+
+Closing that gap properly means a `?q=` on the endpoint, not a cleverer client. What a client can
+do instead is exactly one of two things, and both are worse: page the whole list eagerly, or page
+it lazily and call it a search.
+
+### Case
+
+SQLite's `LIKE` is case-insensitive for ASCII and case-sensitive beyond it, which is the one
+behavioural difference from the in-memory `contains(ignoreCase = true)` this replaced. Making it
+uniform is a collation decision for the `users` table — `COLLATE NOCASE` is ASCII-only too — and
+not something one query should take unilaterally, so it is written down rather than assumed.
+
+## What the screen does with the stream
+
+`HomeScreen` collects it with `collectAsLazyPagingItems()`, and three things about the wiring are
+not obvious:
+
+- **The stream lives on the state.** `HomeUiState.users` is a `Flow<PagingData<HomeItem>>`, because
+  a view model may expose nothing but `state` and `effects` (`docs/unidirectional-data-flow.md`).
+  The view model builds exactly one stream, `cachedIn(viewModelScope)`, and copies the same
+  reference into every state it emits — which is what keeps `HomeUiState`'s `@Immutable` honest and
+  stops a keystroke from rebuilding the presenter and restarting paging at page one.
+  `StabilityContractTest` pins it as the one `Flow` on a state class in the app.
+- **Load states replaced `HomeContent`.** The sealed `Loading` / `Users` / `Error` is gone: a failed
+  *append* has to leave the loaded pages on screen with a retry under them, and a sealed error
+  could only replace the whole list. The footer is `loadState.append`; the full-screen spinner and
+  error are `loadState.refresh` *and* `itemCount == 0`, so a refresh failing behind a populated
+  cache changes nothing the reader is looking at.
+- **The refresh fan-out reads the viewport.** `RefreshVisibleUsersUseCase` is called with the ids of
+  the rows laid out, taken from `LazyListState.layoutInfo` at the instant of the tap and carried on
+  `HomeUiEvent.RefreshClicked`. The view model cannot see them — under paging they are a fact about
+  the layout — and "every page loaded" would have been the wrong answer anyway: the fan-out makes
+  one request per id, so it would grow with the scroll.
+
+## What is not built yet
 
 **No instrumented test.** `UsersRemoteMediatorTest` covers which page is asked for, what is
 stored, and what is reported back, against a fake DAO. What it cannot cover is atomicity —
-`FakeUserPagingDao` has no transaction — and the generated Room `PagingSource` itself. Both need
-a real database, which is `androidTest`, which needs an emulator this project's CI does not yet
-run. The Phase 12 instrumented-matrix item is where that arrives.
+`FakeUserPagingDao` has no transaction — the generated Room `PagingSource` itself, or the `LIKE`
+and its `ESCAPE` clause now that the search is SQL. `SearchPatternTest` covers the half of the
+search that is a pure function; the half that is a query needs a real database, which is
+`androidTest`, which needs an emulator this project's CI does not yet run. The Phase 12
+instrumented-matrix item is where that arrives.
+
+**Nothing reads a `PagingData` back in a unit test.** `HomeViewModelTest` asserts which queries
+reach the repository and that the stream is one instance, which is the whole of what the view
+model decides; what a page *contains* cannot be read out of a `PagingData` without
+`androidx.paging:paging-testing`, which is not on the classpath. Adding it would let a test assert
+the mapping through the stream rather than by calling `toHomeItem` directly, and would let
+`HomeScreenTest` drive the load-state branches — the append footer, and a refresh error behind a
+populated cache — which today are reasoned about here and rendered untested.
+
+**`prefetchDistance` is still unmeasured.** See [`lazy-lists.md`](./lazy-lists.md): no device, no
+emulator, no Macrobenchmark. One page ahead is the library's default for the ordinary reason
+defaults are what they are.

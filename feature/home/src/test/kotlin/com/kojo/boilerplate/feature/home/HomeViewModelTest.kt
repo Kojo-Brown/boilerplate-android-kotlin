@@ -2,48 +2,61 @@ package com.kojo.boilerplate.feature.home
 
 import com.kojo.boilerplate.core.common.network.NetworkStatus
 import com.kojo.boilerplate.core.domain.model.User
-import com.kojo.boilerplate.core.domain.repository.UserRepository
 import com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase
 import com.kojo.boilerplate.core.testing.FakeNetworkMonitor
+import com.kojo.boilerplate.core.testing.FakeUserRepository
 import com.kojo.boilerplate.core.testing.MainDispatcherExtension
 import com.kojo.boilerplate.core.testing.syncStrategyFactoryOver
-import io.mockk.every
-import io.mockk.impl.annotations.MockK
-import io.mockk.junit5.MockKExtension
-import java.io.IOException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.RegisterExtension
 
+/**
+ * The read half of the home screen: the search, and the connectivity flag beside it.
+ * [HomeViewModelRefreshTest] covers the network fan-out.
+ *
+ * ### What moved out of this class when the list became paged
+ *
+ * Most of it. The assertions used to be over `HomeContent.Users.items` — a list the view model
+ * built by filtering everything Room held — and there is no such list any more: the rows are
+ * decided by a `LIKE` in `UserPagingDao` and delivered as pages. So the questions this file can
+ * still answer are the ones about *what the view model does with a keystroke*, and the fake
+ * records exactly that. Which rows a query returns is now a database test, and the ones that
+ * matter need a real SQLite — see the `androidTest` note in `docs/paging.md`.
+ *
+ * `Loading` and `Error` went with them. They are `LazyPagingItems.loadState` now, which lives in
+ * the composition; the retry tests that drove `HomeUiEvent.RetryClicked` went with the event.
+ *
+ * ### One scheduler
+ *
+ * Every dispatcher here shares one, `Dispatchers.Main` included, which is load-bearing and was
+ * not before. The search debounce used to sit upstream of the view model's own
+ * `flowOn(defaultDispatcher)`, so pinning that dispatcher was enough to put the `delay` on the
+ * test's clock. There is no `flowOn` any more: the debounce runs wherever the paged stream is
+ * collected, and `cachedIn(viewModelScope)` collects it on `Main`. With `Main` on a scheduler of
+ * its own, `advanceTimeBy` would advance a clock the debounce is not waiting on.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
-@ExtendWith(MockKExtension::class)
 class HomeViewModelTest {
+
+    private val mainDispatcher = UnconfinedTestDispatcher()
 
     @JvmField
     @RegisterExtension
-    val mainDispatcherExtension = MainDispatcherExtension()
-
-    @MockK
-    lateinit var userRepository: UserRepository
+    val mainDispatcherExtension = MainDispatcherExtension(mainDispatcher)
 
     private val testUsers = listOf(
         User(id = "1", displayName = "Alice Johnson", email = "alice@example.com"),
@@ -51,48 +64,38 @@ class HomeViewModelTest {
         User(id = "3", displayName = "Carol White", email = "carol@example.com"),
     )
 
-    @BeforeEach
-    fun setUp() {
-        every { userRepository.getUsers() } returns flowOf(testUsers)
-    }
+    private val pagedUsers = FakePagedUserRepository(testUsers)
 
     private val networkMonitor = FakeNetworkMonitor()
 
     private fun buildViewModel() = HomeViewModel(
-        userRepository = userRepository,
-        refreshVisibleUsers = RefreshVisibleUsersUseCase(syncStrategyFactoryOver(userRepository)),
-        defaultDispatcher = UnconfinedTestDispatcher(),
+        pagedUsers = pagedUsers,
+        refreshVisibleUsers = RefreshVisibleUsersUseCase(
+            syncStrategyFactoryOver(FakeUserRepository(testUsers)),
+        ),
         networkMonitor = networkMonitor,
     )
 
     /**
-     * `state` is built with stateIn(..., SharingStarted.WhileSubscribed), so its upstream does
-     * not run until something collects it. Reading .value with no subscriber returns the
-     * initial value forever — which is why every assertion below needs a subscriber.
-     * Collecting on backgroundScope keeps the state hot for the test and runTest tears it down
-     * automatically.
+     * Collects both halves of the screen, because both are `WhileSubscribed`-shaped and neither
+     * runs without a subscriber.
      *
-     * Both dispatchers are pinned to the test's own scheduler so there is a single clock —
-     * the search debounce and the retry backoff are both `delay()` upstream of the view
-     * model's own `flowOn`, so they only stay on virtual time while that holds.
+     * The second collector is the one that is easy to forget. `cachedIn` shares the paged stream
+     * `Lazily`, so the `flatMapLatest` under it — and therefore every call to the repository —
+     * starts on the *first collection of the pages*, not on the first collection of `state`. A
+     * test that collected only `state` would assert against a repository that had never been
+     * asked for anything.
      *
-     * [contents] records each time the *list* changed, which is what the debounce assertion is
-     * about. It is deliberately the content and not the whole state: a keystroke changes
-     * `searchQuery` and therefore produces a new `HomeUiState` — that is the text field
-     * updating, which must not be debounced — while leaving the list it was filtering
-     * untouched. `distinctUntilChanged` on the content is exactly "the list changed".
+     * `state.value.users` rather than a collected state's: it is the same instance in every
+     * emission, which is the point of the assertion in `the paged stream is one instance`.
      */
-    private fun TestScope.buildSubscribedViewModel(
-        contents: MutableList<HomeContent> = mutableListOf(),
-    ): HomeViewModel {
-        val viewModel = HomeViewModel(
-            userRepository = userRepository,
-            refreshVisibleUsers = RefreshVisibleUsersUseCase(syncStrategyFactoryOver(userRepository)),
-            defaultDispatcher = UnconfinedTestDispatcher(testScheduler),
-            networkMonitor = networkMonitor,
-        )
+    private fun TestScope.buildSubscribedViewModel(): HomeViewModel {
+        val viewModel = buildViewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.state.map { it.content }.distinctUntilChanged().collect { contents += it }
+            viewModel.state.collect { }
+        }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.state.value.users.collect { }
         }
         runCurrent()
         return viewModel
@@ -105,111 +108,71 @@ class HomeViewModelTest {
         runCurrent()
     }
 
-    private fun HomeViewModel.users(): HomeContent.Users =
-        state.value.content as HomeContent.Users
-
-    private fun HomeViewModel.userCount(): Int = users().items.size
-
     @Test
-    fun `the initial content is Loading`() {
-        assertEquals(HomeContent.Loading, buildViewModel().state.value.content)
+    fun `the screen starts by asking for everything`() = runTest(mainDispatcher) {
+        buildSubscribedViewModel()
+
+        // The empty query is a query like any other — `likePattern("")` is `%%` — which is why
+        // there is no separate "unfiltered" path anywhere below this.
+        assertEquals(listOf(""), pagedUsers.queries)
     }
 
     @Test
-    fun `every user is listed when the search query is empty`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-        val content = viewModel.state.value.content
-
-        assertTrue(content is HomeContent.Users)
-        val users = content as HomeContent.Users
-        assertEquals(3, users.items.size)
-        assertEquals("Alice Johnson", users.items[0].title)
-        assertEquals("alice@example.com", users.items[0].description)
-    }
-
-    @Test
-    fun `a search query filters users by display name`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-
-        enterQuery(viewModel, "alice")
-
-        assertEquals(1, viewModel.userCount())
-        assertEquals("Alice Johnson", viewModel.users().items[0].title)
-    }
-
-    @Test
-    fun `a search query filters users by email`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-
-        enterQuery(viewModel, "bob@")
-
-        assertEquals(1, viewModel.userCount())
-        assertEquals("Bob Smith", viewModel.users().items[0].title)
-    }
-
-    @Test
-    fun `a search query is case insensitive`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-
-        enterQuery(viewModel, "CAROL")
-
-        assertEquals(1, viewModel.userCount())
-        assertEquals("Carol White", viewModel.users().items[0].title)
-    }
-
-    @Test
-    fun `a search query with no match lists nothing`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-
-        enterQuery(viewModel, "xyz-no-match")
-
-        assertEquals(0, viewModel.userCount())
-    }
-
-    @Test
-    fun `clearing the search query restores the full list`() = runTest {
-        val viewModel = buildSubscribedViewModel()
-
-        enterQuery(viewModel, "alice")
-        enterQuery(viewModel, "")
-
-        assertEquals(3, viewModel.userCount())
-    }
-
-    @Test
-    fun `the search query in the state is every keystroke, without waiting for the debounce`() =
-        runTest {
-            val viewModel = buildSubscribedViewModel()
-
-            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("ali"))
-            runCurrent()
-
-            // The text field is bound to this. Debouncing it would make typing feel broken.
-            assertEquals("ali", viewModel.state.value.searchQuery)
+    fun `nothing is asked for until the pages are collected`() = runTest(mainDispatcher) {
+        val viewModel = buildViewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.state.collect { }
         }
-
-    @Test
-    fun `keystrokes typed within the debounce window produce a single filtered list`() = runTest {
-        val contents = mutableListOf<HomeContent>()
-        val viewModel = buildSubscribedViewModel(contents)
-
-        listOf("a", "al", "ali", "alic", "alice").forEach { keystroke ->
-            viewModel.onEvent(HomeUiEvent.SearchQueryChanged(keystroke))
-            advanceTimeBy(TYPING_GAP)
-        }
-        advanceTimeBy(SETTLE)
         runCurrent()
 
-        // Without the debounce every prefix would filter the list and render: "a" alone
-        // matches Alice and Carol, so the intermediate lists are visibly different.
-        assertEquals(
-            listOf(3, 1),
-            contents.filterIsInstance<HomeContent.Users>().map { it.items.size },
-        )
+        // `cachedIn` shares Lazily. A screen that renders the search field but never collects
+        // the pages opens no database query, which is the behaviour that makes the two-pane
+        // layout's collapsed pane free.
+        assertEquals(emptyList<String>(), pagedUsers.queries)
     }
 
     @Test
-    fun `clearing the query is not held back by the debounce`() = runTest {
+    fun `a search query reaches the repository`() = runTest(mainDispatcher) {
+        val viewModel = buildSubscribedViewModel()
+
+        enterQuery(viewModel, "alice")
+
+        // The filter is a parameter of the query the pages are made of, not a predicate applied
+        // to them: an in-memory filter over a `PagingData` sees only the pages already loaded.
+        assertEquals(listOf("", "alice"), pagedUsers.queries)
+    }
+
+    @Test
+    fun `surrounding whitespace is not a different search`() = runTest(mainDispatcher) {
+        val viewModel = buildSubscribedViewModel()
+
+        enterQuery(viewModel, "alice")
+        enterQuery(viewModel, "alice ")
+
+        // A soft keyboard adds the trailing space after a word. Under paging, taking it for a
+        // new query would tear down a `Pager` and build another to run the same SQL.
+        assertEquals(listOf("", "alice"), pagedUsers.queries)
+    }
+
+    @Test
+    fun `keystrokes typed within the debounce window produce a single search`() =
+        runTest(mainDispatcher) {
+            val viewModel = buildSubscribedViewModel()
+
+            listOf("a", "al", "ali", "alic", "alice").forEach { keystroke ->
+                viewModel.onEvent(HomeUiEvent.SearchQueryChanged(keystroke))
+                advanceTimeBy(TYPING_GAP)
+            }
+            advanceTimeBy(SETTLE)
+            runCurrent()
+
+            // Undebounced this is five `Pager`s, four of which exist only long enough to run an
+            // initial load of three pages against the database and be cancelled.
+            assertEquals(listOf("", "alice"), pagedUsers.queries)
+        }
+
+    @Test
+    fun `clearing the query is not held back by the debounce`() = runTest(mainDispatcher) {
         val viewModel = buildSubscribedViewModel()
         enterQuery(viewModel, "alice")
         val clearedAt = currentTime
@@ -217,112 +180,47 @@ class HomeViewModelTest {
         viewModel.onEvent(HomeUiEvent.SearchQueryChanged(""))
         runCurrent()
 
-        assertEquals(3, viewModel.userCount())
+        // "Show me everything again" needs no rate limiting, and delaying it would put a
+        // debounce-length flash of an empty list in front of the restored list.
+        assertEquals(listOf("", "alice", ""), pagedUsers.queries)
         assertEquals(clearedAt, currentTime)
     }
 
     @Test
-    fun `the list reflects repository updates reactively`() = runTest {
-        val usersFlow = MutableStateFlow(testUsers)
-        every { userRepository.getUsers() } returns usersFlow
-        val viewModel = buildSubscribedViewModel()
+    fun `the search query in the state is every keystroke, without waiting for the debounce`() =
+        runTest(mainDispatcher) {
+            val viewModel = buildSubscribedViewModel()
 
-        assertTrue(viewModel.state.value.content is HomeContent.Users)
+            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("ali"))
+            runCurrent()
 
-        val newUser = User(id = "4", displayName = "Dave Brown", email = "dave@example.com")
-        usersFlow.value = testUsers + newUser
-
-        assertEquals(4, viewModel.userCount())
-    }
-
-    @Test
-    fun `a transient repository failure recovers without the user tapping retry`() = runTest {
-        var subscriptions = 0
-        every { userRepository.getUsers() } returns flow {
-            subscriptions++
-            if (subscriptions == 1) throw IOException("connection reset")
-            emit(testUsers)
+            // The text field is bound to this. Debouncing it would make typing feel broken.
+            assertEquals("ali", viewModel.state.value.searchQuery)
+            assertEquals(listOf(""), pagedUsers.queries)
         }
 
-        val viewModel = buildSubscribedViewModel()
-
-        // Still Loading rather than Error: the backoff has not elapsed, so the failure has
-        // not been shown to anyone yet.
-        assertEquals(HomeContent.Loading, viewModel.state.value.content)
-
-        advanceUntilIdle()
-
-        assertEquals(3, viewModel.userCount())
-        assertEquals(2, subscriptions)
-    }
-
     @Test
-    fun `the error content appears only once the retries are exhausted`() = runTest {
-        var subscriptions = 0
-        every { userRepository.getUsers() } returns flow {
-            subscriptions++
-            throw IOException("network error")
+    fun `the paged stream is one instance across every state the screen renders`() =
+        runTest(mainDispatcher) {
+            val viewModel = buildSubscribedViewModel()
+            val first = viewModel.state.value.users
+
+            viewModel.onEvent(HomeUiEvent.SearchQueryChanged("ali"))
+            runCurrent()
+            networkMonitor.emit(NetworkStatus.Offline)
+            runCurrent()
+
+            // What `HomeUiState`'s `@Immutable` promises, and what stops the screen rebuilding
+            // its `LazyPagingItems` — restarting paging at page one — every time an unrelated
+            // field moves. A `Flow` has no `equals`, so identity is the whole of it.
+            assertSame(first, viewModel.state.value.users)
         }
 
-        val viewModel = buildSubscribedViewModel()
-        assertEquals(HomeContent.Loading, viewModel.state.value.content)
-
-        advanceUntilIdle()
-
-        val content = viewModel.state.value.content
-        assertTrue(content is HomeContent.Error)
-        assertEquals("network error", (content as HomeContent.Error).message)
-        assertEquals(4, subscriptions) // the first attempt plus three retries
-    }
-
     @Test
-    fun `a failure that another attempt cannot fix is surfaced immediately`() = runTest {
-        var subscriptions = 0
-        every { userRepository.getUsers() } returns flow {
-            subscriptions++
-            error("unparseable row")
-        }
+    fun `a user is rendered as its display name over its email`() {
+        val item = testUsers[0].toHomeItem()
 
-        val viewModel = buildSubscribedViewModel()
-
-        assertTrue(viewModel.state.value.content is HomeContent.Error)
-        assertEquals(1, subscriptions)
-        assertEquals(0L, currentTime)
-    }
-
-    @Test
-    fun `retry triggers new collection after error`() = runTest {
-        every { userRepository.getUsers() } returns flow { throw IOException("transient error") }
-        val viewModel = buildSubscribedViewModel()
-        advanceUntilIdle()
-
-        assertTrue(viewModel.state.value.content is HomeContent.Error)
-
-        every { userRepository.getUsers() } returns flowOf(testUsers)
-        viewModel.onEvent(HomeUiEvent.RetryClicked)
-        advanceUntilIdle()
-
-        assertEquals(3, viewModel.userCount())
-    }
-
-    @Test
-    fun `retry cancels the collection it replaces`() = runTest {
-        val firstCollection = MutableStateFlow(testUsers)
-        every { userRepository.getUsers() } returns firstCollection
-        val viewModel = buildSubscribedViewModel()
-        assertEquals(3, viewModel.userCount())
-
-        val secondCollection = MutableStateFlow(emptyList<User>())
-        every { userRepository.getUsers() } returns secondCollection
-        viewModel.onEvent(HomeUiEvent.RetryClicked)
-        advanceUntilIdle()
-
-        // flatMapLatest cancelled the first subscription, so the abandoned flow can no longer
-        // write to the state. Under flatMapConcat or merge this would race back to three items.
-        firstCollection.value = testUsers.take(2)
-        advanceUntilIdle()
-
-        assertEquals(0, viewModel.userCount())
+        assertEquals(HomeItem(id = "1", title = "Alice Johnson", description = "alice@example.com"), item)
     }
 
     @Test
@@ -333,40 +231,42 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `isOffline follows the monitor in both directions while subscribed`() = runTest {
-        val viewModel = buildViewModel()
-        val values = mutableListOf<Boolean>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
+    fun `isOffline follows the monitor in both directions while subscribed`() =
+        runTest(mainDispatcher) {
+            val viewModel = buildViewModel()
+            val values = mutableListOf<Boolean>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
+            }
+            runCurrent()
+
+            networkMonitor.emit(NetworkStatus.Offline)
+            runCurrent()
+            networkMonitor.emit(FakeNetworkMonitor.ONLINE)
+            runCurrent()
+
+            // The leading `false` is the assumed-online value the state starts at, which the
+            // monitor's own "online" agrees with — so nothing is emitted for it.
+            assertEquals(listOf(false, true, false), values)
         }
-        runCurrent()
-
-        networkMonitor.emit(NetworkStatus.Offline)
-        runCurrent()
-        networkMonitor.emit(FakeNetworkMonitor.ONLINE)
-        runCurrent()
-
-        // The leading `false` is the assumed-online value the state starts at, which the
-        // monitor's own "online" agrees with — so nothing is emitted for it.
-        assertEquals(listOf(false, true, false), values)
-    }
 
     @Test
-    fun `a captive portal counts as online because a retry cannot fix it`() = runTest {
-        val viewModel = buildViewModel()
-        val values = mutableListOf<Boolean>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
+    fun `a captive portal counts as online because a retry cannot fix it`() =
+        runTest(mainDispatcher) {
+            val viewModel = buildViewModel()
+            val values = mutableListOf<Boolean>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.state.map { it.isOffline }.distinctUntilChanged().collect { values += it }
+            }
+            runCurrent()
+
+            // Joined, routable, and every request will come back with a login page. That is not
+            // the same failure as having no network, and the offline banner would be a lie.
+            networkMonitor.emit(NetworkStatus.Online(isValidated = false, isMetered = false))
+            runCurrent()
+
+            assertEquals(listOf(false), values)
         }
-        runCurrent()
-
-        // Joined, routable, and every request will come back with a login page. That is not
-        // the same failure as having no network, and the offline banner would be a lie.
-        networkMonitor.emit(NetworkStatus.Online(isValidated = false, isMetered = false))
-        runCurrent()
-
-        assertEquals(listOf(false), values)
-    }
 
     private companion object {
         /** Comfortably past the 300ms search debounce. */

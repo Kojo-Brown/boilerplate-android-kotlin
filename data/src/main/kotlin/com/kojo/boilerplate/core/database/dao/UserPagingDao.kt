@@ -33,16 +33,38 @@ import com.kojo.boilerplate.core.database.entity.UserPageKeyEntity
 abstract class UserPagingDao {
 
     /**
-     * Every cached user as a `PagingSource`, ordered exactly as [UserDao.observeAll] orders
-     * them — the two views of the same table must not disagree about order, or a user appears
-     * in a different place depending on which screen is showing it.
+     * The cached users matching [pattern], as a `PagingSource`, ordered exactly as
+     * [UserDao.observeAll] orders them — the two views of the same table must not disagree about
+     * order, or a user appears in a different place depending on which screen is showing it.
      *
      * Room generates the `LIMIT`/`OFFSET` and, more importantly, the invalidation: any write to
      * `users` invalidates this source and Paging re-presents from the database. That is what
-     * makes a locally edited row show up in a paged list without a refresh.
+     * makes a locally edited row show up in a paged list without a refresh. The same mechanism
+     * is what makes the search below cost nothing extra to keep current: changing [pattern]
+     * builds a new `PagingSource`, and a write while one is open re-runs the filtered query
+     * rather than a full one the presenter would then have to filter again.
+     *
+     * ## Why the filter is here and not over the `PagingData`
+     *
+     * Because a `PagingData` is a stream of the pages that have been *loaded*, so filtering it
+     * in the presenter searches the part of the list the reader has already scrolled past. The
+     * result is not a wrong row — it is a list that is silently short, and that gets shorter the
+     * earlier the search is typed. The `LIKE` has to be in the query that decides which rows
+     * exist for the list at all, which is this one.
+     *
+     * @param pattern a `LIKE` pattern from [likePattern], which is the only thing that should
+     *   build one: it escapes the wildcards in what the user typed and matches the `ESCAPE`
+     *   clause below. `%%` — what a blank query produces — matches every row.
      */
-    @Query("SELECT * FROM users ORDER BY displayName ASC")
-    abstract fun pagingSource(): PagingSource<Int, UserEntity>
+    @Query(
+        """
+        SELECT * FROM users
+        WHERE displayName LIKE :pattern ESCAPE '\'
+           OR email LIKE :pattern ESCAPE '\'
+        ORDER BY displayName ASC
+        """,
+    )
+    abstract fun pagingSource(pattern: String): PagingSource<Int, UserEntity>
 
     /**
      * The pagination cursor, or `null` if no page has ever been stored.
