@@ -183,7 +183,7 @@ class DerivedStateContractTest {
         private fun findComposables(): List<ComposableFunction> =
             FUN_DECLARATION.findAll(source.code).mapNotNull { match ->
                 val open = match.range.last
-                val close = closingBracket(source.code, open) ?: return@mapNotNull null
+                val close = source.code.closingBracketAt(open) ?: return@mapNotNull null
                 if (!annotatedComposable(match.range.first)) return@mapNotNull null
                 ComposableFunction(
                     name = match.groupValues[1],
@@ -208,7 +208,7 @@ class DerivedStateContractTest {
         private fun findMemoisations(): List<Memoisation> =
             MEMO_CALL.findAll(source.code).mapNotNull { match ->
                 val bracket = match.range.last
-                val close = closingBracket(source.code, bracket) ?: return@mapNotNull null
+                val close = source.code.closingBracketAt(bracket) ?: return@mapNotNull null
                 val keyed = source.code[bracket] == '('
                 Memoisation(
                     name = match.groupValues[1],
@@ -257,19 +257,6 @@ class DerivedStateContractTest {
         )
 
         private fun String.isStateFactory(): Boolean = STATE_FACTORY.containsMatchIn(this)
-
-        /** The index of the bracket closing the one at [open], or null if it is unbalanced. */
-        private fun closingBracket(code: String, open: Int): Int? {
-            val close = if (code[open] == '(') ')' else '}'
-            var depth = 0
-            for (index in open until code.length) {
-                when (code[index]) {
-                    code[open] -> depth++
-                    close -> if (--depth == 0) return index
-                }
-            }
-            return null
-        }
 
         /**
          * Whether the call at [start] is the whole body of a `remember { }`, read by walking

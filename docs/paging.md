@@ -109,9 +109,18 @@ because it fails quietly, showing a list that is merely shorter than it should b
 
 **No screen consumes this.** `HomeViewModel` still reads `UserRepository.getUsers()`, which is
 the right shape for the handful of users it shows. Wiring a `LazyColumn` to
-`collectAsLazyPagingItems()` — with `key`, `contentType` and the load-state footer — is the
-Phase 10 `LazyColumn` item, and doing it here would have meant rewriting `HomeUiState`,
-`HomeScreen` and their tests inside a data-layer change.
+`collectAsLazyPagingItems()` — with `key`, `contentType` and the load-state footer — was expected
+to arrive with the Phase 10 `LazyColumn` item, and did not: that item settled how the app's
+existing lists are keyed and typed and what `prefetchDistance` means for this `Pager`, and
+[`lazy-lists.md`](./lazy-lists.md) is where the result is. What it found is that the wiring is not
+one change. Two things have to be decided first, and neither is about lazy-list performance:
+search has to move out of `HomeViewModel`'s in-memory filter and into
+[`UserPagingDao.pagingSource`](../data/src/main/kotlin/com/kojo/boilerplate/core/database/dao/UserPagingDao.kt),
+because an in-memory filter over a `PagingData` sees only the pages already loaded and shortens
+the list rather than searching it; and `RefreshVisibleUsersUseCase`, which is called with the ids
+currently on screen, loses its input, because under paging the loaded items live in the presenter
+and not in the view model. Both change the contract in this file, so this is where that item
+belongs — it is listed as its own line in Phase 9.
 
 **No instrumented test.** `UsersRemoteMediatorTest` covers which page is asked for, what is
 stored, and what is reported back, against a fake DAO. What it cannot cover is atomicity —

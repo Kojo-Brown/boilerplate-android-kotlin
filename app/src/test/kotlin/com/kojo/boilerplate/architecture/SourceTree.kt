@@ -43,6 +43,37 @@ internal object SourceTree {
 
 internal fun File.invariantPath(): String = path.replace(File.separatorChar, '/')
 
+/**
+ * The index of the bracket closing the one at [open] — `(`, `{` or `[` — or `null` if it never
+ * closes.
+ *
+ * Lives here rather than in the one test that first needed it for the reason [KotlinSource] does:
+ * it arrived private in [DerivedStateContractTest], [LazyListContractTest] needs exactly the same
+ * walk, and a second copy would be a second copy of its bugs. It is only correct over
+ * [KotlinSource.code] — a brace inside a comment or a string literal counts as a brace here, which
+ * is what blanking those spans first removes.
+ */
+internal fun String.closingBracketAt(open: Int): Int? {
+    val opening = this[open]
+    val closing = when (opening) {
+        '(' -> ')'
+        '[' -> ']'
+        else -> '}'
+    }
+    var depth = 0
+    for (index in open until length) {
+        when (this[index]) {
+            opening -> depth++
+            closing -> if (--depth == 0) return index
+        }
+    }
+    return null
+}
+
+/** The index of the first non-whitespace character at or after [from], or `null` past the end. */
+internal fun String.nextNonSpaceFrom(from: Int): Int? =
+    (from until length).firstOrNull { !this[it].isWhitespace() }
+
 /** This file's path relative to the repository root, in the form the pinned sets are written in. */
 internal fun File.repositoryPath(): String = relativeTo(SourceTree.root).invariantPath()
 

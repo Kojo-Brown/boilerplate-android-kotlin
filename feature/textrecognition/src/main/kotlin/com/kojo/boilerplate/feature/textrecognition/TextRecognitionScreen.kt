@@ -279,7 +279,7 @@ private fun TextDetectedContent(
         modifier = modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
+        item(key = TextDetectedItem.Heading, contentType = TextDetectedItem.Heading) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Recognized Text",
@@ -288,7 +288,7 @@ private fun TextDetectedContent(
             )
         }
 
-        item {
+        item(key = TextDetectedItem.FullText, contentType = TextDetectedItem.FullText) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -306,7 +306,7 @@ private fun TextDetectedContent(
         }
 
         if (scan.blocks.isNotEmpty()) {
-            item {
+            item(key = TextDetectedItem.BlockHeading, contentType = TextDetectedItem.BlockHeading) {
                 Text(
                     text = "Text Blocks (${scan.blocks.size})",
                     style = MaterialTheme.typography.titleMedium,
@@ -314,12 +314,20 @@ private fun TextDetectedContent(
                 )
             }
 
-            itemsIndexed(scan.blocks) { index, block ->
+            // Deliberately unkeyed: a block carries no identity of its own — two blocks in one
+            // frame can hold the same text, and a key that repeats is an exception from the lazy
+            // layout rather than a mis-render — so its index is the only identity there is, and
+            // it is the right one for a list that is only ever replaced whole. See
+            // `docs/lazy-lists.md`; `LazyListContractTest.EXPECTED_INDEX_KEYED` pins the claim.
+            itemsIndexed(
+                items = scan.blocks,
+                contentType = { _, _ -> TextDetectedItem.Block },
+            ) { index, block ->
                 TextBlockCard(index = index + 1, block = block)
             }
         }
 
-        item {
+        item(key = TextDetectedItem.CopyAction, contentType = TextDetectedItem.CopyAction) {
             Button(
                 onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -331,7 +339,7 @@ private fun TextDetectedContent(
             }
         }
 
-        item {
+        item(key = TextDetectedItem.ResumeAction, contentType = TextDetectedItem.ResumeAction) {
             OutlinedButton(
                 onClick = onResumeScanning,
                 modifier = Modifier.fillMaxWidth(),
@@ -340,10 +348,49 @@ private fun TextDetectedContent(
             }
         }
 
-        item {
+        item(key = TextDetectedItem.BottomSpacer, contentType = TextDetectedItem.BottomSpacer) {
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
+}
+
+/**
+ * The seven shapes [TextDetectedContent] puts in one `LazyColumn`, used as both the `key` and the
+ * `contentType` of the slots that produce them.
+ *
+ * ## As `contentType`
+ *
+ * A lazy layout reuses a scrolled-off item's composition for an incoming one, but only when the
+ * two declare the same content type — otherwise the subcomposition's slot table describes a
+ * different tree and there is nothing to reuse. Every slot here left its content type at the
+ * default of `null`, which is one type shared by all of them, so the reuse pool offered a
+ * `Button`'s composition to a `Text` and to a bordered block card, and every "reuse" threw the
+ * whole subtree away and built a new one. Naming the shapes puts blocks — the only slot there is
+ * ever more than one of, and therefore the only one reuse can pay off on — in a pool of their own.
+ *
+ * ## As `key`
+ *
+ * A slot with no key is identified by its index in the item provider, and two of the seven are
+ * emitted conditionally: when `scan.blocks` is empty the block heading and every card disappear,
+ * so the copy button, the scan-again button and the bottom spacer all shift up by
+ * `blocks.size + 1`. Under index identity that reads as three items being replaced by three
+ * different ones — their `remember`ed state is discarded and a scroll anchored to one of them
+ * jumps. Named keys make them the same three items that were always there.
+ *
+ * An `enum` rather than a `String` because a key must survive being written to a `Bundle` for
+ * saved-item state to be restored after process death, and Compose's registry accepts a key that
+ * is `Serializable`, which every enum entry is. It is also the narrower type: a typo in a string
+ * key is a silent duplicate, and a duplicate key is an `IllegalArgumentException` from the lazy
+ * layout at runtime.
+ */
+private enum class TextDetectedItem {
+    Heading,
+    FullText,
+    BlockHeading,
+    Block,
+    CopyAction,
+    ResumeAction,
+    BottomSpacer,
 }
 
 @Composable
