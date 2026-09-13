@@ -47,6 +47,15 @@ class PagedUserRepositoryImpl @Inject constructor(
     ).flow.map { pagingData -> pagingData.map { it.toDomain() } }
 
     private companion object {
+
+        /**
+         * Rows per page, and therefore the `per_page` the mediator sends — it reads it back off
+         * `state.config.pageSize`, so this is the request size as well. Named because
+         * [PAGING_CONFIG] now uses it twice and the two uses have to move together; the
+         * `prefetchDistance` note below is why.
+         */
+        const val PAGE_SIZE = 20
+
         /**
          * `enablePlaceholders = false` because nothing knows how many users there are. The
          * count would have to come from the server, this endpoint deliberately does not report
@@ -57,11 +66,23 @@ class PagedUserRepositoryImpl @Inject constructor(
          * the reader waits on, and filling more than a screen with it is what stops an
          * immediate scroll from hitting an empty append.
          *
-         * `pageSize` is the number the mediator passes to the API as `per_page`, so this
-         * constant is also the request size — see `UsersRemoteMediator.fetchAndStore`.
+         * `prefetchDistance` is how far from the loaded edge an access has to be before the
+         * next page is requested, and it is **item prefetch for this list** — Compose's own
+         * lazy-layout prefetch composes one item ahead of the viewport out of data it already
+         * has, and cannot ask for data that has not been fetched. So the choice of whether the
+         * reader ever waits at the bottom of the list is made here and not in the
+         * `LazyColumn`; `docs/lazy-lists.md` is where the two halves are set beside each other.
+         *
+         * One page ahead is the value, written as [PAGE_SIZE] rather than as `20`. That is
+         * also `PagingConfig`'s default — the default *is* `pageSize`, and restating it is the
+         * point: as a defaulted parameter, halving the page size to cut request cost would
+         * silently halve the prefetch window too, which is a scroll-smoothness regression
+         * arriving from a line that says nothing about scrolling. Written out, the coupling is
+         * deliberate and a reviewer sees both numbers move.
          */
         val PAGING_CONFIG = PagingConfig(
-            pageSize = 20,
+            pageSize = PAGE_SIZE,
+            prefetchDistance = PAGE_SIZE,
             enablePlaceholders = false,
         )
     }

@@ -72,6 +72,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   which `derivedStateOf` cuts work rather than adding it, the three call sites in this app that
   look like they meet it and do not, and why an unkeyed `remember` over a parameter renders the
   argument the screen was first given for as long as it stays composed.
+- [Lazy lists: keys, content types, and prefetch](./docs/lazy-lists.md) — why a mixed-shape list
+  reuses nothing at the default `contentType`, when the index is the right identity for an item
+  and when it silently hands one row's state to another, and which of the two things called
+  "prefetch" is a `LazyColumn` setting and which is a `PagingConfig` one.
 - [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
   writes and nobody reads, turned into a CI gate: every restartable composable skips or is
   named, with a reason, in an allowlist that fails when it stops matching.

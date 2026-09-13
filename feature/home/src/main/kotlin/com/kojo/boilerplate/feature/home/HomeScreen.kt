@@ -304,6 +304,15 @@ private fun HomeUserList(
                 )
             }
         } else {
+            // Keyed on the user id, and with no `contentType`, which is the right pair for this
+            // list rather than an omission. A key is what survives a reorder: this list is
+            // rebuilt from the database on every write and re-sorted by display name, so under
+            // the default index identity a rename would hand row 4's composition — and its
+            // remembered state — to whoever moved into position 4. `contentType` only groups a
+            // reuse pool by shape, and there is exactly one shape here, so naming it would
+            // partition the pool into the single class it already is. `docs/lazy-lists.md` has
+            // the argument; `LazyListContractTest` requires a content type only of a list that
+            // emits more than one kind of slot.
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
