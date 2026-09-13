@@ -19,9 +19,16 @@ android {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:domain"))
+    // The paged user contract. `:core:paging` exposes `PagingData` and `User` as `api`, so
+    // naming `Flow<PagingData<HomeItem>>` in `HomeUiState` needs nothing else on the classpath.
+    implementation(project(":core:paging"))
     implementation(project(":core:ui"))
 
     implementation(libs.androidx.core.ktx)
+    // The Compose half of Paging, and only this module needs it: `:data` builds the `Pager` and
+    // `:core:paging` declares the contract, but `collectAsLazyPagingItems` belongs wherever the
+    // list is actually composed.
+    implementation(libs.androidx.paging.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.hilt.navigation.compose)

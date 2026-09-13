@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DocumentScanner
@@ -31,6 +32,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -39,9 +41,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemContentType
+import androidx.paging.compose.itemKey
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import kotlinx.coroutines.launch
@@ -60,6 +68,16 @@ fun HomeScreen(
     // model. Whether that capture costs a recomposition depends on a compiler default rather
     // than on this file — see `rememberEventSink` and `docs/recomposition.md`.
     val onEvent = rememberEventSink(viewModel)
+    // The presenter for the paged stream, and the reason this screen has one at all: which pages
+    // are live depends on where the reader has scrolled, so it belongs to the composition rather
+    // than to the view model. `state.users` is the same `Flow` instance in every state the view
+    // model emits — see `HomeUiState` — so this is remembered across recompositions and paging
+    // does not restart when the search text or the offline flag changes.
+    val users = state.users.collectAsLazyPagingItems()
+    // Hoisted rather than left to `LazyColumn`'s default because the refresh action reads it:
+    // under paging, "the users currently on screen" is a fact about the layout, and this is
+    // where the layout keeps it.
+    val listState = rememberLazyListState()
     // The app bar's action slot is its own recompose scope and the only thing it needs out of
     // `state` is one Boolean — while `state` itself is replaced on every keystroke, because the
     // text field is bound to `searchQuery` undebounced. Reading `state.isRefreshing` there makes
@@ -103,7 +121,12 @@ fun HomeScreen(
                 actions = {
                     RefreshAction(
                         inProgress = isRefreshing,
-                        onRefresh = { onEvent(HomeUiEvent.RefreshClicked) },
+                        // Read at the instant of the tap, which is when "what I am looking at"
+                        // is defined. Reading `layoutInfo` during composition instead would
+                        // subscribe this slot to every scrolled pixel.
+                        onRefresh = {
+                            onEvent(HomeUiEvent.RefreshClicked(listState.visibleUserIds()))
+                        },
                     )
                 },
             )
@@ -141,13 +164,30 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
             HomeBody(
-                content = state.content,
-                onRetry = { onEvent(HomeUiEvent.RetryClicked) },
+                users = users,
+                greeting = state.greeting,
+                searchQuery = state.searchQuery,
+                listState = listState,
                 onItemClick = { item -> onNavigateToProfile(item.id) },
             )
         }
     }
 }
+
+/**
+ * The ids of the rows the reader can actually see, in view order.
+ *
+ * Each laid-out item carries the `key` its slot declared, so this is the list's own identity
+ * read back rather than a second copy of it kept in step by hand. The `as? String` is what
+ * separates the two kinds of key in this list: a user row is keyed on [HomeItem.id], and the
+ * load-state footer on a [HomeListSlot] — so the footer, and a placeholder key were placeholders
+ * ever enabled, drop out without a name having to be matched.
+ *
+ * Not a `@Composable`, and never read during composition: a `layoutInfo` read in a composition
+ * subscribes it to every frame of a scroll.
+ */
+private fun LazyListState.visibleUserIds(): List<String> =
+    layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }
 
 /**
  * The refresh control, which is a spinner while the fan-out is in flight and a button
@@ -254,30 +294,44 @@ internal fun SearchBar(
 }
 
 /**
- * The part of the screen that the mutually-exclusive [HomeContent] governs. Named for the
- * region it fills rather than for the type it renders, so it does not read as a constructor
- * call for the sealed interface it takes.
+ * The region the list fills, and the three things the *refresh* load state can say about it.
+ *
+ * Both full-screen branches are guarded on `itemCount == 0`, which is the whole difference
+ * between this and the sealed `HomeContent` it replaced. A refresh that fails with pages already
+ * cached must leave them on screen — the reader can still read them, and `docs/paging.md` makes
+ * that a property of the design rather than a nicety — so an error replaces the list only when
+ * there is no list to replace. The same guard is why a mediator refresh behind a populated cache
+ * shows no spinner: the rows are already correct, and a spinner over them would say otherwise.
  */
 @Composable
 internal fun HomeBody(
-    content: HomeContent,
-    onRetry: () -> Unit,
+    users: LazyPagingItems<HomeItem>,
+    greeting: String,
+    searchQuery: String,
+    listState: LazyListState,
     onItemClick: (HomeItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val refresh = users.loadState.refresh
     Box(modifier = modifier.fillMaxSize()) {
-        when (content) {
-            is HomeContent.Loading -> {
+        when {
+            refresh is LoadState.Loading && users.itemCount == 0 -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            is HomeContent.Users -> {
-                HomeUserList(users = content, onItemClick = onItemClick)
-            }
-            is HomeContent.Error -> {
+            refresh is LoadState.Error && users.itemCount == 0 -> {
                 HomeErrorContent(
-                    message = content.message,
-                    onRetry = onRetry,
+                    message = refresh.error.message ?: "Failed to load users",
+                    onRetry = users::retry,
                     modifier = Modifier.align(Alignment.Center),
+                )
+            }
+            else -> {
+                HomeUserList(
+                    users = users,
+                    greeting = greeting,
+                    searchQuery = searchQuery,
+                    listState = listState,
+                    onItemClick = onItemClick,
                 )
             }
         }
@@ -286,43 +340,195 @@ internal fun HomeBody(
 
 @Composable
 private fun HomeUserList(
-    users: HomeContent.Users,
+    users: LazyPagingItems<HomeItem>,
+    greeting: String,
+    searchQuery: String,
+    listState: LazyListState,
     onItemClick: (HomeItem) -> Unit,
 ) {
     Column {
         Text(
-            text = users.greeting,
+            text = greeting,
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
-        if (users.items.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No results found",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        if (users.itemCount == 0) {
+            EmptyUserList(searchQuery = searchQuery, modifier = Modifier.fillMaxSize())
         } else {
-            // Keyed on the user id, and with no `contentType`, which is the right pair for this
-            // list rather than an omission. A key is what survives a reorder: this list is
-            // rebuilt from the database on every write and re-sorted by display name, so under
+            // Keyed on the user id and typed by slot, which is the pair this list needs now that
+            // it is not one shape any more. The key is what survives a reorder: the rows are
+            // re-queried from the database on every write and sorted by display name, so under
             // the default index identity a rename would hand row 4's composition — and its
-            // remembered state — to whoever moved into position 4. `contentType` only groups a
-            // reuse pool by shape, and there is exactly one shape here, so naming it would
-            // partition the pool into the single class it already is. `docs/lazy-lists.md` has
-            // the argument; `LazyListContractTest` requires a content type only of a list that
-            // emits more than one kind of slot.
+            // remembered state — to whoever moved into position 4. It is also what the refresh
+            // action reads back out of `layoutInfo`.
+            //
+            // `contentType` was deliberately absent while the list emitted a single `items` call
+            // over a single card. The load-state footer is a second shape, so the reuse pool is
+            // now one a card can be handed a footer's slot table out of — which composes from
+            // scratch and looks like nothing at all. `docs/lazy-lists.md` has the argument;
+            // `LazyListContractTest` is what requires it of a list that emits more than one kind
+            // of slot.
             LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(users.items, key = { it.id }) { item ->
-                    HomeItemCard(item = item, onClick = { onItemClick(item) })
+                items(
+                    count = users.itemCount,
+                    key = users.itemKey { it.id },
+                    contentType = users.itemContentType { HomeListSlot.User },
+                ) { index ->
+                    // Nullable because `LazyPagingItems` hands back a placeholder for a row it
+                    // has not loaded. This `Pager` disables placeholders — nothing knows how many
+                    // users there are, so a placeholder list would be sized from a guess — so in
+                    // practice this is never null, and the `?.let` is the type system's price for
+                    // that being a configuration rather than a signature.
+                    users[index]?.let { item ->
+                        HomeItemCard(item = item, onClick = { onItemClick(item) })
+                    }
+                }
+
+                // The footer, written inline rather than extracted to a `LazyListScope`
+                // extension: `LazyListContractTest` attributes a slot to the lazy container that
+                // lexically encloses it, so slots emitted from a helper would belong to no
+                // container and stop being audited for keys and content types.
+                when (val append = users.loadState.append) {
+                    is LoadState.Loading -> {
+                        item(key = HomeListSlot.Appending, contentType = HomeListSlot.Appending) {
+                            AppendingFooter()
+                        }
+                    }
+                    is LoadState.Error -> {
+                        item(key = HomeListSlot.AppendFailed, contentType = HomeListSlot.AppendFailed) {
+                            AppendFailedFooter(
+                                message = append.error.message ?: "Could not load more users",
+                                onRetry = users::retry,
+                            )
+                        }
+                    }
+                    is LoadState.NotLoading -> {
+                        if (append.endOfPaginationReached) {
+                            item(key = HomeListSlot.EndOfList, contentType = HomeListSlot.EndOfList) {
+                                EndOfListFooter(searching = searchQuery.isNotBlank())
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+/**
+ * The shapes this list puts in one `LazyColumn`, used as both the `key` and the `contentType` of
+ * every slot that is not a user row.
+ *
+ * An `enum` rather than string constants for two reasons. A key is written to a `Bundle` when
+ * saved item state is preserved across process death, and Compose's registry accepts a key that
+ * is `Serializable`, which every enum entry is. And it is the narrower type: a typo in a string
+ * key is a silent duplicate, and a duplicate key is an `IllegalArgumentException` out of the lazy
+ * layout rather than a mis-render.
+ *
+ * [User] is declared even though the rows are keyed on their id, because the *content type* of a
+ * row still has to be a value distinct from the footers'. Sharing a type with them is the exact
+ * mistake `docs/lazy-lists.md` describes: the pool would offer a footer's slot table to a card.
+ */
+private enum class HomeListSlot {
+    User,
+    Appending,
+    AppendFailed,
+    EndOfList,
+}
+
+/**
+ * Distinguishes "there are no users" from "none of the downloaded users match", because under
+ * paging those are genuinely different and only one of them is the user's mistake.
+ *
+ * A search covers what has been cached rather than what the server holds — the endpoint takes no
+ * query parameter, and `PagedUserRepositoryImpl` explains why letting a search drive remote
+ * loading is a table scan rather than a search — so saying so here is the difference between a
+ * reader scrolling further to find someone and a reader concluding they do not exist.
+ */
+@Composable
+private fun EmptyUserList(searchQuery: String, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Text(
+            text = if (searchQuery.isBlank()) {
+                "No users yet"
+            } else {
+                "No downloaded users match “$searchQuery”. Clear the search to load more."
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+    }
+}
+
+/** The next page is on its way. Sized so that arriving rows do not make the list jump. */
+@Composable
+private fun AppendingFooter() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+    }
+}
+
+/**
+ * An append failed, and this is where that is said: under the rows that did load, with a retry
+ * beside it. `LazyPagingItems.retry()` re-runs the failed load only — the loaded pages, and the
+ * reader's position in them, are untouched.
+ */
+@Composable
+private fun AppendFailedFooter(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            textAlign = TextAlign.Center,
+        )
+        TextButton(onClick = onRetry) {
+            Text("Retry")
+        }
+    }
+}
+
+/**
+ * Shown once there is nothing more to load. Worth a slot of its own: without it, a list that has
+ * genuinely ended is indistinguishable from one whose next request is still in flight.
+ *
+ * [searching] changes the sentence because it changes what ended. With no search the pages come
+ * from the `RemoteMediator` and the end is the server's; under a search the mediator is off, so
+ * the end is the end of what has been downloaded — and "that's everyone" would be a claim about
+ * the server that this screen is in no position to make.
+ */
+@Composable
+private fun EndOfListFooter(searching: Boolean) {
+    Text(
+        text = if (searching) {
+            "That's every downloaded user that matches."
+        } else {
+            "That's everyone."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+    )
 }
 
 @Composable

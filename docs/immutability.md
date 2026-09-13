@@ -4,6 +4,13 @@ Why the state classes in this app are `data class`es of `val`s carrying `@Immuta
 their collections are `ImmutableList` and not `List`, and what the annotation actually
 promises.
 
+> **`HomeContent` no longer exists.** It is used below as this page's worked example and is kept
+> because the argument it carries — a `List`-typed property makes the whole class unstable, and
+> `@Immutable` over one is an unchecked lie — is unchanged and is what `ImmutableList` is for. The
+> home screen's list is paged now, so its rows arrive as a `PagingData` rather than as a list on
+> the state; `HomeUiState.users` is a `Flow`, which is the one case `StabilityContractTest` pins
+> rather than infers. See [`paging.md`](./paging.md).
+
 Every claim on this page is pinned by
 [`StabilityContractTest`](../app/src/test/kotlin/com/kojo/boilerplate/architecture/StabilityContractTest.kt),
 which walks the state graph reachable from every view model and fails the build when the

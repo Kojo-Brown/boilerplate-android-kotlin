@@ -31,13 +31,35 @@ import kotlinx.coroutines.flow.Flow
 interface PagedUserRepository {
 
     /**
-     * A stream of pages over every cached user, ordered as `UserRepository.getUsers()` orders
-     * them.
+     * A stream of pages over the cached users matching [query], ordered as
+     * `UserRepository.getUsers()` orders them.
      *
      * Cold, and safe to collect more than once — each collection gets its own `PagingData`
      * generation. Collect it in a scope that survives configuration change (`cachedIn`) if the
      * consumer is a view model; a `PagingData` is a one-shot stream of load events and
      * re-collecting it re-fetches from page one.
+     *
+     * ## Why the search is a parameter here rather than a filter on the result
+     *
+     * Because `PagingData` carries the pages that have been loaded, not the rows that exist. A
+     * caller filtering the returned stream would be searching its own scroll history: the
+     * matches on page seven are invisible until something has already fetched page seven, so the
+     * list comes back short rather than filtered, and shorter the sooner the reader types. The
+     * predicate has to reach the query that decides which rows the list is made of, and this
+     * parameter is how a caller that must not see a DAO says so.
+     *
+     * ## What a query changes about fetching
+     *
+     * A search covers **what has been downloaded**, not what the server holds. `GET /users` takes
+     * a page and a page size and nothing else — there is no query parameter to forward — so the
+     * only honest options are to search the cache or to walk the whole remote list one page at a
+     * time hoping for a match. The second is not a search; it is a table scan wearing a scroll
+     * bar, and on a list of any size it never terminates before the reader gives up. So an
+     * implementation must not let a query drive remote loading: a searching list pages through
+     * the cache alone, and filling the cache is what scrolling the unsearched list does.
+     *
+     * @param query what the user typed, already trimmed. Blank means everything, and is the
+     *   default state of a screen rather than a special case.
      */
-    fun users(): Flow<PagingData<User>>
+    fun users(query: String): Flow<PagingData<User>>
 }

@@ -79,10 +79,17 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
         ":core:paging",
         ":core:testing",
     ),
+    // `:core:paging` is here and on no other feature, which is the entry worth reading. The home
+    // list is the one screen that consumes `PagedUserRepository`, and the contract was put in a
+    // module of its own precisely so that a feature could name it without seeing `:data` — this
+    // edge is that design being used for the first time. A second feature wanting a paged list
+    // adds itself here; a feature reaching for `:data` to get at `UserPagingDao` instead is what
+    // the rule below still refuses.
     ":feature:home" to setOf(
         ":core:common",
         ":core:domain",
         ":core:navigation",
+        ":core:paging",
         ":core:testing",
         ":core:ui",
     ),

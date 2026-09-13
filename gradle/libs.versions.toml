@@ -163,6 +163,14 @@ androidx-room-paging = { group = "androidx.room", name = "room-paging", version.
 # dispatchers) and belongs to `:data`, which is where the `Pager` is actually constructed.
 androidx-paging-common = { group = "androidx.paging", name = "paging-common", version.ref = "paging" }
 androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", version.ref = "paging" }
+# The Compose presenter: `collectAsLazyPagingItems`, `LazyPagingItems` and the `itemKey` /
+# `itemContentType` adapters a `LazyColumn` needs to key and type a paged list. It belongs to
+# whichever module renders the stream — `:feature:home` — and not to `:data`, which never
+# composes anything. It carries the same `paging` version deliberately: since 3.2 the Compose
+# artifact versions in lockstep with the rest of Paging, and a `LazyPagingItems` reading a
+# `PagingData` produced by a different release is the kind of mismatch that surfaces as a list
+# that never leaves its loading state rather than as a link error.
+androidx-paging-compose = { group = "androidx.paging", name = "paging-compose", version.ref = "paging" }
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

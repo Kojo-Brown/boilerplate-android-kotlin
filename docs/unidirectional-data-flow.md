@@ -3,6 +3,13 @@
 One `UiState` out, one `UiEvent` in, one `UiEffect` for what happens once — and why the
 uniformity is the point rather than the ceremony.
 
+> **Two `HomeViewModel` details below have moved on.** `HomeUiState.content` is gone — the list is
+> paged, so `Loading` and `Error` are `LazyPagingItems.loadState` and the state carries the stream
+> instead — and `RetryClicked` went with it, because `LazyPagingItems.retry()` retries the load
+> that failed rather than resubscribing to a query. The rule the pair illustrated is intact: name
+> an event for the button that was pressed, and let the view model decide what it means. See
+> [`paging.md`](./paging.md).
+
 The three types are per screen and the shape is not. Every view model in this app extends
 [`UdfViewModel<S, E, F>`](../core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/UdfViewModel.kt)
 and exposes exactly three things:

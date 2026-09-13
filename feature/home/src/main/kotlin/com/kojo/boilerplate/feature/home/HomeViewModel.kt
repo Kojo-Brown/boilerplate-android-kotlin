@@ -1,32 +1,28 @@
 package com.kojo.boilerplate.feature.home
 
 import androidx.lifecycle.viewModelScope
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
+import androidx.paging.map
 import com.kojo.boilerplate.core.common.network.NetworkMonitor
-import com.kojo.boilerplate.core.coroutines.DefaultDispatcher
 import com.kojo.boilerplate.core.coroutines.asSearchQueries
-import com.kojo.boilerplate.core.coroutines.retryWithBackoff
 import com.kojo.boilerplate.core.domain.model.User
-import com.kojo.boilerplate.core.domain.repository.UserRepository
 import com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase
+import com.kojo.boilerplate.core.paging.PagedUserRepository
 import com.kojo.boilerplate.core.ui.udf.UdfViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 // flatMapLatest is still @ExperimentalCoroutinesApi in coroutines 1.9.0. The
@@ -35,28 +31,18 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    // Still the repository and not a use case for the read path. `getUsers()` is observed and
-    // rendered with no policy in between, and a use case that forwards one method to one
-    // repository is a hop that buys nothing — the argument docs/solid.md makes for why the
-    // missing layer was defensible at this size. The refresh is the opposite case: three
-    // decisions with wrong answers, which is why that one moved.
-    private val userRepository: UserRepository,
+    // The paged contract, not `UserRepository`. `getUsers()` is every row Room holds, in one
+    // list, re-emitted whole for a single edited row — the right shape for a handful of users
+    // and the wrong one for a list that grows without a bound. Still a repository rather than a
+    // use case, for the reason `docs/solid.md` gives: the read has no policy in between, and a
+    // use case forwarding one method to one repository is a hop that buys nothing. The refresh
+    // is the opposite case — three decisions with wrong answers — which is why that one moved.
+    private val pagedUsers: PagedUserRepository,
     private val refreshVisibleUsers: RefreshVisibleUsersUseCase,
-    // Covers the filtering and item mapping in `content` below, and nothing else.
-    //
-    // @DefaultDispatcher and not @IoDispatcher: this was IO while the same flowOn also
-    // covered the repository's row mapping, which the repository now confines itself. What
-    // is left is a scan of the whole user list plus an allocation per surviving row —
-    // CPU-bound, with no I/O anywhere in it. Leaving it on the IO pool would be the mistake
-    // CoroutineErrorModule describes: IO is sized for threads that are parked waiting, so
-    // filling it with work that actually wants a core starves the calls it exists for.
-    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     networkMonitor: NetworkMonitor,
 ) : UdfViewModel<HomeUiState, HomeUiEvent, HomeUiEffect>() {
 
     private val searchQuery = MutableStateFlow("")
-
-    private val retrySignal = MutableStateFlow(0)
 
     /**
      * The refresh's in-flight flag *and* its lock — see the CAS in [refresh]. One atomic value
@@ -66,70 +52,47 @@ class HomeViewModel @Inject constructor(
     private val refreshing = MutableStateFlow(false)
 
     /**
-     * `flatMapLatest` and not `flatMapConcat`/`merge`: a manual retry must *replace* the
-     * previous subscription, and only `flatMapLatest` cancels the inner flow it is switching
-     * away from. With either alternative every tap on retry would leave another live collection
-     * of `getUsers()` behind it, all of them writing to the same state.
+     * The one paged stream this view model owns, built once and handed to every state it emits.
+     *
+     * ### `flatMapLatest`, and what a new query costs
+     *
+     * A query is not a filter over this stream — it is a parameter of the query the stream is
+     * made of, so each distinct one is a different `Pager` and `flatMapLatest` is what cancels
+     * the previous one. `merge` or `flatMapConcat` would leave every query the user typed
+     * loading pages in parallel, all of them writing to the same Room table.
+     *
+     * That makes the debounce in [asSearchQueries] load-bearing rather than a nicety. Typing
+     * `alice` undebounced would build five `Pager`s, four of which exist only long enough to run
+     * an initial load of three pages against the database. It is also why the trimming and the
+     * `distinctUntilChanged` inside `asSearchQueries` matter here more than they did over a
+     * list: `"alice "` and `"alice"` are the same search, and restarting paging is a visibly
+     * more expensive way to discover that than re-running a filter.
+     *
+     * ### `cachedIn`, which is not optional
+     *
+     * A `PagingData` is a one-shot stream of load events. Without `cachedIn` every collector
+     * gets its own generation and starts at page one — so a rotation would drop the reader back
+     * to the top of the list, and the two-pane layout would page the same list twice. Scoped to
+     * `viewModelScope` because that is the scope that outlives the composition and not the
+     * screen.
+     *
+     * `cachedIn` also makes this flow *hot* for as long as the view model lives, which is the
+     * one place this class departs from the `WhileSubscribed(5_000)` shape below. It is what the
+     * operator is for — holding the loaded pages across a configuration change — and it holds
+     * pages rather than a subscription: the database query behind them is the `PagingSource`'s,
+     * and Paging closes that when the last collector goes away.
      */
-    private val content: Flow<HomeContent> = retrySignal
-        .flatMapLatest {
-            combine<List<User>, String, HomeContent>(
-                // Retry first, dedupe second. Resubscribing replays whatever the source has
-                // already emitted, and Room invalidates per table rather than per row, so an
-                // unrelated write to `users` re-delivers a byte-identical list. The `stateIn`
-                // at the end would conflate the resulting state anyway — but only after the
-                // filter and the whole item mapping had run over the full list again.
-                // `distinctUntilChanged` drops the duplicate before that work happens.
-                userRepository.getUsers()
-                    .retryWithBackoff()
-                    .distinctUntilChanged(),
-                searchQuery.asSearchQueries(),
-            ) { users, query ->
-                val filtered = if (query.isBlank()) {
-                    users
-                } else {
-                    users.filter {
-                        it.displayName.contains(query, ignoreCase = true) ||
-                            it.email.contains(query, ignoreCase = true)
-                    }
-                }
-                HomeContent.Users(
-                    // Mapped straight into a persistent-list builder rather than through
-                    // `map { }.toImmutableList()`. The latter fills an ArrayList and then
-                    // copies all of it into the persistent trie; the builder writes the trie
-                    // once and `build()` hands over its root without copying. One list-sized
-                    // allocation per emission instead of two, on a path that runs on every
-                    // keystroke after the debounce.
-                    items = filtered.mapTo(persistentListOf<HomeItem>().builder()) { user ->
-                        HomeItem(
-                            id = user.id,
-                            title = user.displayName,
-                            description = user.email,
-                        )
-                    }.build(),
-                    greeting = "Boilerplate Android",
-                )
-            }.catch { throwable ->
-                emit(HomeContent.Error(message = throwable.message ?: "Failed to load users"))
-            }
-        }
-        // Covers the combine transform only. The repository's own `flowOn` sits closer to
-        // the source, and the innermost `flowOn` wins for the section it encloses — so the
-        // row mapping stays on IO and this governs the filtering above it.
-        .flowOn(defaultDispatcher)
-        // Outside the `flowOn`, and load-bearing rather than cosmetic. `combine` produces
-        // nothing until *every* input has emitted, so without a value here the whole screen —
-        // including the search field the user is typing into — would sit at the initial state
-        // until the first database read landed. Emitting Loading up front decouples the two,
-        // and it costs nothing: it is identical to `stateIn`'s initial value, so `stateIn`
-        // conflates it away.
-        .onStart { emit(HomeContent.Loading) }
+    private val users: Flow<PagingData<HomeItem>> = searchQuery
+        .asSearchQueries()
+        .flatMapLatest { query -> pagedUsers.users(query) }
+        .map { pagingData -> pagingData.map { user -> user.toHomeItem() } }
+        .cachedIn(viewModelScope)
 
     /**
      * The initial `false` is "assume online", so a cold start does not flash a banner in the
      * window before the monitor has reported; the first real status arrives immediately after.
      * It is also what keeps a monitor that never emits from stalling the whole screen, for the
-     * same `combine` reason as above. `distinctUntilChanged` absorbs the duplicate when the
+     * same `combine` reason as always. `distinctUntilChanged` absorbs the duplicate when the
      * first real status agrees with the assumption.
      */
     private val offline: Flow<Boolean> = networkMonitor.networkStatus
@@ -138,20 +101,24 @@ class HomeViewModel @Inject constructor(
         .distinctUntilChanged()
 
     /**
-     * `WhileSubscribed(5_000)` is what makes all four inputs cost nothing while nobody is
-     * looking: the Room query, the debounce and the connectivity callback are all registered
-     * on the first collector and torn down five seconds after the last one leaves — long
-     * enough to cover an Activity recreation, short enough that a backgrounded screen stops
-     * holding a socket open. See `docs/state-and-events.md`.
+     * `WhileSubscribed(5_000)` is what makes the connectivity callback cost nothing while
+     * nobody is looking: it is registered on the first collector and torn down five seconds
+     * after the last one leaves — long enough to cover an Activity recreation, short enough
+     * that a backgrounded screen stops holding a callback open. See `docs/state-and-events.md`.
+     *
+     * [users] is passed as part of the initial value and not only inside the transform, and that
+     * is what keeps `HomeUiState`'s `@Immutable` promise honest: every state this flow ever
+     * emits carries the *same* stream instance, so the screen's `collectAsLazyPagingItems()`
+     * keeps one presenter for the life of the composition instead of rebuilding it — and paging
+     * does not restart — when an unrelated field changes.
      */
     override val state: StateFlow<HomeUiState> = combine(
-        content,
         searchQuery,
         offline,
         refreshing,
-    ) { content, query, isOffline, isRefreshing ->
+    ) { query, isOffline, isRefreshing ->
         HomeUiState(
-            content = content,
+            users = users,
             searchQuery = query,
             isOffline = isOffline,
             isRefreshing = isRefreshing,
@@ -159,32 +126,30 @@ class HomeViewModel @Inject constructor(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS),
-        initialValue = HomeUiState(),
+        initialValue = HomeUiState(users = users),
     )
 
     override fun onEvent(event: HomeUiEvent) {
         when (event) {
             is HomeUiEvent.SearchQueryChanged -> searchQuery.value = event.query
-            HomeUiEvent.RetryClicked -> retrySignal.update { it + 1 }
-            HomeUiEvent.RefreshClicked -> refresh()
+            is HomeUiEvent.RefreshClicked -> refresh(event.visibleUserIds)
         }
     }
 
     /**
-     * Re-fetches the users currently on screen from the network, all at once.
+     * Re-fetches the users the reader can see from the network, all at once.
      *
-     * [HomeUiEvent.RetryClicked] and this are different operations that a user would describe
-     * with the same word. Retry resubscribes to the database query, which is the fix for a
-     * *read* that failed; it cannot make the data newer, because nothing in this screen ever
-     * asked the network for it. This is the one that does, and until it existed
-     * [UserRepository.syncUser] had no caller outside its own tests — the app could display
-     * users indefinitely without ever refetching one.
+     * This is the only thing on the screen that asks the network for a *user* rather than for a
+     * page. The paged list has its own network path — the `RemoteMediator` behind
+     * [PagedUserRepository] — and the two do different jobs: the mediator extends the list
+     * forwards, this one makes the rows already in it current. Neither can stand in for the
+     * other, and until this existed `UserRepository.syncUser` had no caller outside its tests.
      *
-     * The ids come from [state], so a refresh under an active search covers what the user is
-     * looking at rather than the whole table. That is both the cheaper request and the one
-     * they asked for; clearing the search and refreshing again covers the rest.
+     * [visibleUserIds] arrives on the event because the view model cannot see the viewport —
+     * see [HomeUiEvent.RefreshClicked] for why that is the right place for it rather than a
+     * shortcoming. An empty list is a legitimate value and the use case makes no request for it.
      */
-    private fun refresh() {
+    private fun refresh(visibleUserIds: List<String>) {
         // Claim with a CAS, not read-check-write. Two taps landing in the same frame both read
         // false, both pass a check, and both launch a fan-out — doubling the requests and
         // racing to write the result. Under the CAS the loser fails to claim and becomes a
@@ -193,15 +158,7 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // `state.value` is the initial value whenever nothing is collecting, which on
-                // this screen cannot happen — the tap came from a composition that is
-                // collecting it. The trap is real for tests, and is why they keep a collector
-                // alive; see `HomeViewModelRefreshTest`.
-                val ids = (state.value.content as? HomeContent.Users)
-                    ?.items
-                    ?.map { it.id }
-                    .orEmpty()
-                val outcome = refreshVisibleUsers(ids)
+                val outcome = refreshVisibleUsers(visibleUserIds)
                 if (outcome.failed > 0) {
                     emitEffect(
                         HomeUiEffect.RefreshIncomplete(
@@ -229,8 +186,29 @@ class HomeViewModel @Inject constructor(
         /**
          * Long enough to cover a configuration change, short enough that a backgrounded screen
          * stops costing anything. The standard Android value, and it governs a platform
-         * callback registration as well as the repository subscription.
+         * callback registration.
          */
         const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
     }
 }
+
+/**
+ * What the list renders for one user.
+ *
+ * A free function rather than a `map` inside the state builder, because under paging it is
+ * applied per item by the presenter as the reader reaches it — `PagingData.map` is lazy — rather
+ * than over a whole list on every emission. That is also why no dispatcher is injected for it any
+ * more: there is no longer a list-sized transform to confine, and a `flowOn` here would move the
+ * construction of the `PagingData` rather than the mapping of its items.
+ *
+ * `internal` so that `HomeViewModelTest` can assert the mapping directly. That is not a
+ * convenience: the transform is applied lazily *inside* a `PagingData`, and reading items back
+ * out of one needs either `androidx.paging:paging-testing` or an instrumented test, so a test
+ * that went through the view model would be asserting the framework rather than these three
+ * lines. See the PR that introduced this for what is consequently untested here.
+ */
+internal fun User.toHomeItem(): HomeItem = HomeItem(
+    id = id,
+    title = displayName,
+    description = email,
+)

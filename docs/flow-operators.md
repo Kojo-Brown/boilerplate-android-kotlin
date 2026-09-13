@@ -4,6 +4,13 @@ Four operators that decide how a screen behaves under real conditions — a user
 connection dropping, a database invalidating a table — and the mistakes each one exists to
 prevent.
 
+> **The `HomeViewModel` pipeline quoted below is the pre-paging one.** The home list is a
+> `PagingData` now, so `retrySignal`, the `combine` over `getUsers()` and the `flowOn` are gone
+> from that class — what survives of this page in it is `asSearchQueries` feeding a
+> `flatMapLatest`, where the debounce matters more than it did, because each query now builds a
+> `Pager`. The operators and the mistakes they prevent are unchanged, which is why the example
+> stays. See [`paging.md`](./paging.md).
+
 Every claim here is pinned by a test in
 [`FlowRetryTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/FlowRetryTest.kt),
 [`SearchQueryFlowTest`](../core/common/src/test/kotlin/com/kojo/boilerplate/core/coroutines/SearchQueryFlowTest.kt)
