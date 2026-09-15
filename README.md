@@ -76,6 +76,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   reuses nothing at the default `contentType`, when the index is the right identity for an item
   and when it silently hands one row's state to another, and which of the two things called
   "prefetch" is a `LazyColumn` setting and which is a `PagingConfig` one.
+- [Custom layouts and `SubcomposeLayout`](./docs/custom-layout.md) — why a measurement that
+  decides *where* content goes needs only a `Layout`, why one that decides *whether* content
+  exists is the case subcomposition is for, what the `onTextLayout`-into-state version costs on
+  every scroll, and how to get a measure policy's decisions under a JVM unit test.
 - [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
   writes and nobody reads, turned into a CI gate: every restartable composable skips or is
   named, with a reason, in an allowlist that fails when it stops matching.

@@ -77,8 +77,8 @@ seconds. Two failures it is specifically shaped to catch:
   message says to move it to `:core:testing`.
 
 **Then compilation, per module, in dependency order**, each against only the classpath its build
-file entitles it to. At the time of writing: 102 of 149 `src/main` files, 44 of 61 `src/test`
-files, 327 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
+file entitles it to. At the time of writing: 108 of 168 `src/main` files, 48 of 78 `src/test`
+files, 334 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
 module with the repo's own config — the same three source sets the `detekt` convention gives the
 Gradle task, so that gate is covered in full rather than in part.
 
@@ -91,6 +91,14 @@ merits.
 `testDebugUnitTest` gives it. Running them together would put every module's test classes on one
 classpath, and the contract tests in `:app` walk the classpath: they would audit
 `FakeUserRepository` and `ResultTest` as if those were application classes.
+
+A module's `test` compilation is given its own `main` output as a **friend path**, which is what
+Gradle and the IDE do by associating the two compilations. Without it, a test beside the
+`internal` declaration it covers fails with "cannot access … it is internal in file" — a failure
+about this script rather than about the code, and one that stops the whole run, because a module
+that produces no classes is a `sys.exit`. `SearchPatternTest` against `likePattern` was the first
+to hit it; it had been green in CI the entire time, and it took `:data`'s whole test compilation,
+`:app`'s contract tests and detekt down with it.
 
 **Every skipped test file is printed by name on each run**, under `not run here:`, with its
 reason. That is not decoration. A skipped test is a gate this run did not apply, and a bare count
@@ -119,13 +127,16 @@ adding a stub — is cheap.
   carries a Kotlin 2.x `.kotlin_module` that the compiler behind `kotlin-dsl` refuses to read,
   so it must stay off `build-logic`'s compile classpath — which is fine, because nothing there
   names a Hilt type.
-- **`SolidContractTest` and `CompiledAppTest`.** Both assert over the whole app's compiled
-  output — every repository type, and at least one class per module. The harness compiles a
-  subset by construction, so they would fail on its coverage rather than on the code. They are
-  the two entries in `HARD_EXCLUDES` in `harness.py`, each with that reason next to it.
-  `StabilityContractTest`, `DomainLayerContractTest` and `UnidirectionalDataFlowContractTest`
-  read compiled output too and *do* run: they walk out from the view models, which the harness
-  compiles in full.
+- **`SolidContractTest`, `CompiledAppTest` and `UnidirectionalDataFlowContractTest`.** All three
+  assert over the whole app's compiled output — every repository type, at least one class per
+  module, every view model — and the harness compiles a subset by construction, so they fail on
+  its coverage rather than on the code. They are the three entries in `HARD_EXCLUDES` in
+  `harness.py`, each with that reason next to it. The third only joined them when `HomeViewModel`
+  grew an `androidx.paging` import and stopped compiling here; stubbing Paging would put it back.
+  `StabilityContractTest` and `DomainLayerContractTest` read compiled output too and *do* run.
+  The source-reading contract tests — `RecompositionContractTest`, `DerivedStateContractTest`,
+  `LazyListContractTest`, `CustomLayoutContractTest` — run over the whole repository whatever the
+  harness could compile, which is why they are worth writing that way.
 - Whatever the run prints under `not run here:` — mostly the Room- and DataStore-backed
   repository and DAO tests.
 

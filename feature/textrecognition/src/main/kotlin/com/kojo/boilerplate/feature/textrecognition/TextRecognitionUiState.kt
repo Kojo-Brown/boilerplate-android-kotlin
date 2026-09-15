@@ -41,6 +41,22 @@ sealed interface TextScanState {
     data class TextDetected(
         val fullText: String,
         val blocks: ImmutableList<RecognizedTextBlock>,
+        /**
+         * Whether the reader has asked to see all of [fullText] rather than its first few lines.
+         *
+         * Here rather than in a `remember` inside the result pane for the reason every other flag
+         * on this screen is here: the pane lives in a `LazyColumn` item, and a `remember` in a
+         * lazy slot is discarded the moment the slot is scrolled out and re-composed from its
+         * default when it comes back — so a long result would silently re-collapse itself behind
+         * the reader. It is a field of [TextDetected] rather than of [TextRecognitionUiState]
+         * because it is a fact about *this* result: the next scan replaces the whole state and the
+         * flag goes with it, which is what it should do.
+         *
+         * It is a request rather than an instruction. Nothing here knows whether this text
+         * overflows at the width and font size it is about to be drawn at, so whether it is
+         * honoured is settled in the measure pass — see `ExpandableText`.
+         */
+        val isFullTextExpanded: Boolean = false,
     ) : TextScanState
 
     @Immutable

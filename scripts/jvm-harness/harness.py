@@ -113,6 +113,18 @@ HARD_EXCLUDES = {
     # every module. Under the harness the Compose-only modules contribute none, by design.
     "app/src/test/kotlin/com/kojo/boilerplate/architecture/CompiledAppTest.kt":
         "asserts every module contributed a class; the Compose modules cannot compile here",
+    # Same category, and it only joined it when `HomeViewModel` grew a `androidx.paging` import
+    # (PR #48). Its `discovery` test pins the set of `UdfViewModel` subclasses found on the
+    # classpath, and `HomeViewModel` is no longer on this one — so it reports the harness's
+    # coverage as a missing view model. The three rules it applies to the view models it *can*
+    # see would still be worth running; JUnit has no way to keep them while dropping one test
+    # from the same class, and a pin that passes by being narrowed is worse than one CI applies
+    # in full. Stubbing Paging would put the file back — `PagingData`, `Pager`, `PagingConfig`,
+    # `PagingSource`, `RemoteMediator` and `cachedIn`, none of which this script models today —
+    # and that is the fix, whenever `:core:paging` is worth the stub.
+    "app/src/test/kotlin/com/kojo/boilerplate/architecture/UnidirectionalDataFlowContractTest.kt":
+        "pins every view model in the app; HomeViewModel needs androidx.paging and is not "
+        "compiled here",
 }
 
 
@@ -796,7 +808,14 @@ class Compiler:
             if line.startswith(("e: ", "error:"))
         ]
 
-    def compile(self, label: str, output: Path, classpath: list[str], sources: list[Path]) -> int:
+    def compile(
+        self,
+        label: str,
+        output: Path,
+        classpath: list[str],
+        sources: list[Path],
+        friend_paths: list[str] | None = None,
+    ) -> int:
         if not sources:
             return 0
         if output.exists():
@@ -816,6 +835,15 @@ class Compiler:
                 "-jvm-target", "17",
                 "-nowarn",
                 "-Xsuppress-version-warnings",
+                # A module's `test` source set is an *associated* compilation of its `main` in
+                # both Gradle and the IDE, and that association is what makes an `internal`
+                # declaration visible to the test sitting beside it. Nothing here said so, so
+                # every such test failed with "cannot access … it is internal in file" — a
+                # failure about this script rather than about the code, and one that stops the
+                # whole run (see the `sys.exit` below) before `:app`'s contract tests or detekt
+                # get to say anything. `SearchPatternTest` against `likePattern` was the first
+                # to hit it, and it had been passing in CI the entire time.
+                *([f"-Xfriend-paths={os.pathsep.join(friend_paths)}"] if friend_paths else []),
                 f"@{arguments}",
             ],
             capture_output=True,
@@ -1027,7 +1055,13 @@ def main() -> int:
         ]
         if path in main_outputs:
             classpath.append(str(main_outputs[path]))
-        produced = compiler.compile(f"{module.name}:test", output, classpath, selected)
+        produced = compiler.compile(
+            f"{module.name}:test",
+            output,
+            classpath,
+            selected,
+            friend_paths=[str(main_outputs[path])] if path in main_outputs else None,
+        )
         test_outputs.append((path, output, classpath))
         print(f"  {path} test: {len(selected)} files, {produced} classes")
 

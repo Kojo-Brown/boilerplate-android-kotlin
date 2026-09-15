@@ -165,4 +165,43 @@ class TextRecognitionViewModelTest {
         val scan = viewModel.state.value.scan as TextScanState.TextDetected
         assertEquals("Second scan", scan.fullText)
     }
+
+    @Test
+    fun `a result starts collapsed and the reader can ask for all of it`() = runTest {
+        detect("A page of text")
+        assertFalse((viewModel.state.value.scan as TextScanState.TextDetected).isFullTextExpanded)
+
+        viewModel.onEvent(TextRecognitionUiEvent.FullTextExpansionChanged(expanded = true))
+
+        assertTrue((viewModel.state.value.scan as TextScanState.TextDetected).isFullTextExpanded)
+    }
+
+    /**
+     * The flag belongs to the result rather than to the screen, so the next scan is not handed
+     * the last reader's decision about a different piece of text.
+     */
+    @Test
+    fun `a new result is collapsed again however the last one was left`() = runTest {
+        detect("A page of text")
+        viewModel.onEvent(TextRecognitionUiEvent.FullTextExpansionChanged(expanded = true))
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+        detect("Exit")
+
+        assertFalse((viewModel.state.value.scan as TextScanState.TextDetected).isFullTextExpanded)
+    }
+
+    /**
+     * The control lives in a lazy slot, so a tap can land in the same frame as a resume or a
+     * camera failure. Applying it to whatever `scan` happens to be would copy a `TextDetected`
+     * back over the state that replaced it.
+     */
+    @Test
+    fun `an expansion request arriving after the result is gone changes nothing`() = runTest {
+        detect("A page of text")
+        viewModel.onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+
+        viewModel.onEvent(TextRecognitionUiEvent.FullTextExpansionChanged(expanded = true))
+
+        assertTrue(viewModel.state.value.scan is TextScanState.Scanning)
+    }
 }

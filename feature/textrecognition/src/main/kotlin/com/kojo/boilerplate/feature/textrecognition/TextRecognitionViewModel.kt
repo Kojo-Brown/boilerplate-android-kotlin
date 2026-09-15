@@ -34,6 +34,25 @@ class TextRecognitionViewModel @Inject constructor() :
             TextRecognitionUiEvent.FlashToggled -> _state.update {
                 it.copy(isFlashEnabled = !it.isFlashEnabled)
             }
+            is TextRecognitionUiEvent.FullTextExpansionChanged -> onExpansionChanged(event)
+        }
+    }
+
+    /**
+     * Guarded the same way [onTextDetected] is, and for the same reason: the control that raises
+     * this lives in a `LazyColumn` slot, and a tap can land in the same frame as a resume or a
+     * camera failure. Applying it to whatever `scan` happens to be would mean copying a
+     * `TextDetected` back over an `Error` — so the flag is only ever written to the result it was
+     * a request about.
+     */
+    private fun onExpansionChanged(event: TextRecognitionUiEvent.FullTextExpansionChanged) {
+        _state.update { current ->
+            val scan = current.scan
+            if (scan is TextScanState.TextDetected) {
+                current.copy(scan = scan.copy(isFullTextExpanded = event.expanded))
+            } else {
+                current
+            }
         }
     }
 

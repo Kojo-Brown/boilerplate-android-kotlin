@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.kojo.boilerplate.core.ui.layout.ExpandableText
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import java.util.concurrent.Executors
 import kotlinx.collections.immutable.ImmutableList
@@ -151,6 +152,9 @@ fun TextRecognitionScreen(
                         scan = scan,
                         onResumeScanning = {
                             onEvent(TextRecognitionUiEvent.ResumeScanningClicked)
+                        },
+                        onFullTextExpansionChange = { expanded ->
+                            onEvent(TextRecognitionUiEvent.FullTextExpansionChanged(expanded))
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -271,6 +275,7 @@ private fun TextScannerOverlay(modifier: Modifier = Modifier) {
 private fun TextDetectedContent(
     scan: TextScanState.TextDetected,
     onResumeScanning: () -> Unit,
+    onFullTextExpansionChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -298,8 +303,15 @@ private fun TextDetectedContent(
                     )
                     .padding(16.dp),
             ) {
-                Text(
+                // A page of recognised text used to push the block list, both buttons and the
+                // whole rest of this screen below the fold, with no way to get past it but to
+                // scroll through it. Clipping it needs a way back, and offering one unconditionally
+                // would put "Show all" under four words — which is why whether the control exists
+                // is decided in the measure pass rather than here. See `ExpandableText`.
+                ExpandableText(
                     text = scan.fullText.ifBlank { "No text detected" },
+                    expanded = scan.isFullTextExpanded,
+                    onExpandedChange = onFullTextExpansionChange,
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }

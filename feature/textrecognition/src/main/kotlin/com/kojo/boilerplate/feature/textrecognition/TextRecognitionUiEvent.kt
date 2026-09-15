@@ -32,4 +32,15 @@ sealed interface TextRecognitionUiEvent : UiEvent {
 
     /** The torch button in the app bar. */
     data object FlashToggled : TextRecognitionUiEvent
+
+    /**
+     * "Show all" / "Show less" under the recognised text.
+     *
+     * Carries the state it is moving *to* rather than being a bare toggle, because the control
+     * that raises it is drawn from a measurement: a result that stopped overflowing is shown
+     * collapsed whatever this flag says, so a bare toggle would flip a flag that no longer
+     * describes what is on screen. The screen sends what the reader asked for and the layout
+     * decides what that means.
+     */
+    data class FullTextExpansionChanged(val expanded: Boolean) : TextRecognitionUiEvent
 }
