@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -84,34 +83,8 @@ private fun ProfileDetailSuccessContent(profile: ProfileData) {
             text = profile.displayName,
             style = MaterialTheme.typography.headlineSmall,
         )
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Email",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = profile.email,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "User ID",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = profile.userId,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
+        ProfileFieldCard(label = "Email", value = profile.email)
+        ProfileFieldCard(label = "User ID", value = profile.userId)
     }
 }
 

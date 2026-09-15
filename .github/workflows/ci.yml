@@ -57,6 +57,14 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # `packages` defaults to `tools platform-tools`, and `tools` is the obsolete SDK
+          # package Google removed from the repository years ago — cmdline-tools replaced it.
+          # The action runs `sdkmanager tools` regardless, which now answers "Failed to find
+          # package 'tools'" and exits 1, so this step fails on every run of both workflows
+          # whatever the commit contains. Naming the one package that still exists keeps the
+          # behaviour and drops the dead half.
+          packages: 'platform-tools'
 
       # Every gate in this job runs even when an earlier one fails, so a single run reports
       # all five results instead of stopping at the first. `!cancelled()` rather than
@@ -68,6 +76,10 @@ jobs:
       # screen — that every gate below would happily compile. The rules are in the root
       # build.gradle.kts, next to the reasoning for each one.
       - name: checkModuleDependencies
+        # The guard the comment above promises, which this step alone was missing — so the
+        # gate the comment calls the most valuable of the five was the one step a failure
+        # before it could skip, and a broken SDK setup did exactly that.
+        if: ${{ !cancelled() }}
         run: ./gradlew checkModuleDependencies --stacktrace
 
       # Two seconds, no SDK and no Gradle needed, and it runs before the compile so a broken
@@ -180,6 +192,14 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # `packages` defaults to `tools platform-tools`, and `tools` is the obsolete SDK
+          # package Google removed from the repository years ago — cmdline-tools replaced it.
+          # The action runs `sdkmanager tools` regardless, which now answers "Failed to find
+          # package 'tools'" and exits 1, so this step fails on every run of both workflows
+          # whatever the commit contains. Naming the one package that still exists keeps the
+          # behaviour and drops the dead half.
+          packages: 'platform-tools'
 
       # Two seconds, no SDK needed, and it runs before the ~3 minutes of Gradle work so a
       # broken verifier is reported immediately rather than after the build.

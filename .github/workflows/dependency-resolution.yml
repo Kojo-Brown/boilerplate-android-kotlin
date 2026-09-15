@@ -39,6 +39,14 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # `packages` defaults to `tools platform-tools`, and `tools` is the obsolete SDK
+          # package Google removed from the repository years ago — cmdline-tools replaced it.
+          # The action runs `sdkmanager tools` regardless, which now answers "Failed to find
+          # package 'tools'" and exits 1, so this step fails on every run of both workflows
+          # whatever the commit contains. Naming the one package that still exists keeps the
+          # behaviour and drops the dead half.
+          packages: 'platform-tools'
 
       - name: Verify the Gradle wrapper runs
         run: ./gradlew --version
