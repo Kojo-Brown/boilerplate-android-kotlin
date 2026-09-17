@@ -23,7 +23,18 @@ dependencies {
     api(libs.androidx.lifecycle.viewmodel.compose)
     api(libs.kotlinx.collections.immutable)
 
+    // `SharedElementTransition`'s constructor takes a `SharedTransitionScope` and an
+    // `AnimatedVisibilityScope`, and `:app` is what constructs it — from the two scopes its own
+    // `SharedTransitionLayout` and nav graph provide — so both types have to be on a consumer's
+    // compile classpath. `api` for the same reason the three below it are.
+    api(libs.androidx.compose.animation)
+
     implementation(libs.androidx.core.ktx)
+    // `PredictiveBackHandler` and `BackEventCompat`, for `rememberPredictiveBackDismiss`.
+    // `implementation` rather than `api`: the state object it returns reports the swipe edge as
+    // an `Int` and the progress as a `Float`, so no activity type reaches this module's public
+    // signatures and a caller needs nothing on its classpath to use it.
+    implementation(libs.androidx.activity.compose)
     // `AdaptiveNavigationScaffold` and `useListDetailLayout` are this module's, and both are
     // called from `:app`, so the adaptive types they expose have to travel with them.
     api(libs.androidx.material3.adaptive.navigation.suite)
