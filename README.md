@@ -80,6 +80,11 @@ module's own build file is its namespace and its dependencies and nothing else.
   decides *where* content goes needs only a `Layout`, why one that decides *whether* content
   exists is the case subcomposition is for, what the `onTextLayout`-into-state version costs on
   every scroll, and how to get a measure policy's decisions under a JVM unit test.
+- [Shared elements and predictive back](./docs/shared-elements.md) — why `sharedElement` needs
+  the two sides to be literally one drawing and `sharedBounds` does not, why a shared key is a
+  sealed type rather than a string, why the two scopes travel as a parameter rather than a
+  `CompositionLocal`, and the one manifest attribute without which the whole gesture silently
+  does nothing.
 - [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
   writes and nobody reads, turned into a CI gate: every restartable composable skips or is
   named, with a reason, in an allowlist that fails when it stops matching.

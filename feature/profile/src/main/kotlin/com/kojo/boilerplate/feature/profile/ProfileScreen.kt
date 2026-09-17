@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -17,7 +15,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -27,12 +24,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kojo.boilerplate.core.ui.transition.SharedElementTransition
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 
+/**
+ * @param transition the shared-element transition this screen is the destination half of, or
+ *   `null` when it is not part of one. No default, for the reason `HomeScreen`'s equivalent
+ *   parameter has none: it is a fact about where the screen is drawn, and `AppNavHost` is the one
+ *   place that knows.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     onNavigateUp: () -> Unit,
+    transition: SharedElementTransition?,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -57,6 +62,7 @@ fun ProfileScreen(
             uiState = state,
             onRetry = { onEvent(ProfileUiEvent.RetryClicked) },
             modifier = Modifier.padding(innerPadding),
+            transition = transition,
         )
     }
 }
@@ -66,6 +72,7 @@ internal fun ProfileContent(
     uiState: ProfileUiState,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    transition: SharedElementTransition? = null,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         when (uiState) {
@@ -73,7 +80,7 @@ internal fun ProfileContent(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
             is ProfileUiState.Success -> {
-                ProfileSuccessContent(profile = uiState.profile)
+                ProfileSuccessContent(profile = uiState.profile, transition = transition)
             }
             is ProfileUiState.Error -> {
                 ProfileErrorContent(
@@ -87,7 +94,10 @@ internal fun ProfileContent(
 }
 
 @Composable
-private fun ProfileSuccessContent(profile: ProfileData) {
+private fun ProfileSuccessContent(
+    profile: ProfileData,
+    transition: SharedElementTransition?,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -95,23 +105,7 @@ private fun ProfileSuccessContent(profile: ProfileData) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Surface(
-            modifier = Modifier.size(80.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = profile.displayName.first().uppercaseChar().toString(),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
-        Text(
-            text = profile.displayName,
-            style = MaterialTheme.typography.headlineSmall,
-        )
+        ProfileIdentity(profile = profile, transition = transition)
         ProfileFieldCard(label = "Email", value = profile.email)
         ProfileFieldCard(label = "User ID", value = profile.userId)
     }

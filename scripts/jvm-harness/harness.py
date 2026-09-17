@@ -273,6 +273,13 @@ def topological_order(modules: dict[str, Module]) -> list[str]:
 PACKAGE = re.compile(r"^package\s+([\w.]+)", re.M)
 IMPORT = re.compile(r"^import\s+([\w.]+)", re.M)
 
+# An error line from the Kotlin CLI, in either of the two formats it writes. Kotlin 2.x leads with
+# the location — `path:line:column: error: …` — while `e: file:///…` is the older form, still
+# emitted when the compiler is handed a `file://` URL. The source line the compiler echoes under a
+# diagnostic carries neither marker, so it is not matched. See `Compiler.parse_only`, where
+# matching only the older form made that whole check silently vacuous.
+DIAGNOSTIC = re.compile(r"^e: |(?:^|\s)error:\s")
+
 
 def sources_in(module: Module, source_set: str) -> list[Path]:
     root = module.directory / "src" / source_set / "kotlin"
@@ -785,7 +792,21 @@ class Compiler:
         )
 
     def parse_only(self, sources: list[Path]) -> list[str]:
-        """Runs the compiler with no classpath and returns its diagnostics, unfiltered."""
+        """Runs the compiler with no classpath and returns its diagnostics, unfiltered.
+
+        The filter at the bottom used to be `line.startswith(("e: ", "error:"))`, and it matched
+        nothing this compiler emits. `e: file:///…` is the *old* CLI format; Kotlin 2.x writes
+        `path:line:column: error: …` with the path first, so every diagnostic fell through and
+        this method returned an empty list for any input at all. The only caller was
+        `check_build_logic_parses`, which therefore reported "6 files parse" on every run without
+        having read a single diagnostic — a gate passing without looking, which the module
+        docstring in this file calls out as worse than no gate. Found while parsing the files a
+        change could not compile here and getting back zero errors from a file that imports
+        `androidx`.
+
+        Both formats are accepted now rather than the new one only: the old one is what appears
+        when the compiler is handed a `file://` URL, and matching both costs one alternation.
+        """
         arguments = WORK / "parse.args"
         arguments.parent.mkdir(parents=True, exist_ok=True)
         arguments.write_text("\n".join(str(source) for source in sources) + "\n")
@@ -805,7 +826,7 @@ class Compiler:
         return [
             line.replace(f"file://{ROOT}/", "")
             for line in (result.stdout + result.stderr).splitlines()
-            if line.startswith(("e: ", "error:"))
+            if DIAGNOSTIC.search(line)
         ]
 
     def compile(

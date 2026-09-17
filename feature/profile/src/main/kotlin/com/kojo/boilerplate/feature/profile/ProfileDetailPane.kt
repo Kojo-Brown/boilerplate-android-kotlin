@@ -6,12 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -57,6 +54,12 @@ fun ProfileDetailPane(
     }
 }
 
+/**
+ * `transition = null` on [ProfileIdentity], and that is the layout talking rather than an
+ * omission: this pane is drawn *beside* the list it was selected from, so the row and this block
+ * are visible at the same time and cannot be two halves of one transition. `HomeTwoPaneScreen`
+ * has the argument.
+ */
 @Composable
 private fun ProfileDetailSuccessContent(profile: ProfileData) {
     Column(
@@ -66,23 +69,7 @@ private fun ProfileDetailSuccessContent(profile: ProfileData) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Surface(
-            modifier = Modifier.size(80.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = profile.displayName.first().uppercaseChar().toString(),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
-        Text(
-            text = profile.displayName,
-            style = MaterialTheme.typography.headlineSmall,
-        )
+        ProfileIdentity(profile = profile, transition = null)
         ProfileFieldCard(label = "Email", value = profile.email)
         ProfileFieldCard(label = "User ID", value = profile.userId)
     }

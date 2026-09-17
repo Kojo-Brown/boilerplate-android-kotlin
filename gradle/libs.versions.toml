@@ -122,6 +122,19 @@ androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-man
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+# The shared-element APIs — `SharedTransitionLayout`, `SharedTransitionScope` and the
+# `sharedElement`/`sharedBounds` modifiers — plus `AnimatedVisibilityScope`, which
+# `navigation-compose` hands to each destination. Versioned by the BOM like the rest of Compose:
+# shared elements landed in 1.7.0 behind `@ExperimentalSharedTransitionApi` and the BOM pinned
+# above resolves the animation artifact to the 1.7.x that matches `ui` and `material3`, which
+# matters more here than usual — the modifier and the scope it is a member of are the same release
+# or they do not compile.
+#
+# It is already on every Compose module's runtime classpath transitively, via material3. Declared
+# explicitly anyway in the one module whose own source names it: a transitive dependency is
+# whatever the library above it happens to need next release, and `:core:ui` exposes these two
+# scopes in its public signatures.
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation" }
 
 # Navigation
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }

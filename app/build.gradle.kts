@@ -111,6 +111,11 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    // `AppNavHost` names `SharedTransitionLayout` itself. It would arrive anyway as an `api`
+    // dependency of `:core:ui`, which exposes the two scopes in `SharedElementTransition`'s
+    // signature — declared here because this module's own source uses it, which is the same rule
+    // every other line in this list follows.
+    implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.material.icons.extended)

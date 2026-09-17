@@ -9,9 +9,25 @@
       it includes rather than a list that has to be kept in step with them by hand.
     -->
 
+    <!--
+      android:enableOnBackInvokedCallback is the opt-in for predictive back, and without it
+      every animation the back gesture is supposed to drive silently does not happen. It is
+      what switches the app from the legacy KeyEvent.KEYCODE_BACK path to the
+      OnBackInvokedDispatcher, and that dispatcher is the only thing that reports a gesture's
+      *progress*. So with it absent: NavHost cannot seek its pop transition, a shared element
+      has no seek to follow, and PredictiveBackHandler in HomeTwoPaneScreen receives a single
+      completed event instead of a stream. Nothing fails — every back still navigates, one frame
+      at a time — which is why this one attribute is asserted by SharedElementContractTest.
+
+      Honoured from API 33 and on by default for apps targeting API 36+. This app is minSdk 26 /
+      targetSdk 35: below 33 the platform ignores the attribute and the legacy path is used, so
+      declaring it costs nothing there and the handler in HomeTwoPaneScreen still works — it just
+      receives the gesture as a completion with no progress in front of it.
+    -->
     <application
         android:name=".BoilerplateApp"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.BoilerplateAndroidKotlin">

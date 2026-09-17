@@ -332,7 +332,15 @@ class DerivedStateContractTest {
         )
 
         val EXPECTED_MEMOISATIONS = mapOf(
-            "app/src/main/kotlin/com/kojo/boilerplate/navigation/AppNavHost.kt" to 2,
+            // Four: the nav controller, the nav item list, and one `SharedElementTransition` per
+            // destination that takes part in a transition. Those two are keyed on the two scopes
+            // they wrap — see `AppNavHost` for why identity is what matters there.
+            "app/src/main/kotlin/com/kojo/boilerplate/navigation/AppNavHost.kt" to 4,
+            // The back-gesture progress holder. Unkeyed on purpose: it captures neither of the
+            // function's parameters, and re-creating it mid-gesture would drop the progress the
+            // running gesture is writing into.
+            "core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/transition/" +
+                "PredictiveBackDismissState.kt" to 1,
             "core/ui/src/main/kotlin/com/kojo/boilerplate/core/ui/udf/EventSink.kt" to 1,
             "feature/home/src/main/kotlin/com/kojo/boilerplate/feature/home/HomeScreen.kt" to 2,
             "feature/scanner/src/main/kotlin/com/kojo/boilerplate/feature/scanner/" +

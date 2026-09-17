@@ -50,16 +50,31 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
+import com.kojo.boilerplate.core.ui.components.UserMonogram
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import com.kojo.boilerplate.core.ui.transition.SharedElementKey
+import com.kojo.boilerplate.core.ui.transition.SharedElementTransition
+import com.kojo.boilerplate.core.ui.transition.sharedBoundsTransition
+import com.kojo.boilerplate.core.ui.transition.sharedElementTransition
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import kotlinx.coroutines.launch
 
+/**
+ * @param transition the shared-element transition this screen is taking part in, or `null` when
+ *   it is not taking part in one. There is no default, because which it is depends on where the
+ *   screen is drawn rather than on the screen: full-width in the nav graph it is the source half
+ *   of a transition into the profile, and inside [HomeTwoPaneScreen] it is not — that layout has
+ *   the row and the profile on screen simultaneously, so both halves of every key would be
+ *   visible at once, which has no defined behaviour. `AppNavHost` is the one place that knows
+ *   which branch it is drawing and states it there.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onNavigateToProfile: (userId: String) -> Unit,
     onNavigateToBarcodeScanner: () -> Unit,
     onNavigateToTextRecognition: () -> Unit,
+    transition: SharedElementTransition?,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -169,6 +184,7 @@ fun HomeScreen(
                 searchQuery = state.searchQuery,
                 listState = listState,
                 onItemClick = { item -> onNavigateToProfile(item.id) },
+                transition = transition,
             )
         }
     }
@@ -311,6 +327,7 @@ internal fun HomeBody(
     listState: LazyListState,
     onItemClick: (HomeItem) -> Unit,
     modifier: Modifier = Modifier,
+    transition: SharedElementTransition? = null,
 ) {
     val refresh = users.loadState.refresh
     Box(modifier = modifier.fillMaxSize()) {
@@ -332,6 +349,7 @@ internal fun HomeBody(
                     searchQuery = searchQuery,
                     listState = listState,
                     onItemClick = onItemClick,
+                    transition = transition,
                 )
             }
         }
@@ -345,6 +363,7 @@ private fun HomeUserList(
     searchQuery: String,
     listState: LazyListState,
     onItemClick: (HomeItem) -> Unit,
+    transition: SharedElementTransition?,
 ) {
     Column {
         Text(
@@ -384,7 +403,11 @@ private fun HomeUserList(
                     // practice this is never null, and the `?.let` is the type system's price for
                     // that being a configuration rather than a signature.
                     users[index]?.let { item ->
-                        HomeItemCard(item = item, onClick = { onItemClick(item) })
+                        HomeItemCard(
+                            item = item,
+                            onClick = { onItemClick(item) },
+                            transition = transition,
+                        )
                     }
                 }
 
@@ -531,26 +554,67 @@ private fun EndOfListFooter(searching: Boolean) {
     )
 }
 
+/**
+ * A user row, and the source half of the transition into their profile.
+ *
+ * Two of the three things on this card are shared, and they take different modifiers for a reason
+ * that is about what each one *is* rather than about how each one looks.
+ *
+ * The monogram is [UserMonogram] on both sides — one composable in `:core:ui`, drawn at 40dp here
+ * and 80dp there — so the two are the same drawing at two magnifications and there is nothing to
+ * cross-fade between them. That is the precondition for `sharedElement`, which lifts one node into
+ * the transition's overlay and animates its rectangle.
+ *
+ * The name is the same string at two type scales, `titleMedium` here and `headlineSmall` on the
+ * profile, so the two sides are *not* the same drawing. `sharedBounds` travels the box and
+ * cross-fades the contents, which lets each side render at its own scale; `sharedElement` would
+ * scale one glyph run into the other's box and show it at the wrong weight for the length of the
+ * animation.
+ *
+ * The email is not shared at all. The profile does not draw it in a comparable place — it is a
+ * labelled card down the page — so pinning the two together would drag the line across the screen
+ * to land somewhere it does not belong. An element with no counterpart simply does not animate,
+ * which is the right outcome and needs no code.
+ */
 @Composable
 private fun HomeItemCard(
     item: HomeItem,
     onClick: () -> Unit,
+    transition: SharedElementTransition?,
 ) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium,
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UserMonogram(
+                displayName = item.title,
+                size = 40.dp,
+                modifier = Modifier.sharedElementTransition(
+                    key = SharedElementKey.UserAvatar(item.id),
+                    transition = transition,
+                ),
             )
-            Text(
-                text = item.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            Column {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.sharedBoundsTransition(
+                        key = SharedElementKey.UserName(item.id),
+                        transition = transition,
+                    ),
+                )
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }

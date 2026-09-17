@@ -1,5 +1,7 @@
 package com.kojo.boilerplate.navigation
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Home
@@ -21,6 +23,7 @@ import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavItem
 import com.kojo.boilerplate.core.ui.adaptive.AdaptiveNavigationScaffold
 import com.kojo.boilerplate.core.ui.adaptive.useListDetailLayout
 import com.kojo.boilerplate.core.ui.event.ObserveAsEvents
+import com.kojo.boilerplate.core.ui.transition.SharedElementTransition
 import com.kojo.boilerplate.feature.home.HomeScreen
 import com.kojo.boilerplate.feature.home.HomeTwoPaneScreen
 import com.kojo.boilerplate.feature.profile.ProfileDetailPane
@@ -32,10 +35,32 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * ### Shared elements
+ *
+ * The `SharedTransitionLayout` below wraps the whole graph rather than sitting inside a
+ * destination, because it owns the overlay a travelling element is drawn into and that overlay has
+ * to outlive both the screen being left and the screen being entered. It is also what makes this
+ * file the only place a [SharedElementTransition] is constructed: doing so needs the layout's own
+ * scope *and* the per-destination `AnimatedContentScope`, and this is the one function that has
+ * both. `docs/shared-elements.md` records why that is a feature rather than an inconvenience —
+ * whether a screen takes part in a transition is a fact about where it is drawn, and `Home` is
+ * drawn two ways.
+ *
+ * ### Predictive back
+ *
+ * There is no back handler here, and that is the point. `NavHost` seeks its own pop transition
+ * from the system's back gesture — so the pop tracks the finger and reverses if the gesture is
+ * abandoned, and a shared element follows the same seek for free — but only once
+ * `android:enableOnBackInvokedCallback` is set on the manifest's `application` node, which it now
+ * is. Intercepting back on a destination would take the gesture away from that and replace it with
+ * an animation played after the fact. The one place this app does intercept is the list-detail
+ * layout, where back is not a navigation at all: see `HomeTwoPaneScreen`.
+ *
  * @param appEvents the app-wide broadcast, collected here for the reactions that are
  *   navigation's to make. It is a parameter rather than something read from a `@Singleton`
  *   inside the graph so this function stays a function of its inputs — see `MainActivity`.
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppNavHost(
     appEvents: Flow<AppEvent>,
@@ -61,91 +86,114 @@ fun AppNavHost(
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = startDestination,
-        modifier = modifier,
-    ) {
-        composable<AppDestination.SignIn> {
-            GoogleSignInScreen(
-                onSignedIn = {
-                    navController.navigate(AppDestination.Home) {
-                        popUpTo<AppDestination.SignIn> { inclusive = true }
+    SharedTransitionLayout {
+        NavHost(
+            navController = navController,
+            startDestination = startDestination,
+            modifier = modifier,
+        ) {
+            composable<AppDestination.SignIn> {
+                GoogleSignInScreen(
+                    onSignedIn = {
+                        navController.navigate(AppDestination.Home) {
+                            popUpTo<AppDestination.SignIn> { inclusive = true }
+                        }
+                    },
+                )
+            }
+
+            composable<AppDestination.Home> {
+                val useListDetail = useListDetailLayout()
+                var selectedUserId by rememberSaveable { mutableStateOf<String?>(null) }
+                // Remembered against the two scopes it wraps rather than rebuilt per
+                // recomposition: a composable taking one of these is compared by identity under
+                // strong skipping — the class makes no stability promise and cannot — so a fresh
+                // instance every pass would make `HomeScreen` unskippable, on a screen whose
+                // state is replaced on every keystroke. Both scopes are stable for the life of
+                // this entry, so the keys are only there to say what the identity depends on.
+                val transition = remember(this@SharedTransitionLayout, this@composable) {
+                    SharedElementTransition(this@SharedTransitionLayout, this@composable)
+                }
+
+                MainNavScaffold(
+                    navController = navController,
+                    currentTopLevel = TopLevelDestination.HOME,
+                ) {
+                    if (useListDetail) {
+                        HomeTwoPaneScreen(
+                            selectedUserId = selectedUserId,
+                            onUserSelected = { userId -> selectedUserId = userId },
+                            onNavigateToBarcodeScanner = {
+                                navController.navigate(AppDestination.BarcodeScanner) {
+                                    popUpTo<AppDestination.Home> { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            onNavigateToTextRecognition = {
+                                navController.navigate(AppDestination.TextRecognition) {
+                                    popUpTo<AppDestination.Home> { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            // `:feature:home` cannot see `:feature:profile` — features are siblings
+                            // and neither may import the other. Knowing about both is navigation's
+                            // job, so the detail pane is supplied from here.
+                            detailPane = { userId -> ProfileDetailPane(userId = userId) },
+                        )
+                    } else {
+                        HomeScreen(
+                            onNavigateToProfile = { userId ->
+                                navController.navigate(AppDestination.Profile(userId = userId))
+                            },
+                            onNavigateToBarcodeScanner = {
+                                navController.navigate(AppDestination.BarcodeScanner) {
+                                    popUpTo<AppDestination.Home> { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            onNavigateToTextRecognition = {
+                                navController.navigate(AppDestination.TextRecognition) {
+                                    popUpTo<AppDestination.Home> { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            // The source half of the transition, and only on this branch: the
+                            // two-pane layout draws the row and the profile at the same time, so
+                            // there both halves of every key would be visible at once. That
+                            // decision belongs here, where both branches are in view.
+                            transition = transition,
+                        )
                     }
-                },
-            )
-        }
-
-        composable<AppDestination.Home> {
-            val useListDetail = useListDetailLayout()
-            var selectedUserId by rememberSaveable { mutableStateOf<String?>(null) }
-
-            MainNavScaffold(
-                navController = navController,
-                currentTopLevel = TopLevelDestination.HOME,
-            ) {
-                if (useListDetail) {
-                    HomeTwoPaneScreen(
-                        selectedUserId = selectedUserId,
-                        onUserSelected = { userId -> selectedUserId = userId },
-                        onNavigateToBarcodeScanner = {
-                            navController.navigate(AppDestination.BarcodeScanner) {
-                                popUpTo<AppDestination.Home> { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        onNavigateToTextRecognition = {
-                            navController.navigate(AppDestination.TextRecognition) {
-                                popUpTo<AppDestination.Home> { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        // `:feature:home` cannot see `:feature:profile` — features are siblings
-                        // and neither may import the other. Knowing about both is navigation's
-                        // job, so the detail pane is supplied from here.
-                        detailPane = { userId -> ProfileDetailPane(userId = userId) },
-                    )
-                } else {
-                    HomeScreen(
-                        onNavigateToProfile = { userId ->
-                            navController.navigate(AppDestination.Profile(userId = userId))
-                        },
-                        onNavigateToBarcodeScanner = {
-                            navController.navigate(AppDestination.BarcodeScanner) {
-                                popUpTo<AppDestination.Home> { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        onNavigateToTextRecognition = {
-                            navController.navigate(AppDestination.TextRecognition) {
-                                popUpTo<AppDestination.Home> { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                    )
                 }
             }
-        }
 
-        composable<AppDestination.Profile> {
-            ProfileScreen(onNavigateUp = navController::navigateUp)
-        }
+            composable<AppDestination.Profile> {
+                val transition = remember(this@SharedTransitionLayout, this@composable) {
+                    SharedElementTransition(this@SharedTransitionLayout, this@composable)
+                }
 
-        composable<AppDestination.BarcodeScanner> {
-            MainNavScaffold(
-                navController = navController,
-                currentTopLevel = TopLevelDestination.SCANNER,
-            ) {
-                BarcodeScannerScreen(onNavigateUp = navController::navigateUp)
+                ProfileScreen(
+                    onNavigateUp = navController::navigateUp,
+                    transition = transition,
+                )
             }
-        }
 
-        composable<AppDestination.TextRecognition> {
-            MainNavScaffold(
-                navController = navController,
-                currentTopLevel = TopLevelDestination.TEXT_RECOGNITION,
-            ) {
-                TextRecognitionScreen(onNavigateUp = navController::navigateUp)
+            composable<AppDestination.BarcodeScanner> {
+                MainNavScaffold(
+                    navController = navController,
+                    currentTopLevel = TopLevelDestination.SCANNER,
+                ) {
+                    BarcodeScannerScreen(onNavigateUp = navController::navigateUp)
+                }
+            }
+
+            composable<AppDestination.TextRecognition> {
+                MainNavScaffold(
+                    navController = navController,
+                    currentTopLevel = TopLevelDestination.TEXT_RECOGNITION,
+                ) {
+                    TextRecognitionScreen(onNavigateUp = navController::navigateUp)
+                }
             }
         }
     }
