@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +44,16 @@ import androidx.compose.ui.unit.sp
  * the circle itself scalable. [displayName] is announced in full by the label beside every
  * instance of this, so nothing is lost to a screen reader.
  *
+ * ### Why it is invisible to a screen reader
+ *
+ * It is a decoration, and the thing it decorates is already named. Every instance sits beside a
+ * `Text` carrying [displayName] in full, so left as it is the reader hears "K" and then
+ * "Kelsey Turner" — the initial twice, once as a letter. `clearAndSetSemantics {}` with nothing
+ * in it drops this subtree from the semantics tree entirely, which is the documented way to say
+ * "decorative" for a composable that is not an `Icon` or an `Image` with a `contentDescription`
+ * to null out. Cleared rather than `invisibleToUser`, because the point is that there is nothing
+ * here to describe rather than that it is hidden.
+ *
  * @param displayName the name to take the initial from. An empty name draws an empty circle rather
  *   than throwing, which is what the two copies this replaces did: `displayName.first()` on a user
  *   whose name failed to sync is an exception on the profile screen.
@@ -54,7 +65,9 @@ fun UserMonogram(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.size(size),
+        modifier = modifier
+            .size(size)
+            .clearAndSetSemantics {},
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
     ) {

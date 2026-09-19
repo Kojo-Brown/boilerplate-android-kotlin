@@ -75,18 +75,24 @@ private val DarkColorScheme = darkColorScheme(
     surfaceTint = md_theme_dark_surfaceTint,
 )
 
+/**
+ * @param dynamicColor whether to take the palette from the wallpaper on Android 12 and above.
+ *   `true` by default, which is the Material 3 recommendation and the behaviour a user who has
+ *   themed their device expects — the hand-written schemes below stay as the pre-S fallback and
+ *   as the answer for a caller that needs a fixed palette, a screenshot test most of all.
+ * @param content drawn under a [MaterialTheme] whose colour scheme is decided here. The resolved
+ *   light/dark answer is *not* published from this function: `MainActivity` needs it before the
+ *   theme composes, to set the system bar icons, and computes it from the same
+ *   [ThemeMode.isDark] rather than reading it back out. See that class for why the two must
+ *   agree.
+ */
 @Composable
 fun BoilerplateTheme(
     themeMode: ThemeMode = ThemeMode.System,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val systemDark = isSystemInDarkTheme()
-    val useDark = when (themeMode) {
-        ThemeMode.Light -> false
-        ThemeMode.Dark -> true
-        ThemeMode.System -> systemDark
-    }
+    val useDark = themeMode.isDark(systemInDarkTheme = isSystemInDarkTheme())
 
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

@@ -16,6 +16,12 @@ android {
 dependencies {
     api(project(":core:common"))
 
+    // `FlashToggle` names `Icons.Default.FlashOn` and `FlashOff`, neither of which is in
+    // the small default icon set. Declared here because this module's own source uses it,
+    // which is the rule every other line in this list follows; both features that draw the
+    // toggle already carried it for the copies this module replaced.
+    implementation(libs.androidx.material.icons.extended)
+
     // `api` for the three that appear in this module's own public signatures: `UdfViewModel`
     // extends `ViewModel`, `AdaptiveNavigationScaffold` takes an `ImmutableList`, and
     // `ObserveAsEvents` is written against `Lifecycle`.
