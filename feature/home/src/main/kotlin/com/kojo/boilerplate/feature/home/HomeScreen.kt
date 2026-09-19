@@ -41,6 +41,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -132,7 +137,8 @@ fun HomeScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Home") },
+                // See `ProfileScreen` for why the title says it is a heading itself.
+                title = { Text("Home", modifier = Modifier.semantics { heading() }) },
                 actions = {
                     RefreshAction(
                         inProgress = isRefreshing,
@@ -224,7 +230,16 @@ internal fun RefreshAction(
         Box(
             // The IconButton's own minimum touch target, so swapping the two does not
             // resize the app bar's action slot mid-refresh.
-            modifier = modifier.size(48.dp),
+            modifier = modifier
+                .size(48.dp)
+                // Swapping the button for a spinner removes the only thing in this slot a
+                // screen reader could name, so the refresh would be silent from the tap until
+                // the snackbar. A live region is what turns the swap itself into the
+                // announcement; polite, because it is progress rather than a result.
+                .semantics {
+                    contentDescription = "Refreshing users"
+                    liveRegion = LiveRegionMode.Polite
+                },
             contentAlignment = Alignment.Center,
         ) {
             CircularProgressIndicator(
@@ -266,7 +281,11 @@ private fun refreshFailureMessage(refreshed: Int, failed: Int): String = when (r
 @Composable
 internal fun OfflineBanner(modifier: Modifier = Modifier) {
     Surface(
-        modifier = modifier,
+        // This banner appears without the user having done anything, above content they are
+        // already reading, so nothing moves focus to it and a screen reader would never reach
+        // it unless the user happened to swipe back to the top. Polite rather than assertive:
+        // the list below is still worth reading, which is the banner's whole point.
+        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
     ) {

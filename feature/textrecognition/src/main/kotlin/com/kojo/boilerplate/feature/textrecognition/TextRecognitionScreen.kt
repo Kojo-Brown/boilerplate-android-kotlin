@@ -30,8 +30,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +50,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.kojo.boilerplate.core.ui.components.FlashToggle
 import com.kojo.boilerplate.core.ui.layout.ExpandableText
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import java.util.concurrent.Executors
@@ -95,7 +96,10 @@ fun TextRecognitionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Text Recognition") },
+                // See `ProfileScreen` for why the title says it is a heading itself.
+                title = {
+                    Text("Text Recognition", modifier = Modifier.semantics { heading() })
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
                         Icon(
@@ -106,22 +110,10 @@ fun TextRecognitionScreen(
                 },
                 actions = {
                     if (state.scan is TextScanState.Scanning) {
-                        IconButton(
-                            onClick = { onEvent(TextRecognitionUiEvent.FlashToggled) },
-                        ) {
-                            Icon(
-                                imageVector = if (state.isFlashEnabled) {
-                                    Icons.Default.FlashOff
-                                } else {
-                                    Icons.Default.FlashOn
-                                },
-                                contentDescription = if (state.isFlashEnabled) {
-                                    "Disable flash"
-                                } else {
-                                    "Enable flash"
-                                },
-                            )
-                        }
+                        FlashToggle(
+                            flashOn = state.isFlashEnabled,
+                            onToggle = { onEvent(TextRecognitionUiEvent.FlashToggled) },
+                        )
                     }
                 },
             )

@@ -30,8 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -51,6 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -63,6 +63,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.kojo.boilerplate.core.ui.components.FlashToggle
 import com.kojo.boilerplate.core.ui.udf.rememberEventSink
 import java.util.concurrent.Executors
 
@@ -92,7 +93,10 @@ fun BarcodeScannerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Barcode Scanner") },
+                // See `ProfileScreen` for why the title says it is a heading itself.
+                title = {
+                    Text("Barcode Scanner", modifier = Modifier.semantics { heading() })
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
                         Icon(
@@ -103,22 +107,10 @@ fun BarcodeScannerScreen(
                 },
                 actions = {
                     if (state.scan is BarcodeScanState.Scanning) {
-                        IconButton(
-                            onClick = { onEvent(BarcodeScannerUiEvent.FlashToggled) },
-                        ) {
-                            Icon(
-                                imageVector = if (state.isFlashEnabled) {
-                                    Icons.Default.FlashOff
-                                } else {
-                                    Icons.Default.FlashOn
-                                },
-                                contentDescription = if (state.isFlashEnabled) {
-                                    "Disable flash"
-                                } else {
-                                    "Enable flash"
-                                },
-                            )
-                        }
+                        FlashToggle(
+                            flashOn = state.isFlashEnabled,
+                            onToggle = { onEvent(BarcodeScannerUiEvent.FlashToggled) },
+                        )
                     }
                 },
             )

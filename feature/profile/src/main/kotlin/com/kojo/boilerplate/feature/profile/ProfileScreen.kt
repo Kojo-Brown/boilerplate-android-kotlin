@@ -21,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,7 +48,12 @@ fun ProfileScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Profile") },
+                // A screen title is a heading, and `TopAppBar` does not say so: it draws
+                // the slot with a type style and no semantics. Without this the title is
+                // one more `Text` among the screen's others, and heading navigation —
+                // TalkBack's swipe-by-heading, the fastest way past a screen a reader has
+                // already heard — has nothing to land on.
+                title = { Text("Profile", modifier = Modifier.semantics { heading() }) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
                         Icon(
