@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup, on API 30 and below. `data_extraction_rules.xml` is the same decision for
+  API 31 and above; the platform reads one or the other by version, never both, so a rule
+  added to one file and not the other is a rule that applies to half the install base.
+
+  The auth-token store is excluded because backing it up cannot work and does not fail
+  loudly. What Auto Backup would copy is the ciphertext; what it cannot copy is the
+  AES key behind it, which lives in the Android keystore and is not part of the app's
+  data by design. Restored onto a new device the file is intact, well-formed, and
+  permanently undecryptable — the reader is signed out with no error anywhere, and the
+  store has to be recognised as unrecoverable and cleared before they can sign in again
+  (see `StoredTokenState.Discard`). Excluding it makes a restore produce a clean
+  signed-out install instead, which is the honest outcome.
+
+  The path is the file `preferencesDataStore(name = AUTH_TOKEN_STORE)` writes, relative to
+  the app's `filesDir`. `TokenStorageContractTest` checks it against that constant, because
+  this is a string in an XML file that nothing else would notice going stale.
+
+  Excludes only, so everything not named here is still backed up.
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore/auth_tokens.preferences_pb" />
+</full-backup-content>

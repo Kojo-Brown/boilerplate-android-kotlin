@@ -24,10 +24,22 @@
       declaring it costs nothing there and the handler in HomeTwoPaneScreen still works — it just
       receives the gesture as a completion with no progress in front of it.
     -->
+    <!--
+      android:allowBackup stays true, and the two rules files below are what make that safe.
+      Auto Backup copies the app's files off the device; the Android keystore key behind the
+      encrypted auth tokens does not go with them, so a restored token store is well-formed
+      and permanently undecryptable. Both files exclude it, because the platform reads
+      dataExtractionRules from API 31 and fullBackupContent below that — naming only one of
+      them leaves half the install base restoring tokens it can never read. See
+      docs/token-storage.md, and TokenStorageContractTest, which fails the build if either
+      file stops naming the store.
+    -->
     <application
         android:name=".BoilerplateApp"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.BoilerplateAndroidKotlin">
