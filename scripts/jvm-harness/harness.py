@@ -84,8 +84,14 @@ DEPS = [
 # or against a stub in stubs/. Anything reaching for Room, DataStore, CameraX, ML Kit, Credential
 # Manager, Navigation or Compose UI is left to CI. Computed from the imports rather than from a
 # checked-in file list, so a new file is picked up — or skipped — on its own merits.
+#
+# `javax.crypto` is in `java.base` like `java.*` is — it needs no artifact and no dependency
+# declaration, and it was missing here only because the pattern spelled `javax` out for
+# `javax.inject`, which *is* a fetched jar. Leaving it out cost real coverage: `AesGcmTokenCipher`
+# and its test are ordinary JCA and run identically here and on a device, and both were being
+# skipped as though they needed the Android SDK.
 RESOLVABLE = re.compile(
-    r"^(kotlin|kotlinx|java|javax\.inject|org\.junit|org\.jetbrains|io\.mockk"
+    r"^(kotlin|kotlinx|java|javax\.(inject|crypto)|org\.junit|org\.jetbrains|io\.mockk"
     r"|dagger|retrofit2|okhttp3|okio|com\.kojo\.boilerplate)\."
 )
 STUBBED = re.compile(

@@ -94,6 +94,7 @@ internal object CompiledApp {
         "$PACKAGE.core.datastore",
         "$PACKAGE.core.di",
         "$PACKAGE.core.network",
+        "$PACKAGE.core.security",
         "$PACKAGE.core.work",
         "$PACKAGE.feature.home",
         "$PACKAGE.feature.profile",

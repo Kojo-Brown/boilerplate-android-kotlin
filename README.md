@@ -130,6 +130,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   questions an event has to answer to get on it, why a `Channel` cannot do this job and a
   `replay` cannot fix it, and why the subscription that matters is started in `Application`
   rather than in a screen.
+- [Token storage](./docs/token-storage.md) — AES-256-GCM over an Android keystore key, why
+  that rather than the deprecated `EncryptedSharedPreferences`, why the store is excluded from
+  Auto Backup in two files rather than one, and why a token that will not decrypt is a routine
+  answer rather than an error.
 - [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that
