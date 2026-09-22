@@ -1,3 +1,11 @@
+// Imported rather than written out at the use site. In a Kotlin build script `java` resolves to
+// the `JavaPluginExtension` accessor the Java plugin contributes, not to the package root, so
+// `java.util.Properties` is a property access on that extension and does not compile — with the
+// eleven inference errors that follow from it burying the one line that caused them.
+import java.io.StringReader
+import java.time.Instant
+import java.util.Properties
+
 plugins {
     id("boilerplate.android.library")
     id("boilerplate.hilt")
@@ -32,6 +40,9 @@ plugins {
  */
 class CertificatePinSet(val serialisedHosts: String, val expiry: String)
 
+/** The one key in [certificatePinsFile] that is not a host pattern. */
+val EXPIRY_KEY = "expires"
+
 val certificatePinsFile =
     rootProject.layout.projectDirectory.file("gradle/certificate-pins.properties")
 
@@ -60,8 +71,10 @@ val certificatePinPattern = Regex("""sha256/[A-Za-z0-9+/]{43}=""")
 
 /** The `expires` value and the host entries of [certificatePinsFile], validated and serialised. */
 fun readCertificatePins(text: String): CertificatePinSet {
-    val properties = java.util.Properties().apply { load(java.io.StringReader(text)) }
-    val expiry = (properties.remove("expires") as String?)?.trim().orEmpty()
+    val properties = Properties().apply { load(StringReader(text)) }
+    val expiry = properties.getProperty(EXPIRY_KEY)?.trim().orEmpty()
+    // Removed so that the loop below sees host entries only; `expires` is the one reserved key.
+    properties.remove(EXPIRY_KEY)
     val fileName = certificatePinsFile.asFile.name
 
     val hosts = properties
@@ -92,7 +105,7 @@ fun readCertificatePins(text: String): CertificatePinSet {
     val normalisedExpiry = if (expiry.isEmpty()) {
         ""
     } else {
-        runCatching { java.time.Instant.parse(expiry).toString() }.getOrElse {
+        runCatching { Instant.parse(expiry).toString() }.getOrElse {
             throw GradleException(
                 "`expires = $expiry` in $fileName is not an ISO-8601 instant such as " +
                     "`2027-03-01T00:00:00Z`.",
