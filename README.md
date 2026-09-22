@@ -134,6 +134,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   that rather than the deprecated `EncryptedSharedPreferences`, why the store is excluded from
   Auto Backup in two files rather than one, and why a token that will not decrypt is a routine
   answer rather than an error.
+- [Certificate pinning](./docs/certificate-pinning.md) — why the pin is of the key and not of
+  the certificate, why a host needs two pins before the build will accept it, why a pin set that
+  does not cover the host it talks to is a crash rather than a warning, why an *expired* pin set
+  stops being enforced instead, and the five-step rotation that changes a key without a release.
 - [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that

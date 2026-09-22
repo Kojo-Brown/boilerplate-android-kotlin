@@ -2,6 +2,9 @@ package com.kojo.boilerplate.core.coroutines
 
 import java.io.IOException
 import java.net.SocketTimeoutException
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -259,6 +262,28 @@ class FlowRetryTest {
         assertFalse(isTransientFailure(httpException(HTTP_NOT_FOUND_CODE)))
         assertFalse(isTransientFailure(httpException(HTTP_CONFLICT_CODE)))
         assertFalse(isTransientFailure(IllegalStateException("unparseable payload")))
+    }
+
+    @Test
+    fun `isTransientFailure does not retry a certificate pinning failure`() {
+        // The one `IOException` that is not transient, and the one this rule would otherwise
+        // catch by inheritance. A pinning failure says the chain is not one this build accepts,
+        // which is a fact about the app and the server rather than about the moment: the next
+        // attempt gets the same chain and the same verdict. Retried, it would burn every layer's
+        // backoff budget and surface as "try again" — the one failure that must not read as a
+        // flaky connection.
+        assertFalse(isTransientFailure(SSLPeerUnverifiedException("Certificate pinning failure!")))
+    }
+
+    @Test
+    fun `isTransientFailure still retries the SSL failures that are transient`() {
+        // The carve-out is one class, not the TLS hierarchy. A handshake killed mid-flight by a
+        // dropped connection arrives as an `SSLException` and is exactly as worth retrying as
+        // any other dropped connection — so a rule written against `SSLException`, the obvious
+        // and slightly wider thing to write, would stop retrying a whole class of real
+        // transient failure and nothing else in this file would notice.
+        assertTrue(isTransientFailure(SSLException("connection reset by peer")))
+        assertTrue(isTransientFailure(SSLHandshakeException("remote host closed connection")))
     }
 
     @Test
