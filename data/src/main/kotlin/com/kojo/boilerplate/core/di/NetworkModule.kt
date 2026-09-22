@@ -1,5 +1,6 @@
 package com.kojo.boilerplate.core.di
 
+import android.util.Log
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.kojo.boilerplate.core.datastore.DataStoreTokenProvider
 import com.kojo.boilerplate.core.network.AuthInterceptor
@@ -7,15 +8,19 @@ import com.kojo.boilerplate.core.network.TokenAuthenticator
 import com.kojo.boilerplate.core.network.TokenProvider
 import com.kojo.boilerplate.core.network.api.AuthApi
 import com.kojo.boilerplate.core.network.api.UserApi
+import com.kojo.boilerplate.core.network.pinning.PinningDecision
+import com.kojo.boilerplate.core.network.pinning.PinningPolicy
 import com.kojo.boilerplate.data.BuildConfig
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import java.time.Instant
 import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -58,15 +63,45 @@ object NetworkModule {
         }
 
     /**
+     * What this build does about certificate pinning, decided once.
+     *
+     * The host is `BASE_URL`'s rather than a constant, because the thing that has to be pinned
+     * is wherever this build actually sends its requests — see [PinningPolicy.decideFor], which
+     * refuses a pin set that does not cover it. `Instant.now()` is read here, at the one place
+     * the decision is taken; everything that depends on the time is a parameter below it, which
+     * is what makes the expiry testable without a clock.
+     *
+     * The summary is logged because none of the three outcomes is visible in the app's
+     * behaviour: a build with pinning off, a build whose pins expired and a build enforcing them
+     * against a server that matches all behave identically, right up until the one day they do
+     * not.
+     */
+    @Provides
+    @Singleton
+    fun providePinningDecision(): PinningDecision =
+        PinningPolicy.parse(BuildConfig.CERTIFICATE_PINS, BuildConfig.CERTIFICATE_PIN_EXPIRY)
+            .decideFor(host = BuildConfig.BASE_URL.toHttpUrl().host, now = Instant.now())
+            .also { Log.i(PINNING_TAG, it.summary) }
+
+    /**
      * Unauthenticated OkHttpClient used exclusively by [AuthApi] (login, token refresh).
      * Must NOT include [AuthInterceptor] or [TokenAuthenticator] to avoid circular calls.
+     *
+     * Pinned, and this is the client where forgetting it costs the most. It carries the
+     * password on the way in and the refresh token on every rotation — the two credentials the
+     * other client never sends — so an interception here yields a session rather than one
+     * response. It is also the easy one to miss, because it is defined away from the main
+     * client and shares none of its configuration. `CertificatePinningContractTest` is what
+     * stops the next `OkHttpClient.Builder()` in this repository from being unpinned.
      */
     @Provides
     @Singleton
     @AuthOkHttpClient
     fun provideAuthOkHttpClient(
         loggingInterceptor: HttpLoggingInterceptor,
+        pinningDecision: PinningDecision,
     ): OkHttpClient = OkHttpClient.Builder()
+        .certificatePinner(pinningDecision.certificatePinner)
         .addInterceptor(loggingInterceptor)
         .build()
 
@@ -92,7 +127,9 @@ object NetworkModule {
         authInterceptor: AuthInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         loggingInterceptor: HttpLoggingInterceptor,
+        pinningDecision: PinningDecision,
     ): OkHttpClient = OkHttpClient.Builder()
+        .certificatePinner(pinningDecision.certificatePinner)
         .addInterceptor(authInterceptor)
         .authenticator(tokenAuthenticator)
         .addInterceptor(loggingInterceptor)
@@ -112,4 +149,6 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideUserApi(retrofit: Retrofit): UserApi = retrofit.create(UserApi::class.java)
+
+    private const val PINNING_TAG = "CertificatePinning"
 }

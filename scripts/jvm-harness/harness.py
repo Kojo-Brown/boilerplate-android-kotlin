@@ -65,6 +65,9 @@ DEPS = [
     "com/squareup/okhttp3:logging-interceptor:4.12.0",
     "com/squareup/okio:okio-jvm:3.6.0",
     "com/squareup/okhttp3:mockwebserver:4.12.0",
+    # `okhttp-tls`, for the one test that puts a real TLS handshake in front of the pinner.
+    # Test-only, and it needs nothing but okhttp and okio, both already here.
+    "com/squareup/okhttp3:okhttp-tls:4.12.0",
     # mockk and its own runtime dependencies. Resolved by hand because the harness has no
     # dependency resolver; the versions are the ones mockk 1.13.14 declares.
     "io/mockk:mockk-jvm:1.13.14",
@@ -89,9 +92,12 @@ DEPS = [
 # declaration, and it was missing here only because the pattern spelled `javax` out for
 # `javax.inject`, which *is* a fetched jar. Leaving it out cost real coverage: `AesGcmTokenCipher`
 # and its test are ordinary JCA and run identically here and on a device, and both were being
-# skipped as though they needed the Android SDK.
+# skipped as though they needed the Android SDK. `javax.net` is here for the same reason and was
+# found the same way: `SSLPeerUnverifiedException` is what a certificate-pinning failure throws,
+# `isTransientFailure` has to name it to keep it out of the retry set, and naming it would have
+# dropped `FlowRetry.kt` and its 83 tests out of this run.
 RESOLVABLE = re.compile(
-    r"^(kotlin|kotlinx|java|javax\.(inject|crypto)|org\.junit|org\.jetbrains|io\.mockk"
+    r"^(kotlin|kotlinx|java|javax\.(inject|crypto|net)|org\.junit|org\.jetbrains|io\.mockk"
     r"|dagger|retrofit2|okhttp3|okio|com\.kojo\.boilerplate)\."
 )
 STUBBED = re.compile(
@@ -915,6 +921,7 @@ def test_classpath(jars: Path) -> list[str]:
         for name in (
             "kotlinx-coroutines-test-jvm-1.9.0.jar",
             "mockwebserver-4.12.0.jar",
+            "okhttp-tls-4.12.0.jar",
             "mockk-jvm-1.13.14.jar",
             "mockk-dsl-jvm-1.13.14.jar",
             "mockk-core-jvm-1.13.14.jar",

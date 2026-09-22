@@ -1,6 +1,7 @@
 package com.kojo.boilerplate.core.coroutines
 
 import java.io.IOException
+import javax.net.ssl.SSLPeerUnverifiedException
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlinx.coroutines.CancellationException
@@ -102,10 +103,27 @@ fun <T> Flow<T>.retryWithBackoff(
  * asked again, 5xx is a fault on its side. Every other 4xx is a statement about the request,
  * and sending it again unchanged gets the same answer.
  *
+ * [SSLPeerUnverifiedException] is the one [IOException] that is carved back out, and it is the
+ * exception this app's certificate pinning throws. It means the chain the server presented is
+ * not one this build accepts, which is a property of the two of them and not of the moment:
+ * the next attempt gets the same chain and the same verdict, because the pins are baked into
+ * the APK and only a new server certificate or a new app release can change the answer. Left in
+ * the transient set it would be retried at every layer that retries — `retryWithBackoff` here,
+ * `RetryingUserRepository` under it — so a pin mismatch would spend the backoff budget of every
+ * screen, and a hostile network could hold a device in that loop. It also *reads* as a flaky
+ * connection to everything downstream, which is the more expensive half: the one failure that
+ * should surface as "this connection is not the server" is the one that would be reported as
+ * "try again in a moment". `docs/certificate-pinning.md` covers what to do when it fires.
+ *
+ * Narrowed to [SSLPeerUnverifiedException] rather than to [javax.net.ssl.SSLException], which is
+ * its parent: a handshake killed mid-flight by a dropped connection also arrives as an
+ * `SSLException` and is exactly as transient as any other dropped connection.
+ *
  * Deliberately absent: [kotlinx.serialization.SerializationException] and its kin. A response
  * that does not parse is a contract mismatch, and three more round trips will not fix it.
  */
 fun isTransientFailure(cause: Throwable): Boolean = when (cause) {
+    is SSLPeerUnverifiedException -> false
     is IOException -> true
     is HttpException -> cause.code().isRetryableStatus()
     else -> false
