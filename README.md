@@ -138,6 +138,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   the certificate, why a host needs two pins before the build will accept it, why a pin set that
   does not cover the host it talks to is a crash rather than a warning, why an *expired* pin set
   stops being enforced instead, and the five-step rotation that changes a key without a release.
+- [Root and tamper detection](./docs/root-detection.md) — why there is no `isRooted()` and
+  why a check an app performs is a check an attacker removes, the Play Integrity standard
+  request flow, the request hash that binds a token to one call, why the client fails open and
+  the server does not, and the server-side half without which none of it means anything.
 - [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that

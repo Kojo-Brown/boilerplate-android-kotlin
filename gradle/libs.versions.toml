@@ -88,6 +88,18 @@ robolectric = "4.16.1"
 # than the API version. 0.3.8 is the newest release built on a stdlib at or below
 # 2.1.0, and it carries the full ImmutableList/PersistentList surface this uses.
 kotlinxCollectionsImmutable = "0.3.8"
+# Play Integrity. 1.6.0 is what developer.android.com/google/play/integrity/setup documents as
+# the current coordinate; the version is checked for real by the Dependency Resolution workflow,
+# which is the only place in this project that can reach Google Maven — the scheduled agent's
+# environment answers 403 on CONNECT to dl.google.com, so nothing local resolves it.
+#
+# It carries the standard request API (`IntegrityManagerFactory.createStandard`) this app uses,
+# and drags in `com.google.android.gms:play-services-base` for `Task` and `ApiException`. That
+# transitive edge is the one to watch on an upgrade: it is a Play services artifact, and a
+# release built against a later AndroidX vintage can pull `androidx.lifecycle` past the 2.8.7
+# pinned above and crash the lint bundled with AGP 8.7.3 — a failure that names a lint detector
+# and not this line.
+playIntegrity = "1.6.0"
 cameraX = "1.4.2"
 mlkitBarcode = "17.3.0"
 mlkitTextRecognition = "16.0.1"
@@ -213,6 +225,18 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 # MLKit
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+
+# Play Integrity. The standard request API, plus the coroutine adapter that turns the
+# `com.google.android.gms.tasks.Task` it returns into a suspending call.
+#
+# `kotlinx-coroutines-play-services` is versioned with the rest of coroutines deliberately: it
+# ships `Task.await()` built on the same `CancellableContinuation` internals as the release it
+# accompanies, and mixing versions of those is the kind of mismatch that surfaces as a coroutine
+# that never resumes. It is the only dependency in this repository that exists solely to bridge
+# two threading models, which is why it sits next to the artifact that forced it rather than
+# with the other kotlinx entries.
+play-integrity = { group = "com.google.android.play", name = "integrity", version.ref = "playIntegrity" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
 # Google Credential Manager
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }

@@ -119,6 +119,49 @@ fun readCertificatePins(text: String): CertificatePinSet {
 val certificatePins =
     readCertificatePins(providers.fileContents(certificatePinsFile).asText.orNull.orEmpty())
 
+/*
+ * Play Integrity: `gradle/play-integrity.properties` in, one BuildConfig field out.
+ *
+ * Same shape and the same reasoning as the pin set above — deployment configuration that changes
+ * with the project rather than with the code, read through `providers.fileContents` so the file
+ * is a registered build input, validated here so that only digits can be interpolated into
+ * generated Kotlin source. It is a much smaller value, so this is a much smaller reader; what it
+ * is not is a second mechanism, which is why it sits beside the first rather than in a helper
+ * both share.
+ *
+ * The number is not a secret. See the header of the properties file for what it is and where it
+ * comes from.
+ */
+val integrityCloudProjectFile =
+    rootProject.layout.projectDirectory.file("gradle/play-integrity.properties")
+
+/** The one key in [integrityCloudProjectFile]. */
+val CLOUD_PROJECT_NUMBER_KEY = "cloudProjectNumber"
+
+/**
+ * Digits only, and at least one. A Google Cloud project number is a decimal integer; anything
+ * else here is a project *ID* pasted by mistake, a quoted value, or a comment that lost its `#`.
+ * Rejecting it at configuration time means the message can name the file, rather than
+ * `IntegrityConfiguration.parse` naming it on a device nobody is watching.
+ */
+val cloudProjectNumberPattern = Regex("""[1-9][0-9]*""")
+
+/** The validated `cloudProjectNumber`, or the empty string when the file declares none. */
+fun readIntegrityCloudProjectNumber(text: String): String {
+    val properties = Properties().apply { load(StringReader(text)) }
+    val value = properties.getProperty(CLOUD_PROJECT_NUMBER_KEY)?.trim().orEmpty()
+    if (value.isEmpty()) return ""
+    require(cloudProjectNumberPattern.matches(value)) {
+        "`$CLOUD_PROJECT_NUMBER_KEY = $value` in ${integrityCloudProjectFile.asFile.name} is " +
+            "not a Google Cloud project number. Expected the all-digits project number Play " +
+            "Console shows for the linked Cloud project — not the project ID, and not quoted."
+    }
+    return value
+}
+
+val integrityCloudProjectNumber = readIntegrityCloudProjectNumber(
+    providers.fileContents(integrityCloudProjectFile).asText.orNull.orEmpty(),
+)
 
 android {
     namespace = "com.kojo.boilerplate.data"
@@ -140,6 +183,15 @@ android {
             "String",
             "CERTIFICATE_PIN_EXPIRY",
             "\"${certificatePins.expiry}\"",
+        )
+
+        // The Cloud project Play encrypts this build's integrity tokens to. Empty in an
+        // unmodified checkout, which is what turns attestation off; `IntegrityConfiguration.parse`
+        // is what reads it back.
+        buildConfigField(
+            "String",
+            "INTEGRITY_CLOUD_PROJECT_NUMBER",
+            "\"$integrityCloudProjectNumber\"",
         )
     }
 
@@ -196,8 +248,42 @@ val checkCertificatePinsConfigured = tasks.register("checkCertificatePinsConfigu
     }
 }
 
+/*
+ * The same gate for attestation, and it fires on a quieter failure than the pinning one.
+ *
+ * An unpinned build is visibly unpinned to anybody who looks at the properties file. A build
+ * with no cloud project number *behaves* exactly like a build whose users all happen to be
+ * unable to attest: every request goes out without a token, every `attest` answers
+ * NOT_CONFIGURED, and nothing in the app is any different. If the backend is not yet enforcing,
+ * nothing anywhere is different — which is precisely the window in which this ships unnoticed
+ * and is discovered on the day enforcement is switched on and every install is rejected at once.
+ *
+ * Release only, and `tasks.matching` rather than `tasks.named`, for the reasons given above the
+ * pinning gate.
+ */
+val checkIntegrityAttestationConfigured = tasks.register("checkIntegrityAttestationConfigured") {
+    description = "Fails a release build that declares no Play Integrity cloud project number."
+    group = "verification"
+
+    val cloudProjectNumber = integrityCloudProjectNumber
+    val configurationFile = integrityCloudProjectFile.asFile.path
+    inputs.property("cloudProjectNumber", cloudProjectNumber)
+
+    doLast {
+        check(cloudProjectNumber.isNotEmpty()) {
+            "This is a release build and $configurationFile declares no cloud project number, " +
+                "so this app will never request a Play Integrity token and every request it " +
+                "makes will reach the backend unattested — including the sign-in that " +
+                "AuthApi.login marks for attestation. Link a Cloud project in Play Console and " +
+                "put its number in that file, or delete this task if device attestation is " +
+                "deliberately not part of your threat model. docs/root-detection.md has the " +
+                "procedure and the server-side half."
+        }
+    }
+}
+
 tasks.matching { it.name == "compileReleaseKotlin" }.configureEach {
-    dependsOn(checkCertificatePinsConfigured)
+    dependsOn(checkCertificatePinsConfigured, checkIntegrityAttestationConfigured)
 }
 
 // The Room Gradle Plugin registers `room` on the project, not on the `android` extension, so
@@ -251,6 +337,12 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+
+    // Play Integrity, and the adapter that lets `PlayIntegrityAttestation` await a `Task`
+    // without a callback. `implementation` rather than `api`: nothing above `:data` names a
+    // Play type, and `IntegrityAttestation` exists so that nothing ever has to.
+    implementation(libs.play.integrity)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)

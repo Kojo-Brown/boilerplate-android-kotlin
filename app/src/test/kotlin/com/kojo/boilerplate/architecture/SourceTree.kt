@@ -143,3 +143,65 @@ internal class KotlinSource(text: String) {
     private fun Int.past(delimiter: Int, text: String): Int =
         if (this < 0) text.length else this + delimiter
 }
+
+/**
+ * Every `OkHttpClient.Builder()` chain in `src/main`, and what each one calls.
+ *
+ * Extracted here when a second rule needed it, for the reason [KotlinSource] was:
+ * [CertificatePinningContractTest] asks whether each client was given a pinner and
+ * [IntegrityAttestationContractTest] asks whether each was given the attestation interceptor,
+ * and both questions are "find the builder chains, then look inside one". A second copy of the
+ * bracket walk below would be a second copy of its bugs — and the bugs it can have are quiet
+ * ones: a scan that stops early reports a configured client as unconfigured, and one that runs
+ * past `build()` borrows the next statement's configuration. Both rules pin that behaviour
+ * against their own fixtures through [scan].
+ */
+internal object OkHttpClients {
+
+    /** One `OkHttpClient.Builder()` chain: where it is, and its text up to `.build()`. */
+    data class Chain(val file: String, val line: Int, val calls: String)
+
+    /** Every chain in the repository's `src/main`. */
+    fun chains(): List<Chain> = SourceTree.mainSources().flatMap { file ->
+        val source = KotlinSource(file.readText())
+        BUILDER.findAll(source.code).map { match ->
+            Chain(
+                file = file.repositoryPath(),
+                line = source.lineOf(match.range.first),
+                calls = chainFrom(source.code, match.range.first),
+            )
+        }
+    }
+
+    /** Every chain in [code], for a rule's own fixtures. */
+    fun scan(code: String): List<String> =
+        BUILDER.findAll(code).map { chainFrom(code, it.range.first) }.toList()
+
+    /**
+     * The builder chain starting at [start]: everything up to and including the `.build()` that
+     * closes it.
+     *
+     * Bracket-aware, so that a builder passed as an argument to this one — a `Request.Builder()`
+     * or a `Dispatcher()` — contributes its own `build()` at a depth this never stops on. Runs
+     * to the end of the file if the chain never closes, which is a file that does not compile.
+     */
+    private fun chainFrom(code: String, start: Int): String {
+        var depth = 0
+        var index = start
+        while (index < code.length) {
+            if (depth == 0 && code.startsWith(BUILD_CALL, index)) {
+                return code.substring(start, index + BUILD_CALL.length)
+            }
+            when (code[index]) {
+                '(', '{', '[' -> depth++
+                ')', '}', ']' -> depth--
+            }
+            index++
+        }
+        return code.substring(start)
+    }
+
+    private const val BUILD_CALL = ".build()"
+
+    private val BUILDER = Regex("""\bOkHttpClient\.Builder\s*\(""")
+}

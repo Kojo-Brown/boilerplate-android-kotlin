@@ -52,8 +52,8 @@ class CertificatePinningContractTest {
 
     @Test
     fun `every OkHttp client in the app is given a certificate pinner`() {
-        val unpinned = okHttpClientChains()
-            .filter { !it.chain.contains(PINNER_CALL) }
+        val unpinned = OkHttpClients.chains()
+            .filter { !it.calls.contains(PINNER_CALL) }
             .map { "${it.file}:${it.line}" }
 
         assertTrue(unpinned.isEmpty()) {
@@ -72,7 +72,7 @@ class CertificatePinningContractTest {
         // `NetworkModule` is split or the clients move, which is the day it should assert
         // hardest. The count is a floor rather than an equality: a third client is fine, and
         // failing it is exactly what the rule above is for.
-        val chains = okHttpClientChains()
+        val chains = OkHttpClients.chains()
 
         assertTrue(chains.size >= EXPECTED_CLIENTS) {
             "Expected at least $EXPECTED_CLIENTS `OkHttpClient.Builder()` chains in src/main and " +
@@ -92,16 +92,20 @@ class CertificatePinningContractTest {
         // both directions: a scan that stopped early would report a pinned client as unpinned,
         // and one that ran past `build()` would find a neighbouring statement's pinner and
         // report an unpinned client as pinned. Both are silent, so both are pinned here.
-        assertTrue(scan(PINNED_FIXTURE).single().contains(PINNER_CALL)) {
+        //
+        // [OkHttpClients] is shared with [IntegrityAttestationContractTest] now, so these four
+        // fixtures hold up that rule as well as this one — which is an argument for keeping them
+        // here rather than thinning them out.
+        assertTrue(OkHttpClients.scan(PINNED_FIXTURE).single().contains(PINNER_CALL)) {
             "a pinned chain reads as pinned"
         }
-        assertTrue(!scan(UNPINNED_FIXTURE).single().contains(PINNER_CALL)) {
+        assertTrue(!OkHttpClients.scan(UNPINNED_FIXTURE).single().contains(PINNER_CALL)) {
             "an unpinned chain reads as unpinned"
         }
-        assertTrue(!scan(NEIGHBOUR_FIXTURE).first().contains(PINNER_CALL)) {
+        assertTrue(!OkHttpClients.scan(NEIGHBOUR_FIXTURE).first().contains(PINNER_CALL)) {
             "a chain does not borrow the pinner of the statement after it"
         }
-        assertTrue(scan(NESTED_FIXTURE).single().contains(PINNER_CALL)) {
+        assertTrue(OkHttpClients.scan(NESTED_FIXTURE).single().contains(PINNER_CALL)) {
             "a nested builder's own `build()` does not end the outer chain"
         }
     }
@@ -180,49 +184,6 @@ class CertificatePinningContractTest {
         }
     }
 
-    /** Where an `OkHttpClient.Builder()` chain is, and what it calls. */
-    private data class ClientChain(val file: String, val line: Int, val chain: String)
-
-    private fun okHttpClientChains(): List<ClientChain> =
-        SourceTree.mainSources().flatMap { file ->
-            val source = KotlinSource(file.readText())
-            CLIENT_BUILDER.findAll(source.code).map { match ->
-                ClientChain(
-                    file = file.repositoryPath(),
-                    line = source.lineOf(match.range.first),
-                    chain = chainFrom(source.code, match.range.first),
-                )
-            }
-        }
-
-    /** Every `OkHttpClient.Builder()` chain in [code], for the fixtures. */
-    private fun scan(code: String): List<String> =
-        CLIENT_BUILDER.findAll(code).map { chainFrom(code, it.range.first) }.toList()
-
-    /**
-     * The builder chain starting at [start]: everything up to and including the `.build()` that
-     * closes it.
-     *
-     * Bracket-aware, so that a builder passed as an argument to this one — a `Request.Builder()`
-     * or a `Dispatcher()` — contributes its own `build()` at a depth this never stops on. Runs to
-     * the end of the file if the chain never closes, which is a file that does not compile.
-     */
-    private fun chainFrom(code: String, start: Int): String {
-        var depth = 0
-        var index = start
-        while (index < code.length) {
-            if (depth == 0 && code.startsWith(BUILD_CALL, index)) {
-                return code.substring(start, index + BUILD_CALL.length)
-            }
-            when (code[index]) {
-                '(', '{', '[' -> depth++
-                ')', '}', ']' -> depth--
-            }
-            index++
-        }
-        return code.substring(start)
-    }
-
     private companion object {
         const val NETWORK_MODULE = "data/src/main/kotlin/com/kojo/boilerplate/core/di/NetworkModule.kt"
         const val POLICY_FILE =
@@ -234,9 +195,7 @@ class CertificatePinningContractTest {
         const val EXPECTED_CLIENTS = 2
 
         const val PINNER_CALL = ".certificatePinner("
-        const val BUILD_CALL = ".build()"
 
-        val CLIENT_BUILDER = Regex("""\bOkHttpClient\.Builder\s*\(""")
         val PINNER_BUILDER = Regex("""\bCertificatePinner\.Builder\s*\(""")
 
         /**
