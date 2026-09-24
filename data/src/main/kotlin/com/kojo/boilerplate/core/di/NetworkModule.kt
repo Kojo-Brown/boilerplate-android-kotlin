@@ -10,6 +10,7 @@ import com.kojo.boilerplate.core.network.api.AuthApi
 import com.kojo.boilerplate.core.network.api.UserApi
 import com.kojo.boilerplate.core.network.pinning.PinningDecision
 import com.kojo.boilerplate.core.network.pinning.PinningPolicy
+import com.kojo.boilerplate.core.security.integrity.IntegrityInterceptor
 import com.kojo.boilerplate.data.BuildConfig
 import dagger.Binds
 import dagger.Module
@@ -51,6 +52,25 @@ object NetworkModule {
         encodeDefaults = true
     }
 
+    /**
+     * Request/response logging, full-bodied in debug and silent in release.
+     *
+     * ### The two redactions
+     *
+     * `Level.BODY` logs every header, and two of the ones this app sends are credentials in
+     * everything but name. Logcat is readable by `adb` from any machine the device is plugged
+     * into and, on a debug build, is exactly what gets pasted into a bug report.
+     *
+     * * `Authorization` carries the bearer token. Printing it turns a stack trace attached to a
+     *   ticket into a live session.
+     * * [IntegrityInterceptor.INTEGRITY_TOKEN] carries a Play Integrity token. It is encrypted
+     *   to a Cloud project and so grants nothing by itself — but it is bound to the request it
+     *   accompanies, and a log at `BODY` level prints both. That pair, replayed while the token
+     *   is fresh, is a request the backend will accept as attested.
+     *
+     * `redactHeader` keeps the header's *name* in the log and replaces its value, which is what
+     * makes a missing token still debuggable: the line says the header was there.
+     */
     @Provides
     @Singleton
     fun provideLoggingInterceptor(): HttpLoggingInterceptor =
@@ -60,6 +80,8 @@ object NetworkModule {
             } else {
                 HttpLoggingInterceptor.Level.NONE
             }
+            redactHeader("Authorization")
+            redactHeader(IntegrityInterceptor.INTEGRITY_TOKEN)
         }
 
     /**
@@ -98,10 +120,12 @@ object NetworkModule {
     @Singleton
     @AuthOkHttpClient
     fun provideAuthOkHttpClient(
+        integrityInterceptor: IntegrityInterceptor,
         loggingInterceptor: HttpLoggingInterceptor,
         pinningDecision: PinningDecision,
     ): OkHttpClient = OkHttpClient.Builder()
         .certificatePinner(pinningDecision.certificatePinner)
+        .addInterceptor(integrityInterceptor)
         .addInterceptor(loggingInterceptor)
         .build()
 
@@ -120,17 +144,25 @@ object NetworkModule {
     /**
      * Main authenticated OkHttpClient — adds the JWT Bearer header on every request
      * and handles 401 responses via [TokenAuthenticator].
+     *
+     * The interceptor order is the one thing here that is not arbitrary. Application
+     * interceptors run in the order they are added, each wrapping the next, so
+     * [IntegrityInterceptor] sits between the auth header and the log: it attests the request
+     * as it will actually be sent, and the logging interceptor below it sees — and redacts —
+     * what went out rather than the marker header that asked for it.
      */
     @Provides
     @Singleton
     fun provideOkHttpClient(
         authInterceptor: AuthInterceptor,
+        integrityInterceptor: IntegrityInterceptor,
         tokenAuthenticator: TokenAuthenticator,
         loggingInterceptor: HttpLoggingInterceptor,
         pinningDecision: PinningDecision,
     ): OkHttpClient = OkHttpClient.Builder()
         .certificatePinner(pinningDecision.certificatePinner)
         .addInterceptor(authInterceptor)
+        .addInterceptor(integrityInterceptor)
         .authenticator(tokenAuthenticator)
         .addInterceptor(loggingInterceptor)
         .build()
