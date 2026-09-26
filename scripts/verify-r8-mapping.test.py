@@ -101,7 +101,34 @@ com.kojo.boilerplate.core.datastore.proto.UserPreferencesProto -> a.c.a:
 """
 
 
-def write(root: Path, mapping: str, **extra: str) -> Path:
+# Lines copied verbatim out of the first CI run's mapping file, which is where this script's
+# first parser broke. The hyphen in a Kotlin-mangled lambda name is what a `[\w.$]` class rejects,
+# and a class line it cannot read orphans every member indented under it — twenty of these
+# produced 2354 complaints. Real shapes, so the parser is held to the format rather than to an
+# idea of it.
+REAL_R8_LINES = """\
+androidx.compose.foundation.ClickableKt$clickable-O2vRcR0$$inlined\
+$clickableWithIndicationIfNeeded$1 -> androidx.compose.foundation.b:
+    androidx.compose.foundation.Indication $indication -> M
+    boolean $enabled$inlined -> N
+    java.lang.String $onClickLabel$inlined -> O
+    androidx.compose.ui.semantics.Role $role$inlined -> P
+    kotlin.jvm.functions.Function0 $onClick$inlined -> Q
+    0:14:void <init>(androidx.compose.foundation.Indication,boolean,java.lang.String,\
+androidx.compose.ui.semantics.Role,kotlin.jvm.functions.Function0):0:0 -> <init>
+    0:11:java.lang.Object androidx.compose.foundation.ClickableKt\
+$clickableWithIndicationIfNeeded$1.invoke(java.lang.Object,java.lang.Object,java.lang.Object)\
+:375:375 -> c
+    0:11:java.lang.Object invoke(java.lang.Object,java.lang.Object,java.lang.Object):375 -> c
+    12:14:androidx.compose.ui.Modifier invoke(androidx.compose.ui.Modifier,\
+androidx.compose.runtime.Composer,int):0:0 -> c
+    15:18:java.lang.Object androidx.compose.runtime.ComposerKt.cache(\
+androidx.compose.runtime.Composer,boolean,kotlin.jvm.functions.Function0):1225:1225 -> c
+    # {"id":"com.android.tools.r8.synthesized"}
+"""
+
+
+def write(root: Path, mapping: str, allowlist: str = "", **extra: str) -> Path:
     """Lay out a fixture repository and return its root."""
     files = {
         "build-logic/convention/src/main/kotlin/com/kojo/boilerplate/buildlogic/"
@@ -113,6 +140,8 @@ def write(root: Path, mapping: str, **extra: str) -> Path:
     }
     if mapping:
         files[str(MAPPING_DIR / "mapping.txt")] = mapping
+    if allowlist:
+        files["config/r8/shrunk-away-allowlist.txt"] = allowlist
     for name, contents in extra.items():
         files[str(MAPPING_DIR / name.replace("__", "."))] = contents
 
@@ -137,7 +166,12 @@ FAILURES: list[str] = []
 
 def check(name: str, *, expect_exit: int, expect_in_output: str = "", **fixture: str) -> None:
     with tempfile.TemporaryDirectory() as directory:
-        root = write(Path(directory), fixture.pop("mapping", GOOD_MAPPING), **fixture)
+        root = write(
+            Path(directory),
+            fixture.pop("mapping", GOOD_MAPPING),
+            fixture.pop("allowlist", ""),
+            **fixture,
+        )
         result = run(root)
 
     output = result.stdout + result.stderr
@@ -248,6 +282,50 @@ def main() -> int:
         ),
         expect_exit=1,
         expect_in_output="getDeclaredField",
+    )
+
+    check(
+        "the line shapes a real R8 mapping holds are all understood",
+        mapping=GOOD_MAPPING + REAL_R8_LINES,
+        expect_exit=0,
+        expect_in_output="still matches what it was written for",
+    )
+
+    check(
+        "a class the allowlist explains is allowed not to survive",
+        mapping="\n".join(
+            line
+            for line in GOOD_MAPPING.splitlines()
+            if "UserPreferencesProto" not in line and "onboardingComplete_" not in line
+            and "<init>" not in line
+        )
+        + "\n",
+        allowlist="com.kojo.boilerplate.core.datastore.proto.UserPreferencesProto  "
+        "# nothing injects the data source, so the whole chain is unreachable\n",
+        expect_exit=0,
+        expect_in_output="1 allowed not to",
+    )
+
+    check(
+        "an allowlist entry for a class that survived is stale and fails",
+        allowlist="com.kojo.boilerplate.core.datastore.proto.UserPreferencesProto  "
+        "# nothing injects the data source\n",
+        expect_exit=1,
+        expect_in_output="is stale",
+    )
+
+    check(
+        "an allowlist entry naming a class this gate never asks about fails",
+        allowlist="com.kojo.boilerplate.Deleted  # went away in some refactor\n",
+        expect_exit=1,
+        expect_in_output="covers nothing",
+    )
+
+    check(
+        "an allowlist entry with no reason fails",
+        allowlist="com.kojo.boilerplate.core.datastore.proto.UserPreferencesProto\n",
+        expect_exit=1,
+        expect_in_output="has no `# reason`",
     )
 
     check(

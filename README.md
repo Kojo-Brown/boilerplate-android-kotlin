@@ -230,7 +230,10 @@ halves, and the debug signing key.
 shrunk output rather than by their text — what survived, what kept its name, and
 whether R8 had to guess about any reference. R8 does not warn about a `-keep`
 that matches no class, which is how this file came to hold two rules that
-protected nothing at all.
+protected nothing at all. A class that is genuinely unreachable, and so right to
+remove, is named in `config/r8/shrunk-away-allowlist.txt` with the reason; that
+file is checked in both directions, so an entry cannot outlive the fact it
+records. The first shrunk build put three classes in it.
 
 ```bash
 ./gradlew :app:assembleMinified

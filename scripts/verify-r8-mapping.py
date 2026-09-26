@@ -26,7 +26,10 @@ So this reads R8's own report of the shrunk output and checks the rules by their
 3. **Every `@Serializable` type the app declares survived**, and so did every message class the
    `.proto` schema generates. The expected sets are read out of the Kotlin and `.proto` sources
    rather than listed here, because a list is what stops covering the type somebody adds next
-   month — which is the exact failure the deleted navigation rule was.
+   month — which is the exact failure the deleted navigation rule was. A type that is genuinely
+   unreachable, and so genuinely right to remove, is named in
+   `config/r8/shrunk-away-allowlist.txt` with the reason; that file is checked in both
+   directions, so an entry cannot outlive the fact it records.
 4. **Nothing that has to keep its name was renamed.** `INSTANCE` and `serializer` on a
    serializable declaration, `Companion`, and protobuf's trailing-underscore fields. This
    direction is always decidable from the mapping file: R8 has to record a rename, or `retrace`
@@ -42,7 +45,7 @@ also what an unlisted identity mapping looks like. When either file is there it 
 check is exact. The summary says which of the two the run had, so the reach of this gate is in
 the log rather than assumed. Class removal (check 3) needs neither file.
 
-Usage:  scripts/verify-r8-mapping.py [--root DIR] [--mapping-dir DIR]
+Usage:  scripts/verify-r8-mapping.py [--root DIR] [--mapping-dir DIR] [--allowlist FILE]
 
 Producing what it reads:
 
@@ -62,6 +65,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_MAPPING_DIR = Path("app/build/outputs/mapping/minified")
+
+# Classes the checks below would require to survive, and that R8 is right to remove. Every entry
+# is dead code in the shipped artifact, with the reason it is dead written next to it.
+DEFAULT_ALLOWLIST = Path("config/r8/shrunk-away-allowlist.txt")
 
 # Where the app's package prefix is declared. Read rather than repeated: this script decides
 # which classes count as "the app's own" from it, and a second spelling would diverge silently.
@@ -95,21 +102,30 @@ class ClassMapping:
 
 
 # `com.example.Foo -> a.b.c:`
-CLASS_LINE = re.compile(r"^(?P<original>[\w.$\[\]]+) -> (?P<obfuscated>[\w.$\[\]]+):$")
+#
+# Deliberately `\S+` on both sides rather than a character class. A JVM name can hold more than
+# anyone enumerates from memory, and the first run of this script against a real mapping proved
+# it: Kotlin mangles a lambda that captures an inline-class value into
+# `ClickableKt$clickable-O2vRcR0$$inlined$…`, whose hyphen a `[\w.$]` class rejects. The cost of
+# getting a class line wrong is not one line — `current` goes to `None` and every member indented
+# under it is unattributed too, which is how 20 unreadable class lines became 2354 complaints.
+# An unindented line ending in a colon with ` -> ` in the middle is a class mapping; nothing else
+# in the format looks like that.
+CLASS_LINE = re.compile(r"^(?P<original>\S+) -> (?P<obfuscated>\S+):$")
 
 # `    1:7:void onCreate(android.os.Bundle):41:47 -> a`  /  `    int count -> b`
 #
 # The leading `<line>:<line>:` pair and the trailing `:<line>[:<line>]` are present on methods
-# only, and only when line numbers survived, so both are optional. The name is allowed to contain
-# dots because an inlined frame names its *original* holder there — `1:1:void
-# other.Klass.method():7:7 -> a` — and the member is the last segment of it. Hyphens are allowed
-# because that is how Kotlin mangles a function taking an inline class.
+# only, and only when line numbers survived, so both are optional. Names are `[^\s(]+` and types
+# `\S+` for the reason above; a member line holds no spaces except the two around the arrow and
+# the one after the type, so this stays unambiguous. The name may contain dots, because an
+# inlined frame names its *original* holder there — `1:1:void other.Klass.method():7:7 -> a`.
 MEMBER_LINE = re.compile(
     r"^\s+(?:\d+:\d+:)?"
-    r"(?P<type>[\w.$\[\]<>]+) "
-    r"(?P<name>[\w.$<>-]+)"
+    r"(?P<type>\S+) "
+    r"(?P<name>[^\s(]+)"
     r"(?P<arguments>\([^)]*\))?"
-    r"(?::\d+(?::\d+)?)? -> (?P<obfuscated>[\w$<>-]+)$"
+    r"(?::\d+(?::\d+)?)? -> (?P<obfuscated>\S+)$"
 )
 
 
@@ -298,6 +314,60 @@ def proto_message_classes(root: Path) -> tuple[list[str], list[str]]:
     return names, problems
 
 
+def read_allowlist(path: Path) -> tuple[dict[str, str], list[str]]:
+    """Parse the allowlist, and reject an entry that does not say why it is there.
+
+    A bare name is how an allowlist becomes permanent: nobody can tell later whether the
+    exemption was a considered fact about the app or the quickest way past a red build.
+    """
+    entries: dict[str, str] = {}
+    errors: list[str] = []
+    if not path.is_file():
+        return entries, errors
+
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        parts = raw.split("#", 1)
+        body, reason = parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+        if not body:
+            continue
+        if len(body.split()) != 1:
+            errors.append(
+                f"{path}:{number}: expected `fully.qualified.ClassName  # reason`, got {raw!r}"
+            )
+            continue
+        if not reason:
+            errors.append(f"{path}:{number}: {body} has no `# reason`")
+            continue
+        entries[body] = reason
+    return entries, errors
+
+
+def check_allowlist_is_current(
+    classes: dict[str, ClassMapping],
+    allowed: dict[str, str],
+    required: list[str],
+    path: Path,
+) -> list[str]:
+    """Both directions, so the allowlist cannot quietly stop describing the app.
+
+    An entry whose class is in the shrunk output is a waiver for something that no longer needs
+    one; an entry the checks never ask about is a waiver for something that no longer exists.
+    """
+    failures: list[str] = []
+    for name in sorted(allowed):
+        if name in classes:
+            failures.append(
+                f"    {name} is in the shrunk output, so its entry in {path} is stale. Delete "
+                "the line — the check it waived now applies."
+            )
+        elif name not in required:
+            failures.append(
+                f"    {name} is not a type this gate requires to survive, so its entry in {path} "
+                "covers nothing. Delete the line, or fix the name if the class was renamed."
+            )
+    return failures
+
+
 def app_package_prefix(root: Path) -> tuple[str, list[str]]:
     path = root / CONVENTIONS
     if not path.is_file():
@@ -394,14 +464,18 @@ def check_obfuscated(classes: dict[str, ClassMapping], prefix: str) -> list[str]
 
 
 def check_survived(
-    classes: dict[str, ClassMapping], required: list[str], what: str
+    classes: dict[str, ClassMapping],
+    required: list[str],
+    what: str,
+    allowed: dict[str, str],
+    path: Path,
 ) -> list[str]:
-    missing = [name for name in required if name not in classes]
+    missing = [name for name in required if name not in classes and name not in allowed]
     if not missing:
         return []
     return [
         f"{len(missing)} {what} did not survive shrinking. A keep rule that stopped matching "
-        "looks exactly like this:",
+        f"looks exactly like this. If the class is genuinely unreachable, say so in {path}:",
         *[f"    {name}" for name in sorted(missing)],
     ]
 
@@ -451,11 +525,12 @@ def check_not_removed(
     seeds: set[str] | None,
     required: list[str],
     names: tuple[str, ...],
+    allowed: dict[str, str],
 ) -> list[str]:
     if removed is None and seeds is None:
         return []
     failures: list[str] = []
-    for name in required:
+    for name in (entry for entry in required if entry not in allowed):
         if removed is not None:
             for member in sorted(removed.get(name, set()) & set(names)):
                 failures.append(f"    {name}.{member} was shrunk away (usage.txt)")
@@ -477,10 +552,17 @@ def main(argv: list[str]) -> int:
         default=None,
         help=f"R8's output directory (default: {DEFAULT_MAPPING_DIR})",
     )
+    parser.add_argument(
+        "--allowlist",
+        type=Path,
+        default=None,
+        help=f"classes that are allowed not to survive (default: {DEFAULT_ALLOWLIST})",
+    )
     arguments = parser.parse_args(argv)
 
     root: Path = arguments.root
     mapping_dir: Path = arguments.mapping_dir or root / DEFAULT_MAPPING_DIR
+    allowlist_path: Path = arguments.allowlist or root / DEFAULT_ALLOWLIST
 
     mapping_file = mapping_dir / "mapping.txt"
     if not mapping_file.is_file():
@@ -517,22 +599,36 @@ def main(argv: list[str]) -> int:
     proto_classes, problems = proto_message_classes(root)
     failures += problems
 
+    allowed, problems = read_allowlist(allowlist_path)
+    failures += problems
+
     serializable_names = [declaration.jvm_name for declaration in declarations]
     objects = [d.jvm_name for d in declarations if d.kind == "object"]
+    required = serializable_names + proto_classes
 
     if prefix:
         failures += check_obfuscated(classes, prefix)
     failures += check_missing_rules(mapping_dir)
-    failures += check_survived(classes, serializable_names, "@Serializable type(s)")
-    failures += check_survived(classes, proto_classes, "generated protobuf message(s)")
+    failures += check_survived(
+        classes, serializable_names, "@Serializable type(s)", allowed, allowlist_path
+    )
+    failures += check_survived(
+        classes, proto_classes, "generated protobuf message(s)", allowed, allowlist_path
+    )
     failures += check_names_kept(classes, serializable_names, NAME_CRITICAL_MEMBERS)
     failures += check_protobuf_fields(classes, proto_classes)
+
+    stale = check_allowlist_is_current(classes, allowed, required, allowlist_path)
+    if stale:
+        failures += [f"{len(stale)} allowlist entry/entries no longer describe the app:", *stale]
 
     removed, evidence = removed_members(mapping_dir)
     seeds = kept_seeds(mapping_dir)
     if seeds is not None:
         evidence = "seeds.txt" if removed is None else "usage.txt + seeds.txt"
-    failures += check_not_removed(removed, seeds, objects + proto_classes, NAME_CRITICAL_MEMBERS)
+    failures += check_not_removed(
+        removed, seeds, objects + proto_classes, NAME_CRITICAL_MEMBERS, allowed
+    )
 
     renamed = sum(1 for entry in classes.values() if entry.renamed)
     print(f"Read {mapping_file}")
@@ -540,6 +636,7 @@ def main(argv: list[str]) -> int:
     print(f"  {len(serializable_names)} @Serializable type(s) required to survive "
           f"({len(objects)} of them objects)")
     print(f"  {len(proto_classes)} generated protobuf message(s) required to survive")
+    print(f"  {len(allowed)} allowed not to, per {allowlist_path}")
     print(f"  member removal checked against: {evidence}")
     if removed is None and seeds is None:
         print("  (R8 wrote neither report, so removal of a *member* is not covered by this run; "
