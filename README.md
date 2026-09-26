@@ -142,6 +142,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   why a check an app performs is a check an attacker removes, the Play Integrity standard
   request flow, the request hash that binds a token to one call, why the client fails open and
   the server does not, and the server-side half without which none of it means anything.
+- [R8: full mode, keep rules and the mapping file](./docs/r8.md) — why a keep rule is the one
+  kind of configuration that cannot fail, the three rules this app actually owns and the runtime
+  crash each one prevents, the two that were removed for matching nothing, why the shrunk variant
+  is `minified` rather than `release`, and how a stack trace gets read back.
 - [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that
@@ -167,15 +171,16 @@ Two workflows run on every push to `main` and every pull request.
 | Job | Runs |
 |-----|------|
 | **compile · lint · detekt · test** | `compileDebugKotlin`, `lintDebug`, `detekt`, `testDebugUnitTest` |
-| **Build + verify APK** (needs the gates) | `assembleDebug`, then `scripts/verify-apk.sh` |
+| **Build · verify APK · shrink** (needs the gates) | `assembleDebug`, then `scripts/verify-apk.sh`, then `assembleMinified` and `scripts/verify-r8-mapping.py` |
 
 All four gates run even when an earlier one fails, so a single run reports
 every result rather than stopping at the first.
 
 Artifacts: `gate-reports` (lint HTML, detekt, test reports and JUnit XML,
-7-day retention) and `app-debug` (`app-debug.apk`, 14-day retention). The APK
-is uploaded even when verification fails, so the artifact is available to
-inspect without re-running CI.
+7-day retention), `app-debug` (`app-debug.apk`, 14-day retention) and
+`r8-mapping-minified` (the shrinker's `mapping.txt` and whatever reports R8
+wrote beside it, 90-day retention). The APK is uploaded even when verification
+fails, so the artifact is available to inspect without re-running CI.
 
 ### Verifying the APK
 
@@ -212,6 +217,28 @@ each check fails when it should. It needs only bash — no SDK, no APK, no netwo
 Not covered: the APK is never installed on an emulator, and alignment is checked
 at 4 bytes rather than the 16 KB page alignment Android 15+ wants for native
 libraries.
+
+### Shrinking, and the mapping file
+
+R8 only runs on a minified variant, and `release` cannot be built here while the
+certificate pins and the Play Integrity project are deliberately empty — so
+`app/proguard-rules.pro` was a file no build in this repository read. The
+`minified` build type is that variant: `initWith(release)`, the libraries' debug
+halves, and the debug signing key.
+
+`scripts/verify-r8-mapping.py` then checks the keep rules by their effect on the
+shrunk output rather than by their text — what survived, what kept its name, and
+whether R8 had to guess about any reference. R8 does not warn about a `-keep`
+that matches no class, which is how this file came to hold two rules that
+protected nothing at all.
+
+```bash
+./gradlew :app:assembleMinified
+python3 scripts/verify-r8-mapping.py
+```
+
+[`docs/r8.md`](./docs/r8.md) has the rules, what each one prevents, and how to
+retrace a stack trace against the uploaded mapping.
 
 The debug build needs no secrets. A signed release build would add
 `KEYSTORE_FILE`, `KEY_ALIAS`, `KEY_PASSWORD` and `STORE_PASSWORD` to the
