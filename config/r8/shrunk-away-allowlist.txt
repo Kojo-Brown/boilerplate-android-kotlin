@@ -1,0 +1,26 @@
+# Classes scripts/verify-r8-mapping.py would otherwise require to survive shrinking, and that
+# R8 is right to remove.
+#
+# One entry per line:
+#
+#     fully.qualified.ClassName  # why it is unreachable, and what makes the entry go away
+#
+# The reason is not decoration — the parser rejects an entry without one. A bare name is how an
+# allowlist becomes permanent: a year later nobody can tell whether the exemption was a
+# considered fact about the app or the quickest way past a red build.
+#
+# Entries are checked in both directions, so this file cannot drift. An entry naming a class
+# that *is* in the shrunk output fails the gate — the class became reachable and the check that
+# was waived now applies. An entry naming a class the verifier never asks about fails too: a
+# `@Serializable` type that was deleted or renamed leaves a line here that would otherwise go on
+# silently covering whatever is called that next.
+#
+# Everything in this file is dead code in the shipped artifact. That is a finding about the app
+# rather than about the shrinker, and the first R8 run in this repository's history is what
+# surfaced it — which is most of the reason `:app:assembleMinified` is now in CI.
+
+com.kojo.boilerplate.core.network.model.LoginRequest  # Nothing calls AuthApi.login. The type is named in that method's signature and nowhere else, so R8 removes the endpoint and its body type together. Retrofit's own rules do not hold it: they keep the *interface* and allow its unused methods to be shrunk. Delete this entry when something signs in with a password — then the DTO is reachable and the check applies again.
+
+com.kojo.boilerplate.core.datastore.proto.UserPreferencesProto  # Nothing injects UserPreferencesDataSource, so the whole Proto DataStore chain — module, serializer, data source, both generated messages — is unreachable and R8 removes all of it. Delete this entry when a screen or a worker reads typed preferences; the GeneratedMessageLite field rule in app/proguard-rules.pro starts mattering on the same day.
+
+com.kojo.boilerplate.core.datastore.proto.SyncPreferencesProto  # The same chain: this message is only reachable through UserPreferencesProto.getSync, and nothing reaches that. See the entry above.

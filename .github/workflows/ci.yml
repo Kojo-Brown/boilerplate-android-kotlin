@@ -172,12 +172,14 @@ jobs:
           retention-days: 7
 
   build:
-    name: Build + verify APK
+    name: Build · verify APK · shrink
     runs-on: ubuntu-latest
     # The template's ordering, kept: an APK is only worth producing once the code
     # that goes into it has compiled, linted and passed its tests.
     needs: [gates]
-    timeout-minutes: 30
+    # Raised from thirty when the shrunk variant joined this job. R8 over fifteen modules' worth
+    # of classes plus ML Kit, CameraX and Compose is a few minutes on top of the debug build.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -206,6 +208,11 @@ jobs:
       - name: verify-apk.sh self-test
         run: ./scripts/verify-apk.test.sh
 
+      # Same reasoning, for the shrinker's verifier: seconds, no SDK, and a broken verifier is
+      # reported now rather than after the R8 step it would have gated.
+      - name: verify-r8-mapping.py self-test
+        run: python3 scripts/verify-r8-mapping.test.py
+
       # writeDebugApkIdentity emits the package/version/sdk values the APK is expected to
       # carry, straight out of the build DSL, for the verification step below.
       - name: assembleDebug
@@ -220,6 +227,64 @@ jobs:
       # compileSdk during the step above, so no separate sdkmanager step is needed.
       - name: Verify APK is installable
         run: ./scripts/verify-apk.sh
+
+      # SPEC.md Phase 11 item 4. The only place R8 runs at all.
+      #
+      # `minified` and not `release`: `release` cannot be built here on purpose — `:data` fails
+      # `compileReleaseKotlin` while the certificate pins and the Play Integrity project are
+      # empty, and they are empty because the values would have to name a real server and a real
+      # Play Console app. app/build.gradle.kts has the build type and the reasoning. Without this
+      # step app/proguard-rules.pro is a file no build reads, which is how it came to hold two
+      # rules that matched nothing at all.
+      #
+      # In this job rather than one of its own because the variant consumes the libraries' `debug`
+      # halves, which `assembleDebug` above has just built: R8 is the only new work, and a
+      # separate runner would recompile fifteen modules to do it.
+      - name: assembleMinified
+        id: shrink
+        if: ${{ !cancelled() }}
+        run: ./gradlew :app:assembleMinified --stacktrace
+
+      # R8 writes the rules it would need for every reference it could not resolve. When it fails
+      # for that reason the file is the answer, and printing it here turns a two-round diagnosis
+      # into one.
+      - name: Unresolved references R8 reported
+        if: ${{ failure() && steps.shrink.conclusion == 'failure' }}
+        run: |
+          missing=app/build/outputs/mapping/minified/missing_rules.txt
+          if [ -f "$missing" ]; then
+            echo "::group::$missing"
+            cat "$missing"
+            echo "::endgroup::"
+          else
+            echo "No $missing — the failure above is not an unresolved reference."
+          fi
+
+      # Checks the keep rules by their effect on the shrunk output: what survived, what kept its
+      # name, and whether R8 had to guess about anything. A keep rule cannot fail on its own —
+      # R8 does not warn about a pattern that matches no class — so this is what stops one going
+      # quiet after a package move or a dependency bump.
+      - name: Keep rules still match what they were written for
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-r8-mapping.py
+
+      # The mapping file is the whole value of shrinking a build you then have to support: without
+      # it every frame of every crash report from that artifact says `a.b.c.a`. Uploaded
+      # separately from the APK below and kept for the maximum GitHub allows, because a crash
+      # arrives weeks after the build and a mapping that expired is a stack trace nobody can read.
+      # `usage.txt` and `seeds.txt` go with it when R8 wrote them — they are what says *why*
+      # something was kept or dropped, which is the question a surprising retrace raises.
+      #
+      # This is not the release mapping. The build that goes to Play is signed with the upload key
+      # and uploaded with its own mapping, which is Phase 11's signing item, not this one.
+      - name: Upload R8 mapping
+        if: ${{ !cancelled() && hashFiles('app/build/outputs/mapping/minified/mapping.txt') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8-mapping-minified
+          path: app/build/outputs/mapping/minified/
+          if-no-files-found: error
+          retention-days: 90
 
       # Uploaded even when verification fails: when the APK is wrong, the APK is the
       # evidence, and re-running CI to get a copy of it wastes a round trip. Gated on the

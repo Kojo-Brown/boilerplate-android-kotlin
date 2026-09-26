@@ -20,6 +20,41 @@ android {
                 "proguard-rules.pro",
             )
         }
+
+        /*
+         * The shrunk build CI can actually produce.
+         *
+         * R8 only runs on a minified variant, and the only minified variant here is `release` —
+         * which this repository deliberately cannot build. `:data` fails `compileReleaseKotlin`
+         * while `gradle/certificate-pins.properties` and `gradle/play-integrity.properties` are
+         * empty, and they are empty because the values would have to name a real server's keys
+         * and a real Play Console project. Both gates are right, and between them they mean
+         * `app/proguard-rules.pro` is a file no build in this repository reads: a keep rule that
+         * matches nothing, a rule that is missing, and a rule that works all produce the same
+         * green CI. Putting fake pins in CI to get past that would defeat the gate whose whole
+         * point is that nobody can drift past it.
+         *
+         * So this build type exists to give R8 somewhere to run. `initWith(release)` rather than a
+         * second copy of the shrinker settings: the two must not drift, because a rule verified
+         * here and absent from the release build is worse than no verification at all.
+         *
+         * `matchingFallbacks` is the load-bearing line. The fifteen library modules have only
+         * `debug` and `release` variants, and it is `release` that cannot be built — so this
+         * variant consumes their `debug` ones. That is also why the job in ci.yml that builds it
+         * is the one that already ran `assembleDebug`: the library halves are the same outputs,
+         * and R8 is the only new work.
+         *
+         * Debug signing so the result is installable — a shrunk APK is the only way to check a
+         * `retrace`d stack trace against the mapping by hand, and `signingConfigs.debug` is the
+         * one key every checkout of this repository has. It is not, and must not become, the
+         * build that goes to Play: that is `release`, signed with the upload key, once the pins
+         * and the cloud project are filled in.
+         */
+        create("minified") {
+            initWith(getByName("release"))
+            matchingFallbacks.add("debug")
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 }
 
