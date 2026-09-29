@@ -29,11 +29,10 @@ trap 'rm -rf "$WORK"' EXIT
 tests_run=0
 tests_failed=0
 
-# The certificate the stub keytool reports for the throwaway key, and the one it reports for the
-# debug key. Different, because the point of the `minified` check is that the two are not the same.
+# The certificate the stub keytool reports for the throwaway key, in both the spellings the script
+# handles: keytool's colon-separated form and the normalised one the gate logs.
 THROWAWAY_SHA='AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99'
 THROWAWAY_HEX='AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899'
-DEBUG_SHA='11:22:33:44:55:66:77:88:99:00:11:22:33:44:55:66:77:88:99:00:11:22:33:44:55:66:77:88:99:00:11:22'
 
 BIN="$WORK/bin"
 mkdir -p "$BIN"
@@ -126,6 +125,12 @@ EOF
 echo 1 >"$BASELINE/gradle.4.exit"
 
 # 5: the key declared and present — the gate passing, and signingReport's per-variant blocks.
+#
+# Copied from what the `upload signing` job actually printed on run 1 of PR #56 rather than from
+# memory, and the difference mattered: a debug-signed variant reports `Error: Missing keystore` and
+# **no digest at all** on a runner where the debug keystore has not been created, which this job
+# never does because it builds nothing. The first version of this fixture invented a SHA-256 for
+# those blocks, so the rehearsal's debug/minified check passed here and failed in CI.
 cat >"$BASELINE/gradle.5.out" <<EOF
 > Task :app:checkUploadSigning
 Play upload signing: alias \`rehearsal-upload-key-not-a-real-key\`, certificate SHA-256 $THROWAWAY_HEX
@@ -133,12 +138,9 @@ Play upload signing: alias \`rehearsal-upload-key-not-a-real-key\`, certificate 
 > Task :app:signingReport
 Variant: debug
 Config: debug
-Store: /home/runner/.android/debug.keystore
+Store: /home/runner/.config/.android/debug.keystore
 Alias: AndroidDebugKey
-MD5: 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-SHA1: 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33
-SHA-256: $DEBUG_SHA
-Valid until: Tuesday, 1 January 2055
+Error: Missing keystore
 ----------
 Variant: release
 Config: release
@@ -151,12 +153,15 @@ Valid until: Sunday, 1 January 2053
 ----------
 Variant: minified
 Config: debug
-Store: /home/runner/.android/debug.keystore
+Store: /home/runner/.config/.android/debug.keystore
 Alias: AndroidDebugKey
-MD5: 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-SHA1: 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33
-SHA-256: $DEBUG_SHA
-Valid until: Tuesday, 1 January 2055
+Error: Missing keystore
+----------
+Variant: debugAndroidTest
+Config: debug
+Store: /home/runner/.config/.android/debug.keystore
+Alias: AndroidDebugKey
+Error: Missing keystore
 ----------
 EOF
 
@@ -259,12 +264,20 @@ expect 'a gate that logs no fingerprint is caught' 1 'reports the alias and the 
 # Which key each variant would actually be signed with.
 expect 'a release variant signed with another key is caught' 1 'the release variant reports' \
     "sed -i 's/^SHA-256: $THROWAWAY_SHA/SHA-256: 99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99:99/' gradle.5.out"
-# The one-line deletion in app/build.gradle.kts that would put the upload key into the shrunk
-# build CI publishes as an artifact.
-expect 'a minified variant that inherited the upload key is caught' 1 'the minified variant reports' \
-    "awk '/^Variant: minified/{m=1} m && /^SHA-256: /{sub(/SHA-256: .*/, \"SHA-256: $THROWAWAY_SHA\")} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
-expect 'a signingReport with no debug variant is caught' 1 'no certificate for the debug variant' \
-    "sed -i 's/^Variant: debug/Variant: debugAndroidTest/' gradle.5.out"
+expect 'a release variant with no signing config at all is caught' 1 'the release variant reports' \
+    "awk '/^Variant: release/{r=1} r && /^Config: /{sub(/.*/, \"Config: none\"); r=0} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
+
+# The one-line deletion in app/build.gradle.kts that would put the upload key into the shrunk build
+# CI publishes as an artifact: without the override, `initWith(release)` leaves `minified` on the
+# release config and the upload keystore.
+expect 'a minified variant that inherited the upload key is caught' 1 'the minified variant is signed' \
+    "awk '/^Variant: minified/{m=1} m && /^Config: debug/{sub(/.*/, \"Config: release\")} m && /^Store: /{sub(/.*/, \"Store: /home/runner/work/app/build/signing/upload-keystore.jks\"); m=0} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
+# `Config: debug` on its own is not enough: the debug config itself could be pointed at the upload
+# key, which is why the store is compared too.
+expect 'a debug config repointed at the upload keystore is caught' 1 'the debug variant is signed' \
+    "sed -i 's|^Store: /home/runner/.config/.android/debug.keystore|Store: /home/runner/work/app/build/signing/upload-keystore.jks|' gradle.5.out"
+expect 'a signingReport missing a variant is caught' 1 'no signing config for the minified variant' \
+    "sed -i 's/^Variant: minified/Variant: minifiedAndroidTest/' gradle.5.out"
 
 # The fingerprint comparison, which is the reason the declaration is checked in at all.
 expect 'a gate that accepts a mismatched fingerprint is caught' 1 'accepted a keystore that is not' \

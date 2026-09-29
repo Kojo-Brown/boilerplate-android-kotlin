@@ -62,8 +62,11 @@ pass() {
 
 # Records a failure and keeps going, so one run reports every problem instead of stopping at the
 # first and hiding the rest behind another CI round trip.
+#
+# `$*` and not `$1`: several of these messages are long enough to want wrapping across two
+# arguments, and a `$1` here silently prints the first half of them.
 fail() {
-    printf '  FAIL  %s\n' "$1" >&2
+    printf '  FAIL  %s\n' "$*" >&2
     failures=$((failures + 1))
 }
 
@@ -218,30 +221,53 @@ variant_field() {
         '
 }
 
+# Every variant has to be in the report. A rule that reads a variant `signingReport` stopped
+# printing finds an empty string, and an empty string compares equal to another empty string —
+# which is a check that passes by having nothing to look at.
+for variant in debug release minified; do
+    if [ -z "$(variant_field "$variant" Config)" ]; then
+        fail "signingReport printed no signing config for the $variant variant"
+        dump "signingReport" "$GRADLE_OUTPUT"
+    fi
+done
+
+release_config="$(variant_field release Config)"
+release_store="$(variant_field release Store)"
 release_certificate="$(variant_field release SHA-256 | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
-if [ "$release_certificate" = "$FINGERPRINT" ]; then
+
+if [ "$release_config" = "release" ] && [ "$release_certificate" = "$FINGERPRINT" ]; then
     pass "the release variant is signed with the declared key"
 else
-    fail "the release variant reports certificate '$release_certificate', expected '$FINGERPRINT'"
+    fail "the release variant reports config '$release_config' and certificate " \
+        "'$release_certificate', expected 'release' and '$FINGERPRINT'"
     dump "signingReport" "$GRADLE_OUTPUT"
 fi
 
 # The invariant app/build.gradle.kts states in prose next to the `minified` build type: it borrows
 # the debug key so that a shrunk APK is installable, and it must never become the build that goes
 # to Play. `initWith(release)` copies the release build type wholesale, so the line that overrides
-# the signing config back to `debug` is one deletion away from silently shipping `minified` signed
+# the signing config back to `debug` is one deletion away from CI publishing a shrunk APK signed
 # with the upload key.
-debug_certificate="$(variant_field debug SHA-256 | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
-minified_certificate="$(variant_field minified SHA-256 | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
-if [ -z "$debug_certificate" ]; then
-    fail "signingReport printed no certificate for the debug variant"
-    dump "signingReport" "$GRADLE_OUTPUT"
-elif [ "$minified_certificate" = "$debug_certificate" ]; then
-    pass "the minified variant keeps the debug key"
-else
-    fail "the minified variant reports '$minified_certificate', expected the debug key's '$debug_certificate'"
-    dump "signingReport" "$GRADLE_OUTPUT"
-fi
+#
+# Checked by the config each variant names and the keystore behind it, rather than by comparing
+# certificates with the debug variant's. That was the first shape of this check and it failed in CI
+# for a reason worth recording: `signingReport` prints `Error: Missing keystore` and no digest at all
+# for a debug-signed variant on a runner where the debug keystore has not been created yet — and
+# this job deliberately builds nothing, so nothing creates it. Reading the config and the store needs
+# no keystore to exist, and it is the more direct statement of the invariant anyway. Both halves are
+# needed: `Config: debug` alone would still pass if `signingConfigs.debug` were repointed at the
+# upload key, and a store comparison alone would pass if a second config shared the debug keystore.
+for variant in debug minified; do
+    config="$(variant_field "$variant" Config)"
+    store="$(variant_field "$variant" Store)"
+    if [ "$config" = "debug" ] && [ "$store" != "$release_store" ]; then
+        pass "the $variant variant keeps the debug key"
+    else
+        fail "the $variant variant is signed by config '$config' out of '$store'; expected " \
+            "'debug', and not the upload keystore at '$release_store'"
+        dump "signingReport" "$GRADLE_OUTPUT"
+    fi
+done
 
 # --- 4. a declaration naming a different key ---------------------------------------------------
 
