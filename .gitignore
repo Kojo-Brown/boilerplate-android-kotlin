@@ -9,7 +9,15 @@ build/
 /captures
 .externalNativeBuild
 .cxx
+# Signing key material, in every extension it arrives under. `*.keystore` was already here; the
+# other three are the ones a PKCS #12 upload key is produced with — keytool writes `.jks` by habit
+# and `.p12` by default since JDK 9, and Windows tooling writes `.pfx` for the same format. The
+# upload key reaches this repository only as UPLOAD_KEYSTORE_BASE64 and is written only under
+# `build/`; these patterns are what stops a decoded copy being committed by hand.
 *.keystore
+*.jks
+*.p12
+*.pfx
 !debug.keystore
 
 # The offline harness is a Python script; running it leaves bytecode next to it.

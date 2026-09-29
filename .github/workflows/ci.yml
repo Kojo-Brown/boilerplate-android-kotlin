@@ -171,6 +171,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  upload-signing:
+    name: upload signing
+    runs-on: ubuntu-latest
+    # No compilation at all: `checkUploadSigning` and `signingReport` are configuration-time tasks
+    # and `--dry-run` only prints a task graph, so what this job pays for is one Gradle
+    # configuration of fifteen modules, several times over. Twenty-five minutes is well clear of
+    # that on a cold cache.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Needed even though nothing here compiles: AGP cannot configure an Android project without
+      # an SDK to resolve `compileSdk` against, and every task this job runs is one AGP registers.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      # Two seconds, no SDK and no Gradle needed, and it runs first so a broken rehearsal is
+      # reported immediately rather than after the Gradle work it would have gated. The rehearsal's
+      # happy path runs below on every build; its failure paths — the reason it exists — run
+      # nowhere else at all.
+      - name: verify-upload-signing.sh self-test
+        run: ./scripts/verify-upload-signing.test.sh
+
+      # SPEC.md Phase 11 item 5, and the only thing that ever exercises the signing configuration.
+      # `release` cannot be built in this repository — `:data` fails `compileReleaseKotlin` while
+      # the certificate pins and the Play Integrity project are empty — and the real upload key is
+      # in a secret store a fork cannot read, so without this the whole signing block in
+      # app/build.gradle.kts would be code no build runs. It generates its own key and needs no
+      # secret of any kind.
+      - name: Rehearse release signing
+        run: ./scripts/verify-upload-signing.sh
+
   build:
     name: Build · verify APK · shrink
     runs-on: ubuntu-latest
