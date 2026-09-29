@@ -146,6 +146,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   kind of configuration that cannot fail, the three rules this app actually owns and the runtime
   crash each one prevents, the two that were removed for matching nothing, why the shrunk variant
   is `minified` rather than `release`, and how a stack trace gets read back.
+- [Play Store signing](./docs/release-signing.md) — the upload key that exists only in the
+  secret store: why the certificate fingerprint is checked in and the key is not, what AGP does
+  with a release variant that has no signing config, how the path is rehearsed on every pull
+  request without a real key, and the rotation and loss procedures.
 - [Unidirectional data flow](./docs/unidirectional-data-flow.md) — the one `UiState` /
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that

@@ -1,0 +1,129 @@
+name: Release bundle
+
+# SPEC.md Phase 11 item 5: the release path, signed with the upload key, with the key coming from
+# the repository secret store and from nowhere else.
+#
+# ## This workflow cannot succeed in this repository as it stands, and that is on purpose
+#
+# It fails at `bundleRelease`, in `:data:compileReleaseKotlin`, because
+# gradle/certificate-pins.properties and gradle/play-integrity.properties are empty — and they are
+# empty because their values would have to name a real server's keys and a real Play Console
+# project, and this repository is linked to neither. Those two gates exist so that an unpinned,
+# unattested build cannot be released by accident, and filling them with placeholders to make this
+# file go green would defeat exactly what they are for.
+#
+# So this is the release path written down as something that runs, rather than as a paragraph in a
+# README that drifts. Fill in the three configuration files under `gradle/`, add the three secrets,
+# push a tag, and it works.
+#
+# What does not wait for any of that is the *signing* half, which is what this item is about. The
+# `upload signing` job in ci.yml rehearses it on every pull request against a key it generates on
+# the runner: that the gate is attached to `bundleRelease`, that the declared certificate is the one
+# that would sign it, that `minified` keeps the debug key, and that no password reaches the log. The
+# part of this file that would otherwise be unverifiable is verified there.
+#
+# ## What it deliberately does not do
+#
+# It does not upload to Play. That needs a service-account credential for a Play Console account
+# this repository does not have, and a publisher action holding it would be a second, larger secret
+# with permission to ship to users — worth adding deliberately, with the account it belongs to, and
+# not worth stubbing here. The artifact this produces is the one such a step would take: a signed
+# `.aab` and the mapping file that makes its crash reports readable.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Bundle · sign · verify
+    runs-on: ubuntu-latest
+    # R8 over fifteen modules plus a cold Gradle cache on a tag that shares nothing with a branch
+    # build. Well clear of the ~25 minutes this takes, and far short of the six-hour default.
+    timeout-minutes: 60
+
+    # Job-level rather than step-level so that every Gradle invocation below sees the same three,
+    # and as `env:` rather than interpolated into a `run:` script — a secret substituted into the
+    # text of a script is a secret that a quote or a backtick in the value turns into shell syntax,
+    # and that `set -x` or a stack trace prints. `UploadSigningContractTest` holds every workflow in
+    # this repository to that.
+    env:
+      UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+      UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+      UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      # Before the twenty-five minutes of build, not after: this is the step that reads the secrets
+      # and compares the keystore against gradle/upload-signing.properties, and a missing secret or
+      # a rotated key should be reported now rather than at the packaging task at the end. It is the
+      # same task `bundleRelease` depends on, so running it first costs one configuration.
+      - name: Check the upload key
+        run: ./gradlew :app:checkUploadSigning --stacktrace
+
+      - name: bundleRelease
+        run: ./gradlew :app:bundleRelease --stacktrace
+
+      # `bundleRelease` exiting 0 says the build ran. An `.aab` is a JAR-signed archive, so this is
+      # what says which key signed it — and it is checked against the fingerprint the commit
+      # declares rather than against "some certificate is present", because the whole point of the
+      # declaration is that a build signed with the wrong key looks exactly like one signed with the
+      # right one.
+      - name: The bundle is signed with the declared key
+        run: |
+          set -euo pipefail
+          bundle=app/build/outputs/bundle/release/app-release.aab
+          [ -f "$bundle" ] || { echo "::error::no bundle at $bundle"; exit 1; }
+
+          declared="$(sed -n 's/^certificateSha256[[:space:]]*=[[:space:]]*//p' \
+            gradle/upload-signing.properties | head -n 1 | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
+          actual="$(keytool -printcert -jarfile "$bundle" \
+            | sed -n 's/.*SHA256: \(.*\)/\1/p' | head -n 1 | tr -d ':[:space:]' | tr 'a-f' 'A-F')"
+
+          if [ -z "$actual" ]; then
+            echo "::error::$bundle carries no signature — keytool found no certificate in it."
+            exit 1
+          fi
+          if [ "$declared" != "$actual" ]; then
+            echo "::error::$bundle is signed by $actual, not the declared $declared."
+            exit 1
+          fi
+          echo "Signed by $actual, as gradle/upload-signing.properties declares."
+
+      # Ninety days, the maximum GitHub allows, for the same reason the CI mapping is kept that
+      # long: a crash report arrives weeks after a release, and a mapping that expired is a stack
+      # trace nobody can read. This is the mapping that matters — the one in ci.yml belongs to the
+      # `minified` variant, which nobody ships.
+      - name: Upload the bundle and its mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ github.ref_name }}
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/mapping/release/
+          if-no-files-found: error
+          retention-days: 90
