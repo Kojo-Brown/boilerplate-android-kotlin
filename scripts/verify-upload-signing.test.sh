@@ -157,6 +157,18 @@ Store: /home/runner/.config/.android/debug.keystore
 Alias: AndroidDebugKey
 Error: Missing keystore
 ----------
+Variant: benchmark
+Config: debug
+Store: /home/runner/.config/.android/debug.keystore
+Alias: AndroidDebugKey
+Error: Missing keystore
+----------
+Variant: nonMinifiedBenchmark
+Config: debug
+Store: /home/runner/.config/.android/debug.keystore
+Alias: AndroidDebugKey
+Error: Missing keystore
+----------
 Variant: debugAndroidTest
 Config: debug
 Store: /home/runner/.config/.android/debug.keystore
@@ -272,6 +284,14 @@ expect 'a release variant with no signing config at all is caught' 1 'the releas
 # release config and the upload keystore.
 expect 'a minified variant that inherited the upload key is caught' 1 'the minified variant is signed' \
     "awk '/^Variant: minified/{m=1} m && /^Config: debug/{sub(/.*/, \"Config: release\")} m && /^Store: /{sub(/.*/, \"Store: /home/runner/work/app/build/signing/upload-keystore.jks\"); m=0} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
+# The same deletion one and two links further down the `initWith` chain. `benchmark` inherits from
+# `minified` and `nonMinifiedBenchmark` from `benchmark`, so each has its own override to lose — and
+# unlike the shrunk artifact above, both of these are installed on a device by CI on every pull
+# request, which is a worse place for the upload key to end up.
+expect 'a benchmark variant that inherited the upload key is caught' 1 'the benchmark variant is signed' \
+    "awk '/^Variant: benchmark/{b=1} b && /^Config: debug/{sub(/.*/, \"Config: release\")} b && /^Store: /{sub(/.*/, \"Store: /home/runner/work/app/build/signing/upload-keystore.jks\"); b=0} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
+expect 'a nonMinifiedBenchmark variant that inherited the upload key is caught' 1 'the nonMinifiedBenchmark variant is signed' \
+    "awk '/^Variant: nonMinifiedBenchmark/{n=1} n && /^Config: debug/{sub(/.*/, \"Config: release\")} n && /^Store: /{sub(/.*/, \"Store: /home/runner/work/app/build/signing/upload-keystore.jks\"); n=0} {print}' gradle.5.out >tmp && mv tmp gradle.5.out"
 # `Config: debug` on its own is not enough: the debug config itself could be pointed at the upload
 # key, which is why the store is compared too.
 expect 'a debug config repointed at the upload keystore is caught' 1 'the debug variant is signed' \

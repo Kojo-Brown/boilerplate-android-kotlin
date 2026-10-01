@@ -158,8 +158,10 @@ path could easily have been code no build ever ran. Two things stop that:
   generates a throwaway key, declares it, and drives the real configuration: that
   `checkUploadSigning` is attached to `assembleRelease` and `bundleRelease` and not to
   `assembleDebug`, that the release variant really would be signed with the declared key, that
-  `minified` keeps the debug key, that a mismatched fingerprint and a wrong password both fail, and
-  that neither password appears anywhere Gradle printed. It needs no secret.
+  every variant that borrows the debug key still does — `minified`, `benchmark` and
+  `nonMinifiedBenchmark`, each of which is one `initWith` link further from `release` than the last
+  and so has its own override to lose — that a mismatched fingerprint and a wrong password both
+  fail, and that neither password appears anywhere Gradle printed. It needs no secret.
 - **`scripts/verify-upload-signing.test.sh`**, which drives that script against stubs so its
   failure paths are exercised too — a rehearsal that stopped checking would otherwise report green
   about exactly the thing it stopped checking.

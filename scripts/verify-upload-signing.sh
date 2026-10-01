@@ -224,7 +224,11 @@ variant_field() {
 # Every variant has to be in the report. A rule that reads a variant `signingReport` stopped
 # printing finds an empty string, and an empty string compares equal to another empty string —
 # which is a check that passes by having nothing to look at.
-for variant in debug release minified; do
+#
+# `benchmark` and `nonMinifiedBenchmark` joined the list when they joined the build. They are two
+# more variants that borrow the debug key, and the reason they are checked and not merely tolerated
+# is in the loop below.
+for variant in debug release minified benchmark nonMinifiedBenchmark; do
     if [ -z "$(variant_field "$variant" Config)" ]; then
         fail "signingReport printed no signing config for the $variant variant"
         dump "signingReport" "$GRADLE_OUTPUT"
@@ -257,7 +261,15 @@ fi
 # no keystore to exist, and it is the more direct statement of the invariant anyway. Both halves are
 # needed: `Config: debug` alone would still pass if `signingConfigs.debug` were repointed at the
 # upload key, and a store comparison alone would pass if a second config shared the debug keystore.
-for variant in debug minified; do
+#
+# `benchmark` and `nonMinifiedBenchmark` are held to exactly the same thing, and for a sharper
+# version of the same reason. Each is one `initWith` away from the release build type — `benchmark`
+# through `minified`, `nonMinifiedBenchmark` through `benchmark` — so the chain that has to keep
+# overriding the signing config back to `debug` is now three links long, and the APKs at the end of
+# it are built and installed on a device by CI on every pull request. A missing override there would
+# not produce an obviously wrong artifact; it would produce a benchmarkable APK signed with the key
+# Play enrols.
+for variant in debug minified benchmark nonMinifiedBenchmark; do
     config="$(variant_field "$variant" Config)"
     store="$(variant_field "$variant" Store)"
     if [ "$config" = "debug" ] && [ "$store" != "$release_store" ]; then
