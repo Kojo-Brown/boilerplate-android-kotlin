@@ -111,10 +111,11 @@ dependencies {
     // `AndroidJUnit4`, which both tests run with.
     implementation(libs.androidx.test.ext.junit)
 
-    // `UiDevice`, `By` and `Until`. Both tests wait for the app's first screen to be on screen
-    // rather than trusting `startActivityAndWait`'s first frame, because the first frame of this
-    // app is an empty themed window: `MainActivity.onCreate` calls `setContent`, and the sign-in
-    // screen's text arrives a composition later. A profile generated against the first frame
-    // would miss everything Compose does to produce the second.
+    // `UiDevice`, `By` and `Until`, for `awaitFirstScreen`. Both tests wait for the app's first
+    // screen rather than trusting `startActivityAndWait`'s first frame, because the first frame of
+    // this app is an empty themed window: `MainActivity.onCreate` calls `setContent`, and the
+    // sign-in screen's content arrives a composition later. A profile recorded against the first
+    // frame would miss most of what Compose does to produce the second — see FirstScreen.kt, which
+    // also says why the wait's result is asserted rather than ignored.
     implementation(libs.androidx.test.uiautomator)
 }

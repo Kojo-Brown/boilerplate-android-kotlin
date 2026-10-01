@@ -2,8 +2,6 @@ package com.kojo.boilerplate.benchmark
 
 import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Until
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,8 +39,8 @@ import org.junit.runner.RunWith
  *
  * Whatever this does not exercise, ART does not record, and the app ships without it compiled. A
  * profile collected against a path that is not the measured path is the one failure mode here that
- * produces a green gate and a slower app, which is why [FIRST_SCREEN_TEXT] is shared between the
- * two files rather than written twice.
+ * produces a green gate and a slower app, which is why [awaitFirstScreen] is shared between the
+ * two tests rather than written twice.
  */
 @RunWith(AndroidJUnit4::class)
 class BaselineProfileGenerator {
@@ -57,6 +55,6 @@ class BaselineProfileGenerator {
         // than a cold launch.
         pressHome()
         startActivityAndWait()
-        device.wait(Until.hasObject(By.text(FIRST_SCREEN_TEXT)), FIRST_SCREEN_TIMEOUT_MS)
+        awaitFirstScreen()
     }
 }
