@@ -7,6 +7,7 @@ import org.gradle.api.artifacts.ProjectDependency
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
+    alias(libs.plugins.android.test) apply false
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false
@@ -103,6 +104,23 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
     ":feature:scanner" to setOf(":core:common", ":core:testing", ":core:ui"),
     ":feature:signin" to setOf(":core:auth", ":core:common", ":core:testing", ":core:ui"),
     ":feature:textrecognition" to setOf(":core:common", ":core:testing", ":core:ui"),
+    /*
+     * The macrobenchmark module, and the only entry in this map that names `:app`.
+     *
+     * Everything above is a statement about layering. This one is a statement about the opposite:
+     * `:benchmark` exists to start `:app` and time it, so the app is not a layer it must not see
+     * but the subject it is pointed at. AGP expresses that as `targetProjectPath` in
+     * `benchmark/build.gradle.kts` rather than as a `project()` dependency, and whether that
+     * lands in a declarable configuration is an AGP implementation detail — so the edge is
+     * allowed here rather than left to fail the day AGP changes its mind about where to put it.
+     *
+     * It does not weaken the "nothing depends on `:app`" rule that the comment above states,
+     * because the rule is about what ships. `:benchmark` applies `com.android.test`: it produces
+     * a test APK that is installed beside the app on a device, it is in no release artifact, and
+     * no module in this map may depend on it — which, as with `:core:datastore-proto`, is
+     * enforced by absence.
+     */
+    ":benchmark" to setOf(":app"),
     ":app" to setOf(
         ":core:auth",
         ":core:common",

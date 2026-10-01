@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately empty.
+
+  AGP synthesises this module's real manifest: the `<instrumentation>` node, its `targetPackage`
+  (this module's own, because of `android.experimental.self-instrumenting` in build.gradle.kts),
+  and the `<uses-sdk>` from `defaultConfig`. Everything Macrobenchmark itself needs — the
+  permissions behind `dumpsys`, `am` and profile capture — is declared in the library's own
+  manifest and merged in from there, which is the same reason `app/src/main/AndroidManifest.xml`
+  no longer lists a permission of its own.
+
+  The file exists rather than being absent so that the one thing a test module must never acquire
+  is visible as an empty space: a permission or a component added here ships in the APK that runs
+  beside the app and changes the thing being measured.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

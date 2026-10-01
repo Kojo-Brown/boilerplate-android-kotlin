@@ -30,6 +30,12 @@ rootProject.name = "BoilerplateAndroidKotlin"
 // CI runs before anything else.
 include(":app")
 
+// The macrobenchmark module. A `com.android.test` project rather than a source set inside `:app`,
+// because a macrobenchmark starts the app under test as a separate process and measures it from
+// outside: the measuring code cannot be in the process being measured. It ships in no release
+// artifact and nothing depends on it. See docs/baseline-profiles.md.
+include(":benchmark")
+
 include(":core:auth")
 include(":core:common")
 // The typed-preferences schema and nothing else: one `.proto` file, protoc, and the lite

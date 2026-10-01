@@ -88,6 +88,9 @@ module's own build file is its namespace and its dependencies and nothing else.
 - [Compose compiler metrics](./docs/compose-metrics.md) — the stability report the compiler
   writes and nobody reads, turned into a CI gate: every restartable composable skips or is
   named, with a reason, in an allowlist that fails when it stops matching.
+- [Baseline profiles and the startup budget](./docs/baseline-profiles.md) — why a profile rule
+  that stopped matching is as silent as an R8 keep rule that stopped matching, what the two
+  benchmark build types are for, and why the milliseconds in the budget are not startup times.
 - [Modularisation](./docs/modularisation.md) — the fifteen-module graph, what each module
   may depend on and what enforces it, and what the split actually bought (a domain layer that
   is framework-free at the bytecode level, and two `@ApplicationScope` qualifiers that turned

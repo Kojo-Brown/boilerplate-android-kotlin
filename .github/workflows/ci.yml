@@ -214,6 +214,223 @@ jobs:
       - name: Rehearse release signing
         run: ./scripts/verify-upload-signing.sh
 
+  startup-benchmark:
+    name: Baseline profile · startup budget
+    runs-on: ubuntu-latest
+    # Same ordering as `build` below, for the same reason: a startup measurement is only worth
+    # taking once the code that starts up has compiled, linted and passed its tests.
+    needs: [gates]
+    # The long one, and every minute of it is accounted for: R8 over fifteen modules for the
+    # `benchmark` variant and a second, unshrunk build for `nonMinifiedBenchmark`; an emulator
+    # cold boot; fifteen generation iterations; then twenty measured cold starts, each of which
+    # reinstalls or recompiles the app before launching it. Ninety minutes is clear of that on a
+    # cold Gradle cache. Beyond it the emulator is wedged — which happens — and the job should
+    # fail rather than hold a runner for the six-hour default.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # See the note on this input in the `gates` job: the action's default `tools` package no
+          # longer exists in the SDK repository and fails the step on every run.
+          packages: 'platform-tools'
+
+      # An emulator without KVM falls back to software CPU emulation, which is roughly an order of
+      # magnitude slower — enough that the boot alone outlives this job's timeout, and enough that
+      # any number measured on it would be meaningless anyway. GitHub's Linux runners expose
+      # /dev/kvm but not to the runner's own user, so this is the standard udev rule that grants
+      # it. It is not an optimisation: without it this gate cannot run at all.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Seconds, no SDK and no emulator needed, and it runs first so a broken verifier is reported
+      # immediately rather than after an hour of Gradle and emulator work. Its failure paths — a
+      # regression over budget, a stale profile, a warmup that made the numbers unattributable —
+      # run nowhere else at all: a green gate exercises none of them.
+      - name: verify-startup-budget.py self-test
+        run: python3 scripts/verify-startup-budget.test.py
+
+      # Built before the emulator comes up rather than inside the step below, so that a build
+      # failure is a build failure and not an emulator step that timed out. Both app variants and
+      # both test APKs: `nonMinifiedBenchmark` is what the profile is recorded against and
+      # `benchmark` is what is measured — app/build.gradle.kts has the reasoning for the split.
+      - name: Build the benchmark variants
+        run: |
+          ./gradlew \
+            :app:assembleBenchmark :app:assembleNonMinifiedBenchmark \
+            :benchmark:assembleBenchmark :benchmark:assembleNonMinifiedBenchmark \
+            --stacktrace
+
+      # `default` and not `google_apis` or an ATD image: the AOSP image is a userdebug build with
+      # the AOSP launcher, which is what `pressHome()` needs and what keeps ART's profile commands
+      # available. API 34 is pinned here and in config/benchmark/startup-budget.json, and the
+      # verifier fails when the two disagree — the API level decides what ART does with a baseline
+      # profile, so a run on another one is not comparable to the budget.
+      #
+      # Two Gradle invocations, one per variant, because they are two different runs against two
+      # different builds of the app. The generator goes first: its output is what the staleness
+      # half of the gate compares the committed profile against.
+      - name: Generate the profile and measure startup
+        id: measure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          # Macrobenchmark needs the screen on and the window animations off. The action's own
+          # flag does the second; `-no-boot-anim` and `-no-window` keep the first from costing a
+          # GPU that is software rasterisation anyway.
+          disable-animations: true
+          emulator-options: >-
+            -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none
+          # One word, and deliberately so. This input is not handed to a shell as written: the
+          # action runs the lines through `/usr/bin/sh` joined together, which is dash on an Ubuntu
+          # runner and which never sees a `\` continuation as one. Two runs of this gate were spent
+          # learning that — "Illegal option -o pipefail", then
+          # "Task '\' not found in root project" — and both are properties of the action rather
+          # than of anything this repository controls. The script is a file with its own shebang;
+          # scripts/run-startup-benchmark.sh carries the two Gradle invocations and the reasoning.
+          script: ./scripts/run-startup-benchmark.sh
+
+      # The gate. Holds both cases to config/benchmark/startup-budget.json and the committed
+      # profile to the one this run just generated.
+      #
+      # Before the profile is printed, not after, and that ordering is load-bearing: this step's
+      # output is a dozen lines ending in the measured medians, and the step below is several
+      # thousand lines of generated profile. Run the other way round, the numbers somebody needs in
+      # order to act on a failure are buried in a log nobody scrolls to the middle of.
+      #
+      # Runs even when the step above failed, because a partial run still has something to say
+      # about which half broke.
+      - name: Startup is inside budget and the profile is current
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-startup-budget.py
+
+      # Separate from the bundle below and deliberately so: one file, named for what it is, so that
+      # regenerating the committed profile is a download and a copy rather than an archaeology
+      # exercise. docs/baseline-profiles.md points here.
+      - name: Upload the generated profile on its own
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-baseline-profile
+          path: benchmark/build/outputs/**/*-baseline-prof.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload benchmark output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-benchmark
+          path: |
+            benchmark/build/outputs/**/*-benchmarkData.json
+            benchmark/build/outputs/**/*-baseline-prof.txt
+            benchmark/build/reports/
+            benchmark/build/outputs/androidTest-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The generated profile, with its identity, emitted into the log and uploaded on its own.
+      #
+      # This is the one output of this job a human has to act on: when the committed profile is
+      # missing or has gone stale, the fix is to replace it with this file. It gets its own
+      # single-file artifact as well as the log, because the alternative is finding it among the
+      # forty-odd files the step below collects.
+      #
+      # ## Why this is base64 and not the file
+      #
+      # It was `cat`, for one run, and that run proved the route does not work. Two limits decide
+      # the shape of this step, and neither is negotiable from inside this repository:
+      #
+      #   * The Actions API serves **at most the last 5000 lines** of a job log. This profile is
+      #     longer than that on its own, so a plain dump arrives with its head cut off — the first
+      #     run of this gate produced one that began mid-`androidx/navigation`, missing every rule
+      #     before it. A truncated profile is worse than none: it parses, it passes the rule-count
+      #     floor, and it is silently missing the startup path.
+      #   * Actions artifacts are served from `*.blob.core.windows.net`, which the scheduled agent
+      #     that maintains this repository cannot reach — its egress policy answers 403 on CONNECT.
+      #     The same agent has no Android SDK, because `dl.google.com` is denied too, so it cannot
+      #     record a profile itself either.
+      #
+      # So the only channel from this emulator to a commit is the log, and the payload has to fit
+      # the window. gzip takes a baseline profile to roughly a fifth of its size — it is thousands
+      # of lines sharing a handful of package prefixes — and base64 at 76 columns brings the whole
+      # file in at well under a thousand lines, head included.
+      #
+      # It is emitted last, after the uploads, for the same reason: whatever else this job prints,
+      # the payload stays inside the window.
+      #
+      # `gzip -n` so the bytes depend only on the profile and not on when it was compressed, and
+      # the step decodes its own output and compares the digest before printing it. A channel that
+      # carries a profile has to be checkable rather than trusted: a single mistyped rule is
+      # exactly the failure this whole gate exists to catch, since AGP drops a rule that matches
+      # nothing without a word. The `sha256` below is of the profile itself, so it verifies the
+      # round trip end to end — decode, decompress, commit, check.
+      - name: Profile this run generated
+        id: generated-profile
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          generated=(benchmark/build/outputs/**/*-baseline-prof.txt)
+          if [ ${#generated[@]} -eq 0 ]; then
+            echo "No profile was generated — the generator step above did not get that far."
+            exit 0
+          fi
+          for file in "${generated[@]}"; do
+            echo "$file"
+            echo "  sha256: $(sha256sum "$file" | cut -d' ' -f1)"
+            echo "  lines:  $(wc -l < "$file")"
+            echo "  bytes:  $(wc -c < "$file")"
+          done
+          echo
+          echo "The readable file is the generated-baseline-profile artifact. The block below is"
+          echo "the same bytes, for whoever cannot reach artifact storage. To rebuild it from a"
+          echo "saved copy of this log — the ^ and \$ anchors are load-bearing, or this very"
+          echo "paragraph matches too, and the API serves these lines with a timestamp prefix"
+          echo "that has to come off first:"
+          echo
+          echo "    sed -e 's/^[0-9-]*T[0-9:.]*Z //' job.log \\"
+          echo "      | sed -n '/^-----BEGIN BASELINE PROFILE GZIP BASE64-----\$/,/^-----END BASELINE PROFILE GZIP BASE64-----\$/p' \\"
+          echo "      | sed '1d;\$d' | base64 -d | gunzip > app/src/main/baseline-prof.txt"
+          echo "    sha256sum app/src/main/baseline-prof.txt   # must equal the sha256 above"
+          echo
+          for file in "${generated[@]}"; do
+            gzip -9 -n -c "$file" | base64 -w 76 > profile.b64
+            # Decoded here, before it is printed, so a channel that mangles the profile fails this
+            # job instead of handing somebody a plausible file to commit.
+            if [ "$(base64 -d profile.b64 | gunzip | sha256sum | cut -d' ' -f1)" \
+                 != "$(sha256sum "$file" | cut -d' ' -f1)" ]; then
+              echo "::error::base64 round trip did not reproduce $file"
+              exit 1
+            fi
+            echo "::group::$file (gzip, base64, $(wc -l < profile.b64) lines)"
+            echo "-----BEGIN BASELINE PROFILE GZIP BASE64-----"
+            cat profile.b64
+            echo "-----END BASELINE PROFILE GZIP BASE64-----"
+            echo "::endgroup::"
+            rm -f profile.b64
+          done
+
   build:
     name: Build · verify APK · shrink
     runs-on: ubuntu-latest

@@ -62,6 +62,10 @@ gradlePlugin {
             id = "boilerplate.android.library.compose"
             implementationClass = "AndroidLibraryComposeConventionPlugin"
         }
+        register("androidTest") {
+            id = "boilerplate.android.test"
+            implementationClass = "AndroidTestConventionPlugin"
+        }
         register("hilt") {
             id = "boilerplate.hilt"
             implementationClass = "HiltConventionPlugin"

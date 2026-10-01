@@ -420,9 +420,17 @@ def check_supplied_externals(modules: dict[str, Module]) -> list[str]:
     return violations
 
 
-# `:core:testing` never reaches `:app` — it is a test-only dependency of other modules — so the
-# contract tests there cannot see it and must not expect to.
-NOT_ON_APP_CLASSPATH = {":core:testing"}
+# Modules the contract tests in `:app` cannot see and must not expect to.
+#
+# `:core:testing` never reaches `:app` — it is a test-only dependency of other modules.
+#
+# `:benchmark` reaches it from the other direction and must never arrive: it is a
+# `com.android.test` module that depends *on* `:app` in order to launch and measure it, which
+# makes it the one project in this repository with that edge. An entry for it in
+# `EXPECTED_MODULE_PACKAGES` would assert the opposite of what has to be true — that a test APK's
+# classes are on the shipped app's classpath — so its absence from that list is correct and is
+# recorded here rather than left to look like drift.
+NOT_ON_APP_CLASSPATH = {":core:testing", ":benchmark"}
 
 COMPILED_APP = Path("app/src/test/kotlin/com/kojo/boilerplate/architecture/CompiledApp.kt")
 

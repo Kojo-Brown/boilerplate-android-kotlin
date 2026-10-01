@@ -417,6 +417,100 @@ android {
             matchingFallbacks.add("debug")
             signingConfig = signingConfigs.getByName("debug")
         }
+
+        /*
+         * The build `:benchmark` measures.
+         *
+         * SPEC.md Phase 11 item 6. A startup number is only worth gating on if it is measured
+         * against the build a user would install, and the three things that make a build fast are
+         * all absent from `debug`: R8, no debuggability, and the baseline profile compiled into
+         * `assets/dexopt`. Benchmarking `debug` is the most common way to produce a performance
+         * gate that is green, stable, and measuring something nobody ships.
+         *
+         * `initWith(minified)` and not `initWith(release)` for the reason the block above exists:
+         * `release` cannot be built in this repository while the certificate pins and the Play
+         * Integrity project are deliberately empty. Inheriting from `minified` picks up R8 in full
+         * mode, `app/proguard-rules.pro`, the `debug` signing config and the `debug` fallback for
+         * the fifteen library modules in one line, and — the part that matters — guarantees the
+         * shrinker configuration measured here is the same one `verify-r8-mapping.py` checks. Two
+         * copies of it would drift, and a startup time measured against a different set of keep
+         * rules than the shipped build uses is a number about nothing.
+         *
+         * `isProfileable` is the whole reason this is a fourth build type rather than a reuse of
+         * `minified`. Macrobenchmark drives `am`, `dumpsys` and ART's profile commands against the
+         * app from a separate process, and the platform only permits that on a build that has
+         * opted in — either by being debuggable, which would destroy the measurement, or by being
+         * profileable, which costs nothing at run time. Setting it on `minified` instead would mean
+         * the artifact R8 is verified against is not the artifact AGP produces for `release`, which
+         * is the one thing that block is careful about.
+         *
+         * It is not debuggable: `initWith(minified)` carries `release`'s `isDebuggable = false`
+         * through, and `benchmark/build.gradle.kts` deliberately leaves Macrobenchmark's
+         * `DEBUGGABLE` error unsuppressed so that a change to that fails the gate rather than
+         * quietly halving the measured speed-up.
+         */
+        create("benchmark") {
+            initWith(getByName("minified"))
+            isProfileable = true
+
+            /*
+             * Restated rather than inherited, both of them, and the reason is the same for each.
+             *
+             * `initWith` is documented as copying the source build type's properties, and these
+             * two are the ones whose absence is not a compile error. A missing `debug` fallback is
+             * a configuration failure naming a variant of `:core:common` that does not exist; a
+             * missing signing config is an unsigned APK that assembles fine and then cannot be
+             * installed on the emulator, half an hour into the job. Both fixes would be these
+             * lines, so they are here from the start.
+             *
+             * Saying either twice is harmless: a duplicate fallback is a no-op in AGP's variant
+             * matching, and assigning the signing config the build type already has changes
+             * nothing. Leaving them unsaid is not harmless, which is the asymmetry that decides it.
+             */
+            matchingFallbacks.add("debug")
+            signingConfig = signingConfigs.getByName("debug")
+        }
+
+        /*
+         * The build the baseline profile is *generated* from, and the one build type here whose
+         * existence is forced by a detail rather than chosen.
+         *
+         * `BaselineProfileGenerator` records the names ART saw. Run against `benchmark` above,
+         * those names are R8's: `a.b.c.d`. A profile of obfuscated names cannot be the file that is
+         * checked in, because the next R8 run assigns different ones — AGP's own pipeline goes the
+         * other way, taking source names from `src/main/baseline-prof.txt` and rewriting them
+         * through the mapping as it packages the APK. So generation needs a variant that is
+         * otherwise identical and not renamed.
+         *
+         * This is the same split the `androidx.baselineprofile` Gradle plugin makes for itself, and
+         * the name is deliberately its vocabulary. The plugin is not used here because it derives
+         * its generated build types from `release`, which this repository cannot build — see the
+         * `minified` block above — so the split is made by hand instead.
+         *
+         * `isMinifyEnabled = false` turns off shrinking as well as renaming, which is more than
+         * strictly needed and is correct anyway: a profile should name every class that runs at
+         * startup, and R8 removing one would silently narrow the recording. Rules that no longer
+         * match after shrinking are dropped by AGP when it packages the profile into the shrunk
+         * APK, which is the right direction for that filtering to happen in.
+         *
+         * `debug` is not an option for this and the reason is the same silent-narrowing problem
+         * from the other end: `debugImplementation` pulls in `ui-tooling` and the Compose test
+         * manifest, so a profile generated there names classes no shipped build contains, and
+         * `isDebuggable = true` changes what ART compiles in the first place.
+         */
+        create("nonMinifiedBenchmark") {
+            initWith(getByName("benchmark"))
+            isMinifyEnabled = false
+
+            // The same three restated for the same reasons as above, `isProfileable` included:
+            // `BaselineProfileRule` reads ART's profile for the app through the shell, and the
+            // platform only allows that against a build that opted in. Without it the generator
+            // fails on the device rather than at configuration time, which is the slowest place
+            // to find out.
+            isProfileable = true
+            matchingFallbacks.add("debug")
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 }
 
@@ -588,6 +682,33 @@ dependencies {
     // the request stay there, behind `BackgroundSyncScheduler`.
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
+
+    /*
+     * ProfileInstaller: the runtime half of the baseline profile.
+     *
+     * AGP compiles `src/main/baseline-prof.txt` into `assets/dexopt/baseline.prof` inside the APK,
+     * and that is as far as the build can take it — a file in the APK is not a profile ART has
+     * accepted. On API 31 and above the platform installer reads it directly, but this app's
+     * `minSdk` is 26, and on everything below 31 the only thing that moves the profile from assets
+     * into ART's reference profile is this library's `androidx.startup` initialiser, running on
+     * first launch.
+     *
+     * So without it the profile ships, nothing installs it on most of the supported range, and the
+     * build stays green: there is no error, only an app that starts as slowly as it did before.
+     * `StartupBenchmark.withBaselineProfile` uses `BaselineProfileMode.Require` precisely so that
+     * state fails a gate instead of going unnoticed.
+     *
+     * Its initialiser merges into the `androidx.startup` provider that `AndroidManifest.xml`
+     * already declares — the one that exists there to remove WorkManager's entry. Removing that
+     * provider instead of the single `<meta-data>` node, as the comment beside it warns, would take
+     * this initialiser down with it and produce exactly the silent failure above.
+     *
+     * Macrobenchmark also requires it in the app under test — 1.3.0 or newer — to reset compilation
+     * state and drop the shader cache between iterations. Without it the second iteration of a cold
+     * startup benchmark measures a partly warm app and reports numbers that are better than the
+     * truth.
+     */
+    implementation(libs.androidx.profileinstaller)
 
     // Test-only on purpose. `StabilityContractTest` needs the Kotlin declaration model — `val`
     // vs `var`, sealed subclasses, generic type arguments — none of which survives into Java
