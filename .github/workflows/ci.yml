@@ -301,8 +301,15 @@ jobs:
           emulator-options: >-
             -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
             -camera-back none -camera-front none
+          # `set -eu` and not `set -euo pipefail`: this action runs its script with
+          # `/usr/bin/sh -c`, which on an Ubuntu runner is dash, and dash's `set` has no
+          # `pipefail` — it answers "Illegal option -o pipefail" and exits 2 before the first
+          # Gradle invocation. Every other `run:` block in this workflow gets bash, which is why
+          # this is the one place the distinction matters. Nothing here is a pipeline, so `-e`
+          # alone carries the weight that matters: without it a failed generator would be
+          # followed by a benchmark run against a profile that was never recorded.
           script: |
-            set -euo pipefail
+            set -eu
             ./gradlew :benchmark:connectedNonMinifiedBenchmarkAndroidTest \
               -Pandroid.testInstrumentationRunnerArguments.class=com.kojo.boilerplate.benchmark.BaselineProfileGenerator \
               --stacktrace
