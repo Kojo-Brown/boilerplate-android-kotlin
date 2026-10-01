@@ -47,6 +47,10 @@ So this reads both and holds each to `config/benchmark/startup-budget.json`.
    actually does today, and a committed file that no longer names what the app runs is the stale
    case this gate exists for.
 
+Every one of these is reported, not just the first. A missing committed profile does not stop
+the startup medians from being printed — they are what the budget would be recalibrated from, and
+withholding them is how a failing gate becomes two round trips instead of one.
+
 ## What it cannot check
 
 Whether the committed profile is *byte-identical* to a freshly generated one, and that is on
@@ -360,6 +364,19 @@ def parse_profile(path: Path) -> Profile:
     return profile
 
 
+def read_profile(path: Path) -> tuple[Profile | None, str | None]:
+    """Parses a profile, returning the problem rather than raising it.
+
+    A profile that is missing or malformed is a *finding*, not a reason to stop reading the run.
+    The startup medians are parsed before this is called and are what a budget is calibrated from,
+    so aborting here would withhold exactly the information needed to act on the failure.
+    """
+    try:
+        return parse_profile(path), None
+    except VerificationError as error:
+        return None, str(error)
+
+
 def check_device(context: dict[str, Any], budget: Budget) -> list[str]:
     """Holds the run to the API level the budget was calibrated on, and reports the rest."""
     build = (context or {}).get("build") or {}
@@ -559,29 +576,54 @@ def verify(
             f"contained a result from a class ending in {BENCHMARK_CLASS_SUFFIX}"
         )
 
-    committed = parse_profile(
-        profile_path if profile_path is not None else root / budget.profile.path
-    )
-
-    generated_files = find_files(outputs_dir, GENERATED_PROFILE_SUFFIX)
-    generated = parse_profile(generated_files[0]) if generated_files else None
-
     violations: list[str] = []
     lines: list[str] = ["Measured on:", *describe_context(context)]
 
     violations += check_device(context, budget)
 
+    # The startup report comes first, and it is reported before the profile is even read.
+    #
+    # That ordering is the whole reason this function collects violations instead of raising on
+    # the first problem, and it was learned from a run that did the opposite: the committed
+    # profile was missing, this exited on that, and the medians it had already parsed — the
+    # numbers somebody needs in order to calibrate the budget, and the only place they appear
+    # without scrolling past several thousand lines of generated profile — were never printed.
+    #
+    # It follows the same rule as the gates in ci.yml: every check runs even when an earlier one
+    # failed, so one run reports everything rather than stopping at the first thing wrong.
     measurement_violations, measurement_report = check_measurements(measurements, budget)
     violations += measurement_violations
     lines += ["Startup:", *measurement_report]
 
-    profile_violations, profile_report = check_profile(committed, budget.profile)
-    violations += profile_violations
-    lines += ["Baseline profile:", *profile_report]
+    committed, committed_violation = read_profile(
+        profile_path if profile_path is not None else root / budget.profile.path
+    )
+    generated_files = find_files(outputs_dir, GENERATED_PROFILE_SUFFIX)
+    generated, generated_violation = (
+        read_profile(generated_files[0]) if generated_files else (None, None)
+    )
 
-    stale_violations, stale_report = check_not_stale(committed, generated, budget.profile)
-    violations += stale_violations
-    lines += stale_report
+    lines.append("Baseline profile:")
+    if committed is None:
+        violations.append(committed_violation or "the committed profile could not be read")
+        lines.append(f"  not readable: {committed_violation}")
+    else:
+        profile_violations, profile_report = check_profile(committed, budget.profile)
+        violations += profile_violations
+        lines += profile_report
+
+    if generated_violation is not None:
+        violations.append(generated_violation)
+
+    if committed is not None:
+        stale_violations, stale_report = check_not_stale(committed, generated, budget.profile)
+        violations += stale_violations
+        lines += stale_report
+    elif generated is not None:
+        lines.append(
+            f"  {generated.path}: {len(generated.rules)} rules, {len(generated.classes)} "
+            f"classes (freshly generated — this is the file to commit)"
+        )
 
     print("\n".join(lines))
 

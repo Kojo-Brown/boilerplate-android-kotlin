@@ -135,11 +135,26 @@ Its header says why it is a file rather than a block in the workflow. On the fir
 after anything that changed the startup path, expect the `verify` step to fail until the `cp` above
 has happened — the profile it is checking is the one you are about to replace.
 
-Without a device, CI does both: the `startup-benchmark` job prints the profile it generated into the
-job log inside a collapsed group, and uploads it in the `startup-benchmark` artifact. That is there
-on purpose rather than as a convenience — the scheduled agent that maintains this repository has no
-Android SDK at all, because its network answers 403 on CONNECT to `dl.google.com`, so the log is the
-only route by which a generated profile reaches a commit.
+Without a device, CI does both. The `startup-benchmark` job uploads what it recorded as a
+single-file artifact, `generated-baseline-profile`, and also prints it into the job log inside a
+collapsed group, preceded by its SHA-256, line count and byte count.
+
+That is deliberate rather than a convenience, and the reason is worth knowing before you rely on the
+log route. The scheduled agent that maintains this repository can do neither of the two things that
+would make this easy: it has no Android SDK, because its network answers 403 on CONNECT to
+`dl.google.com`, and it cannot download a CI artifact, because the same policy denies
+`*.blob.core.windows.net`, which is where Actions stores them. The job log, fetched through the API,
+is the only route by which those bytes can reach it at all — and a profile copied out of a log has to
+be checked, not trusted, because a single mistyped rule is a rule AGP will silently drop. Hence the
+checksum.
+
+**A consequence worth facing rather than discovering.** Regenerating this profile needs a device, and
+the agent that maintains this repository does not have one. So the profile cannot be refreshed on the
+cadence everything else here is refreshed on, and the gate that keeps it honest will eventually fail
+with nobody able to act on it from inside the normal loop. The fix is a CI job that regenerates the
+profile and opens a pull request with it — which would be the first workflow in this repository to
+need `contents: write`, and so is a deliberate change to its permissions posture rather than a
+detail. It is not done here for that reason.
 
 ## Recalibrating the budget
 

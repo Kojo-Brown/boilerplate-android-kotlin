@@ -310,13 +310,33 @@ jobs:
           # scripts/run-startup-benchmark.sh carries the two Gradle invocations and the reasoning.
           script: ./scripts/run-startup-benchmark.sh
 
-      # The generated profile printed into the log, not only uploaded.
+      # The gate. Holds both cases to config/benchmark/startup-budget.json and the committed
+      # profile to the one this run just generated.
       #
-      # This is the one artifact of this job a human has to act on: when the committed profile has
-      # gone stale the fix is to replace it with this file, and an artifact download is a round
-      # trip at best and impossible from a network that cannot reach the artifact host — which is
-      # the same reason `configureUnitTests` puts assertion messages in the console.
+      # Before the profile is printed, not after, and that ordering is load-bearing: this step's
+      # output is a dozen lines ending in the measured medians, and the step below is several
+      # thousand lines of generated profile. Run the other way round, the numbers somebody needs in
+      # order to act on a failure are buried in a log nobody scrolls to the middle of.
+      #
+      # Runs even when the step above failed, because a partial run still has something to say
+      # about which half broke.
+      - name: Startup is inside budget and the profile is current
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-startup-budget.py
+
+      # The generated profile, with its identity, printed into the log and uploaded on its own.
+      #
+      # This is the one artifact of this job a human has to act on: when the committed profile is
+      # missing or has gone stale, the fix is to replace it with this file. It gets its own
+      # single-file artifact as well as the log, because the alternative is finding it among the
+      # forty-odd files the step below collects.
+      #
+      # The checksum and the counts are what make the log route usable rather than merely possible.
+      # A profile copied out of a log can be verified against them; one copied without them has to
+      # be trusted, and a silently mistyped rule is exactly the failure this whole gate exists to
+      # catch — AGP drops a rule that matches nothing without a word.
       - name: Profile this run generated
+        id: generated-profile
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
@@ -327,17 +347,28 @@ jobs:
             exit 0
           fi
           for file in "${generated[@]}"; do
-            echo "::group::$file ($(wc -l < "$file") rules)"
+            echo "$file"
+            echo "  sha256: $(sha256sum "$file" | cut -d' ' -f1)"
+            echo "  lines:  $(wc -l < "$file")"
+            echo "  bytes:  $(wc -c < "$file")"
+          done
+          for file in "${generated[@]}"; do
+            echo "::group::$file"
             cat "$file"
             echo "::endgroup::"
           done
 
-      # The gate. Holds both cases to config/benchmark/startup-budget.json and the committed
-      # profile to the one this run just generated. Runs even when the step above failed, because a
-      # partial run still has something to say about which half broke.
-      - name: Startup is inside budget and the profile is current
+      # Separate from the bundle below and deliberately so: one file, named for what it is, so that
+      # regenerating the committed profile is a download and a copy rather than an archaeology
+      # exercise. docs/baseline-profiles.md points here.
+      - name: Upload the generated profile on its own
         if: ${{ !cancelled() }}
-        run: python3 scripts/verify-startup-budget.py
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-baseline-profile
+          path: benchmark/build/outputs/**/*-baseline-prof.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload benchmark output
         if: ${{ !cancelled() }}

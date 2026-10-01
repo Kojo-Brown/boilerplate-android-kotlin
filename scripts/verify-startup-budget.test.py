@@ -488,23 +488,48 @@ def main() -> int:
     # --- the committed profile -------------------------------------------------------------
 
     check(
-        "a missing committed profile is an error that names the generator",
+        "a missing committed profile is a finding that names the generator",
         committed=None,
-        expect_exit=2,
+        expect_exit=1,
         expect_in_output="BaselineProfileGenerator",
+    )
+
+    # The case that cost a CI round trip: the gate exited on the missing profile before printing
+    # the medians, which are the only thing a budget can be recalibrated from and are otherwise
+    # thousands of lines of generated profile away in the job log.
+    check(
+        "a missing committed profile still reports the measured startup numbers",
+        committed=None,
+        expect_exit=1,
+        expect_in_output="against a budget of 2100 ms",
+    )
+
+    check(
+        "a missing committed profile still names the freshly generated one as the fix",
+        committed=None,
+        generated=profile(),
+        expect_exit=1,
+        expect_in_output="this is the file to commit",
+    )
+
+    check(
+        "an unparsable committed profile also still reports the numbers",
+        committed=profile(extra="# regenerated 2026-10-01"),
+        expect_exit=1,
+        expect_in_output="against a budget of 2100 ms",
     )
 
     check(
         "a line that is not a rule fails rather than being skipped",
         committed=profile(extra="# regenerated 2026-10-01"),
-        expect_exit=2,
+        expect_exit=1,
         expect_in_output="is not a profile rule",
     )
 
     check(
         "a descriptor with no leading L fails",
         committed=profile(extra="HSPLcom/kojo/boilerplate/Oops->onCreate()V"),
-        expect_exit=2,
+        expect_exit=1,
         expect_in_output="is not a profile rule",
     )
 
