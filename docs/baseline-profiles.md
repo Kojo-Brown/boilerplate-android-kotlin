@@ -119,22 +119,21 @@ The profile is a recording, so it is regenerated rather than edited. Do it after
 changes what runs before the first screen: a new start destination, work moved into
 `BoilerplateApp.onCreate`, a dependency whose initialisation moved, a Compose or AndroidX bump.
 
-With a device or emulator attached (API 33 or newer — `BaselineProfileRule` needs root below that):
+With a device or emulator attached (API 33 or newer — `BaselineProfileRule` needs root below that),
+record and measure with the same script CI runs, then take its output:
 
 ```
-./gradlew :benchmark:connectedNonMinifiedBenchmarkAndroidTest \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.kojo.boilerplate.benchmark.BaselineProfileGenerator
+./scripts/run-startup-benchmark.sh
 cp "$(find benchmark/build/outputs -name '*-baseline-prof.txt' | head -1)" \
     app/src/main/baseline-prof.txt
-```
-
-Then measure, and the budget's headroom tells you whether the change was worth it:
-
-```
-./gradlew :benchmark:connectedBenchmarkAndroidTest \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.kojo.boilerplate.benchmark.StartupBenchmark
 python3 scripts/verify-startup-budget.py
 ```
+
+The script is the two Gradle invocations and nothing else, in the order that matters: it records
+before it measures, so a `BaselineProfileMode.Require` failure still leaves a fresh profile on disk.
+Its header says why it is a file rather than a block in the workflow. On the first run of all, or
+after anything that changed the startup path, expect the `verify` step to fail until the `cp` above
+has happened — the profile it is checking is the one you are about to replace.
 
 Without a device, CI does both: the `startup-benchmark` job prints the profile it generated into the
 job log inside a collapsed group, and uploads it in the `startup-benchmark` artifact. That is there
