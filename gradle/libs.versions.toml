@@ -100,6 +100,41 @@ kotlinxCollectionsImmutable = "0.3.8"
 # pinned above and crash the lint bundled with AGP 8.7.3 — a failure that names a lint detector
 # and not this line.
 playIntegrity = "1.6.0"
+# Macrobenchmark and the Baseline Profile rule, which ship as one release of the
+# `androidx.benchmark` group. 1.3.4 is the last of the 1.3.x line and the newest release
+# contemporary with AGP 8.7.3: 1.4.0 (July 2025) and 1.5.0 (2026) both carry Baseline Profile
+# Gradle Plugin work aimed at AGP 9's new DSL, and 1.5.0's notes name `newDsl` explicitly. The
+# Gradle plugin is not used here at all — see `benchmark/build.gradle.kts` for why — but the
+# runtime half of a release is built and tested against the AGP of its own vintage, and this is
+# the vintage this repository is on.
+#
+# Only `benchmark-macro-junit4` is taken. `benchmark-junit4` is the microbenchmark half and
+# measures a function in a loop inside the app's own process; nothing here needs it, and a
+# microbenchmark is a different gate with a different noise profile.
+benchmark = "1.3.4"
+# UiAutomator, for the two lines in each test that wait for the app's first screen. 2.3.0 and not
+# 2.4.0: 2.4.0 (July 2026) overhauled the API surface — `uiAutomator {}` scope, `onElement`,
+# `waitForAppToBeVisible` — and deprecated nothing, so it is a different library wearing the same
+# coordinate. 2.3.0 is what `benchmark-macro-junit4:1.3.4` is written against and what every
+# `By`/`Until` call below is.
+uiautomator = "2.3.0"
+# `androidx.test.ext:junit`, for `AndroidJUnit4`. 1.2.1 rather than 1.3.0 for the reason the whole
+# catalog is pinned conservatively: 1.3.0 is a 2025 release built against a later AndroidX
+# vintage, and Gradle resolves to the highest version anybody asks for — see the note on
+# `lifecycleRuntimeKtx`.
+androidxTestJunit = "1.2.1"
+# ProfileInstaller. This is the runtime half of a baseline profile: AGP compiles
+# `app/src/main/baseline-prof.txt` into `assets/dexopt/baseline.prof`, and it is this library's
+# `androidx.startup` initialiser that hands the profile to ART on first run. Without it the file
+# ships and nothing installs it below API 31, and `CompilationMode.Partial(Require)` in
+# `StartupBenchmark` fails rather than quietly measuring an uncompiled app — which is the whole
+# reason that mode is `Require`.
+#
+# 1.3.1 and not 1.4.x: Macrobenchmark 1.3.4 requires 1.3.0 or newer for profile capture and
+# shader-cache clearing, 1.3.1 is the newest release of the line that predates the compileSdk 36
+# vintage, and this project compiles against 35 — a dependency built against a higher compileSdk
+# is a hard AGP error, not a warning.
+profileinstaller = "1.3.1"
 cameraX = "1.4.2"
 mlkitBarcode = "17.3.0"
 mlkitTextRecognition = "16.0.1"
@@ -217,6 +252,16 @@ okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-i
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 okhttp-tls = { group = "com.squareup.okhttp3", name = "okhttp-tls", version.ref = "okhttp" }
 
+# Macrobenchmark + Baseline Profiles. All three live in `:benchmark`, which is a
+# `com.android.test` module and ships in no APK the user installs.
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+
+# ProfileInstaller, in `:app`. The one dependency in this repository whose entire job runs before
+# the first frame and is invisible afterwards.
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+
 # CameraX
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraX" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX" }
@@ -286,6 +331,10 @@ androidx-adaptive = { group = "androidx.compose.material3.adaptive", name = "ada
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+# The test-only module plugin, for `:benchmark`. It produces an APK that is installed beside
+# `:app` and instruments it, and it is the only module type Macrobenchmark can live in: a
+# macrobenchmark measures another process starting, so it cannot be in the process it measures.
+android-test = { id = "com.android.test", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

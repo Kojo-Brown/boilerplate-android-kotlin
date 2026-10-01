@@ -4,6 +4,12 @@ The app is fifteen Gradle modules. This page is what each one is for, what it ma
 and — the part worth reading — what the split actually bought, because most of the reasons
 usually given for modularising an Android app did not apply here.
 
+There is a sixteenth Gradle project, `:benchmark`, and it is deliberately absent from everything
+below. It applies `com.android.test`, so it ships in no artifact a user installs, and the layering
+this page is about does not reach it: it is not a layer of the app but a thing pointed at the app
+from outside. It is the one project allowed to depend on `:app`, and nothing may depend on it. See
+[baseline-profiles.md](./baseline-profiles.md).
+
 ## The graph
 
 ```
@@ -42,6 +48,7 @@ usually given for modularising an Android app did not apply here.
 | `:data` | no | Room, DataStore, Retrofit/OkHttp, the connectivity monitor, and the Hilt modules that bind them. |
 | `:feature:*` | yes | One screen family each. Siblings; none may depend on another. |
 | `:app` | yes | `MainActivity`, `BoilerplateApp`, `AppNavHost`. Depends on everything; nothing depends on it. |
+| `:benchmark` | no | Not part of the app. `com.android.test`: the macrobenchmark that times `:app`'s cold start and the rule that records its baseline profile. The only project that may name `:app`; nothing may name it. |
 
 ## The rules, and what enforces them
 

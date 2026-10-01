@@ -37,6 +37,9 @@ look obviously fake. Scan `git diff --cached` before every push.
 
 ## Modules
 The app is fifteen Gradle modules — `:app`, `:data`, five `:feature:*` and eight `:core:*`.
+`:benchmark` is a sixteenth Gradle project and not one of them: it applies `com.android.test`,
+ships in nothing, and is the only project allowed to depend on `:app`. The unqualified gates above
+cover it like any other; its device half runs only in CI. See `docs/baseline-profiles.md`.
 What may depend on what is declared in the root `build.gradle.kts` and enforced by
 `checkModuleDependencies`; `docs/modularisation.md` is the map. Three rules break builds:
 - A `:feature:*` module may never depend on another `:feature:*`. Take a composable slot and

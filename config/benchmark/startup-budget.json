@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "The startup budget, and the shape of the baseline profile it assumes.",
+    "",
+    "Read by scripts/verify-startup-budget.py, which is the gate. Every number here is a",
+    "deliberate decision and the script's docstring says what each one is holding up; this file",
+    "carries the values and not the reasoning, because a budget that is edited has to be edited",
+    "in one obvious place. docs/baseline-profiles.md is the long form, including how to",
+    "recalibrate after a deliberate change.",
+    "",
+    "These milliseconds are CI emulator milliseconds. They are not a claim about any user's",
+    "phone and must not be quoted as one: a software rasteriser on a CPU shared with the rest of",
+    "a GitHub runner is roughly an order of magnitude away from real hardware in both directions",
+    "depending on the workload. What they are is a regression gate against this repository's own",
+    "history, measured the same way every time."
+  ],
+  "metric": "timeToInitialDisplayMs",
+  "statistic": "median",
+  "device": {
+    "sdk": 34,
+    "_comment": [
+      "Gated. The API level is what decides how ART treats a baseline profile, so a run on a",
+      "different one is not comparable to this budget and fails rather than being measured",
+      "against it. ci.yml pins the same number on the emulator.",
+      "",
+      "The device model is deliberately not gated. Emulator images for one API level report",
+      "several different model strings, none of which changes what is being measured, so a check",
+      "on it would be a flake rather than a guard. The script prints the whole build context it",
+      "measured, which is what makes an unexpected machine visible in the log."
+    ]
+  },
+  "cases": {
+    "withoutCompilation": {
+      "budgetMs": 2600,
+      "minimumIterations": 10,
+      "maximumWarmupIterations": 0
+    },
+    "withBaselineProfile": {
+      "budgetMs": 2100,
+      "minimumIterations": 10,
+      "maximumWarmupIterations": 0
+    }
+  },
+  "profile": {
+    "path": "app/src/main/baseline-prof.txt",
+    "minimumRules": 200,
+    "requiredClasses": [
+      "Lcom/kojo/boilerplate/BoilerplateApp;",
+      "Lcom/kojo/boilerplate/MainActivity;"
+    ],
+    "minimumRulesByPackage": {
+      "Lcom/kojo/boilerplate/": 20,
+      "Landroidx/compose/": 50
+    }
+  }
+}

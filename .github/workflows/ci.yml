@@ -214,6 +214,144 @@ jobs:
       - name: Rehearse release signing
         run: ./scripts/verify-upload-signing.sh
 
+  startup-benchmark:
+    name: Baseline profile · startup budget
+    runs-on: ubuntu-latest
+    # Same ordering as `build` below, for the same reason: a startup measurement is only worth
+    # taking once the code that starts up has compiled, linted and passed its tests.
+    needs: [gates]
+    # The long one, and every minute of it is accounted for: R8 over fifteen modules for the
+    # `benchmark` variant and a second, unshrunk build for `nonMinifiedBenchmark`; an emulator
+    # cold boot; fifteen generation iterations; then twenty measured cold starts, each of which
+    # reinstalls or recompiles the app before launching it. Ninety minutes is clear of that on a
+    # cold Gradle cache. Beyond it the emulator is wedged — which happens — and the job should
+    # fail rather than hold a runner for the six-hour default.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # See the note on this input in the `gates` job: the action's default `tools` package no
+          # longer exists in the SDK repository and fails the step on every run.
+          packages: 'platform-tools'
+
+      # An emulator without KVM falls back to software CPU emulation, which is roughly an order of
+      # magnitude slower — enough that the boot alone outlives this job's timeout, and enough that
+      # any number measured on it would be meaningless anyway. GitHub's Linux runners expose
+      # /dev/kvm but not to the runner's own user, so this is the standard udev rule that grants
+      # it. It is not an optimisation: without it this gate cannot run at all.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Seconds, no SDK and no emulator needed, and it runs first so a broken verifier is reported
+      # immediately rather than after an hour of Gradle and emulator work. Its failure paths — a
+      # regression over budget, a stale profile, a warmup that made the numbers unattributable —
+      # run nowhere else at all: a green gate exercises none of them.
+      - name: verify-startup-budget.py self-test
+        run: python3 scripts/verify-startup-budget.test.py
+
+      # Built before the emulator comes up rather than inside the step below, so that a build
+      # failure is a build failure and not an emulator step that timed out. Both app variants and
+      # both test APKs: `nonMinifiedBenchmark` is what the profile is recorded against and
+      # `benchmark` is what is measured — app/build.gradle.kts has the reasoning for the split.
+      - name: Build the benchmark variants
+        run: |
+          ./gradlew \
+            :app:assembleBenchmark :app:assembleNonMinifiedBenchmark \
+            :benchmark:assembleBenchmark :benchmark:assembleNonMinifiedBenchmark \
+            --stacktrace
+
+      # `default` and not `google_apis` or an ATD image: the AOSP image is a userdebug build with
+      # the AOSP launcher, which is what `pressHome()` needs and what keeps ART's profile commands
+      # available. API 34 is pinned here and in config/benchmark/startup-budget.json, and the
+      # verifier fails when the two disagree — the API level decides what ART does with a baseline
+      # profile, so a run on another one is not comparable to the budget.
+      #
+      # Two Gradle invocations, one per variant, because they are two different runs against two
+      # different builds of the app. The generator goes first: its output is what the staleness
+      # half of the gate compares the committed profile against.
+      - name: Generate the profile and measure startup
+        id: measure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          # Macrobenchmark needs the screen on and the window animations off. The action's own
+          # flag does the second; `-no-boot-anim` and `-no-window` keep the first from costing a
+          # GPU that is software rasterisation anyway.
+          disable-animations: true
+          emulator-options: >-
+            -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none
+          script: |
+            set -euo pipefail
+            ./gradlew :benchmark:connectedNonMinifiedBenchmarkAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.kojo.boilerplate.benchmark.BaselineProfileGenerator \
+              --stacktrace
+            ./gradlew :benchmark:connectedBenchmarkAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.kojo.boilerplate.benchmark.StartupBenchmark \
+              --stacktrace
+
+      # The generated profile printed into the log, not only uploaded.
+      #
+      # This is the one artifact of this job a human has to act on: when the committed profile has
+      # gone stale the fix is to replace it with this file, and an artifact download is a round
+      # trip at best and impossible from a network that cannot reach the artifact host — which is
+      # the same reason `configureUnitTests` puts assertion messages in the console.
+      - name: Profile this run generated
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          generated=(benchmark/build/outputs/**/*-baseline-prof.txt)
+          if [ ${#generated[@]} -eq 0 ]; then
+            echo "No profile was generated — the generator step above did not get that far."
+            exit 0
+          fi
+          for file in "${generated[@]}"; do
+            echo "::group::$file ($(wc -l < "$file") rules)"
+            cat "$file"
+            echo "::endgroup::"
+          done
+
+      # The gate. Holds both cases to config/benchmark/startup-budget.json and the committed
+      # profile to the one this run just generated. Runs even when the step above failed, because a
+      # partial run still has something to say about which half broke.
+      - name: Startup is inside budget and the profile is current
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-startup-budget.py
+
+      - name: Upload benchmark output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-benchmark
+          path: |
+            benchmark/build/outputs/**/*-benchmarkData.json
+            benchmark/build/outputs/**/*-baseline-prof.txt
+            benchmark/build/reports/
+            benchmark/build/outputs/androidTest-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   build:
     name: Build · verify APK · shrink
     runs-on: ubuntu-latest
