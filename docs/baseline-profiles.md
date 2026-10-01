@@ -136,25 +136,61 @@ after anything that changed the startup path, expect the `verify` step to fail u
 has happened — the profile it is checking is the one you are about to replace.
 
 Without a device, CI does both. The `startup-benchmark` job uploads what it recorded as a
-single-file artifact, `generated-baseline-profile`, and also prints it into the job log inside a
-collapsed group, preceded by its SHA-256, line count and byte count.
+single-file artifact, `generated-baseline-profile`, and also emits it into the job log, preceded by
+its SHA-256, line count and byte count.
 
-That is deliberate rather than a convenience, and the reason is worth knowing before you rely on the
-log route. The scheduled agent that maintains this repository can do neither of the two things that
-would make this easy: it has no Android SDK, because its network answers 403 on CONNECT to
-`dl.google.com`, and it cannot download a CI artifact, because the same policy denies
-`*.blob.core.windows.net`, which is where Actions stores them. The job log, fetched through the API,
-is the only route by which those bytes can reach it at all — and a profile copied out of a log has to
-be checked, not trusted, because a single mistyped rule is a rule AGP will silently drop. Hence the
-checksum.
+Not as itself, though, and the reason is the whole point of this section. Three facts bound what can
+reach the agent that maintains this repository, and between them they decide the shape of that log
+step:
 
-**A consequence worth facing rather than discovering.** Regenerating this profile needs a device, and
-the agent that maintains this repository does not have one. So the profile cannot be refreshed on the
-cadence everything else here is refreshed on, and the gate that keeps it honest will eventually fail
-with nobody able to act on it from inside the normal loop. The fix is a CI job that regenerates the
-profile and opens a pull request with it — which would be the first workflow in this repository to
-need `contents: write`, and so is a deliberate change to its permissions posture rather than a
-detail. It is not done here for that reason.
+* It has **no Android SDK**, because its network answers 403 on CONNECT to `dl.google.com`. So it
+  cannot record a profile itself, and cannot run any Gradle task in this repository either.
+* It **cannot download an Actions artifact**, because the same policy denies
+  `*.blob.core.windows.net`, which is where Actions serves them from.
+* The job log, fetched through the API, is therefore the only channel — and the API serves **at most
+  the last 5000 lines** of a job. This profile is longer than that by itself.
+
+The first run of this gate printed the profile with `cat` and proved the third point the expensive
+way: what came back began part-way through `androidx/navigation`, with every rule before it cut off.
+That is the worst possible failure mode for this particular file. A truncated profile still parses,
+still clears the rule-count floor, and is silently missing most of the startup path — which is
+exactly the rot the whole gate exists to detect, manufactured by the tool meant to fix it.
+
+So the log carries the profile **gzipped and base64-encoded**, between
+`-----BEGIN BASELINE PROFILE GZIP BASE64-----` and `-----END BASELINE PROFILE GZIP BASE64-----`.
+A baseline profile is thousands of lines sharing a handful of package prefixes, so gzip takes it to
+roughly a fifth of its size and the encoded block lands at well under a thousand lines — head
+included, with room for the profile to grow several times over. It is emitted last, after the
+uploads, so that nothing printed later can push it out of the window.
+
+To rebuild the committed profile from a saved copy of the log — the step prints this too:
+
+```
+sed -e 's/^[0-9-]*T[0-9:.]*Z //' job.log \
+  | sed -n '/^-----BEGIN BASELINE PROFILE GZIP BASE64-----$/,/^-----END BASELINE PROFILE GZIP BASE64-----$/p' \
+  | sed '1d;$d' | base64 -d | gunzip > app/src/main/baseline-prof.txt
+sha256sum app/src/main/baseline-prof.txt   # must equal the sha256 the job printed
+```
+
+The `^` and `$` anchors matter: the step's own instructions name those markers, and an unanchored
+match starts on them instead. The timestamp prefix is what the API adds and the web UI does not.
+
+The checksum is not decoration. A profile that arrives over a channel has to be checked rather than
+trusted, because a single mangled rule is a rule AGP drops without a word — and the step itself
+decodes its own output and compares the digest before printing it, so a channel that mangles the
+profile fails the job instead of handing somebody a plausible file to commit.
+
+**A consequence worth facing rather than discovering.** None of this makes the agent able to *record*
+a profile; it only makes the recording retrievable. Refreshing the profile still costs a full CI
+round — the job records, the log carries it back, a commit follows — so it cannot happen in the same
+run as the change that made it necessary, and the gate will be red in between. That is the honest
+cost of a checked-in recording in a repository whose maintainer has no device, and it is preferable
+to the alternatives: a hand-written profile would be a guess dressed as a measurement, and a profile
+generated at build time would put an emulator in the path of every release build.
+
+The upgrade is a CI job that regenerates the profile and opens a pull request with it, which would be
+the first workflow here to need `contents: write` — a deliberate change to this repository's
+permissions posture rather than a detail, and so not made as a side effect of this item.
 
 ## Recalibrating the budget
 

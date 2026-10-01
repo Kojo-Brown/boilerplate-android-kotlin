@@ -324,40 +324,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 scripts/verify-startup-budget.py
 
-      # The generated profile, with its identity, printed into the log and uploaded on its own.
-      #
-      # This is the one artifact of this job a human has to act on: when the committed profile is
-      # missing or has gone stale, the fix is to replace it with this file. It gets its own
-      # single-file artifact as well as the log, because the alternative is finding it among the
-      # forty-odd files the step below collects.
-      #
-      # The checksum and the counts are what make the log route usable rather than merely possible.
-      # A profile copied out of a log can be verified against them; one copied without them has to
-      # be trusted, and a silently mistyped rule is exactly the failure this whole gate exists to
-      # catch — AGP drops a rule that matches nothing without a word.
-      - name: Profile this run generated
-        id: generated-profile
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          generated=(benchmark/build/outputs/**/*-baseline-prof.txt)
-          if [ ${#generated[@]} -eq 0 ]; then
-            echo "No profile was generated — the generator step above did not get that far."
-            exit 0
-          fi
-          for file in "${generated[@]}"; do
-            echo "$file"
-            echo "  sha256: $(sha256sum "$file" | cut -d' ' -f1)"
-            echo "  lines:  $(wc -l < "$file")"
-            echo "  bytes:  $(wc -c < "$file")"
-          done
-          for file in "${generated[@]}"; do
-            echo "::group::$file"
-            cat "$file"
-            echo "::endgroup::"
-          done
-
       # Separate from the bundle below and deliberately so: one file, named for what it is, so that
       # regenerating the committed profile is a download and a copy rather than an archaeology
       # exercise. docs/baseline-profiles.md points here.
@@ -382,6 +348,88 @@ jobs:
             benchmark/build/outputs/androidTest-results/
           if-no-files-found: ignore
           retention-days: 14
+
+      # The generated profile, with its identity, emitted into the log and uploaded on its own.
+      #
+      # This is the one output of this job a human has to act on: when the committed profile is
+      # missing or has gone stale, the fix is to replace it with this file. It gets its own
+      # single-file artifact as well as the log, because the alternative is finding it among the
+      # forty-odd files the step below collects.
+      #
+      # ## Why this is base64 and not the file
+      #
+      # It was `cat`, for one run, and that run proved the route does not work. Two limits decide
+      # the shape of this step, and neither is negotiable from inside this repository:
+      #
+      #   * The Actions API serves **at most the last 5000 lines** of a job log. This profile is
+      #     longer than that on its own, so a plain dump arrives with its head cut off — the first
+      #     run of this gate produced one that began mid-`androidx/navigation`, missing every rule
+      #     before it. A truncated profile is worse than none: it parses, it passes the rule-count
+      #     floor, and it is silently missing the startup path.
+      #   * Actions artifacts are served from `*.blob.core.windows.net`, which the scheduled agent
+      #     that maintains this repository cannot reach — its egress policy answers 403 on CONNECT.
+      #     The same agent has no Android SDK, because `dl.google.com` is denied too, so it cannot
+      #     record a profile itself either.
+      #
+      # So the only channel from this emulator to a commit is the log, and the payload has to fit
+      # the window. gzip takes a baseline profile to roughly a fifth of its size — it is thousands
+      # of lines sharing a handful of package prefixes — and base64 at 76 columns brings the whole
+      # file in at well under a thousand lines, head included.
+      #
+      # It is emitted last, after the uploads, for the same reason: whatever else this job prints,
+      # the payload stays inside the window.
+      #
+      # `gzip -n` so the bytes depend only on the profile and not on when it was compressed, and
+      # the step decodes its own output and compares the digest before printing it. A channel that
+      # carries a profile has to be checkable rather than trusted: a single mistyped rule is
+      # exactly the failure this whole gate exists to catch, since AGP drops a rule that matches
+      # nothing without a word. The `sha256` below is of the profile itself, so it verifies the
+      # round trip end to end — decode, decompress, commit, check.
+      - name: Profile this run generated
+        id: generated-profile
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          generated=(benchmark/build/outputs/**/*-baseline-prof.txt)
+          if [ ${#generated[@]} -eq 0 ]; then
+            echo "No profile was generated — the generator step above did not get that far."
+            exit 0
+          fi
+          for file in "${generated[@]}"; do
+            echo "$file"
+            echo "  sha256: $(sha256sum "$file" | cut -d' ' -f1)"
+            echo "  lines:  $(wc -l < "$file")"
+            echo "  bytes:  $(wc -c < "$file")"
+          done
+          echo
+          echo "The readable file is the generated-baseline-profile artifact. The block below is"
+          echo "the same bytes, for whoever cannot reach artifact storage. To rebuild it from a"
+          echo "saved copy of this log — the ^ and \$ anchors are load-bearing, or this very"
+          echo "paragraph matches too, and the API serves these lines with a timestamp prefix"
+          echo "that has to come off first:"
+          echo
+          echo "    sed -e 's/^[0-9-]*T[0-9:.]*Z //' job.log \\"
+          echo "      | sed -n '/^-----BEGIN BASELINE PROFILE GZIP BASE64-----\$/,/^-----END BASELINE PROFILE GZIP BASE64-----\$/p' \\"
+          echo "      | sed '1d;\$d' | base64 -d | gunzip > app/src/main/baseline-prof.txt"
+          echo "    sha256sum app/src/main/baseline-prof.txt   # must equal the sha256 above"
+          echo
+          for file in "${generated[@]}"; do
+            gzip -9 -n -c "$file" | base64 -w 76 > profile.b64
+            # Decoded here, before it is printed, so a channel that mangles the profile fails this
+            # job instead of handing somebody a plausible file to commit.
+            if [ "$(base64 -d profile.b64 | gunzip | sha256sum | cut -d' ' -f1)" \
+                 != "$(sha256sum "$file" | cut -d' ' -f1)" ]; then
+              echo "::error::base64 round trip did not reproduce $file"
+              exit 1
+            fi
+            echo "::group::$file (gzip, base64, $(wc -l < profile.b64) lines)"
+            echo "-----BEGIN BASELINE PROFILE GZIP BASE64-----"
+            cat profile.b64
+            echo "-----END BASELINE PROFILE GZIP BASE64-----"
+            echo "::endgroup::"
+            rm -f profile.b64
+          done
 
   build:
     name: Build · verify APK · shrink
