@@ -53,8 +53,14 @@ private const val FIRST_SCREEN_TIMEOUT_MS = 10_000L
  * here turns that into one failure naming the text that never appeared.
  */
 internal fun MacrobenchmarkScope.awaitFirstScreen() {
+    // `textContains` and not `text`: UiAutomator's exact matcher compares against the whole of the
+    // accessibility node's text, and the node here is the Button — Compose merges a button's
+    // descendants into one node, so what arrives is whatever that merge produced. It should be
+    // exactly this string and matching it exactly would be more precise, but "more precise" buys
+    // nothing when the alternative failure is a false negative on a gate whose round trip is an
+    // emulator boot. Nothing else on this screen contains it.
     val appeared = device.wait(
-        Until.hasObject(By.text(FIRST_SCREEN_TEXT)),
+        Until.hasObject(By.textContains(FIRST_SCREEN_TEXT)),
         FIRST_SCREEN_TIMEOUT_MS,
     )
     check(appeared) {

@@ -55,23 +55,53 @@ android {
 
     buildTypes {
         /*
-         * The variant that does the measuring, matched by name to `:app`'s `benchmark` build type.
+         * The two variants that do the work, matched by name to `:app`'s `benchmark` and
+         * `nonMinifiedBenchmark` build types.
          *
-         * A `com.android.test` module builds a variant per *its own* build type and matches each
-         * to the target project's by name, so this block is what makes `:app`'s `benchmark`
-         * variant reachable at all. It carries no `matchingFallbacks` on purpose: a fallback
-         * would quietly measure `:app`'s `release` or `minified` build the day somebody removed
-         * the `benchmark` build type from `app/build.gradle.kts`, and a startup benchmark against
-         * the wrong variant is a number that looks fine and means nothing. Without one, that edit
-         * fails the build and names the missing build type.
+         * A `com.android.test` module builds a variant per *its own* build type and matches each to
+         * the target project's by name, so these two blocks are what make `:app`'s benchmark
+         * variants reachable at all.
          *
-         * The stock `debug` and `release` variants are left in place and deliberately not
-         * filtered out with `beforeVariants`. `debug` is what carries this module through the
-         * gates every other module goes through — `compileDebugKotlin`, `lintDebug`, `detekt` and
-         * `resolveAllDependencies` are all unqualified in ci.yml, and `resolveAllDependencies`
-         * asserts it saw `debugCompileClasspath` specifically — so filtering it out would take
-         * this module out of every gate that can run without a device. Nothing assembles the
-         * `release` variant, here or anywhere else in this repository.
+         * ## matchingFallbacks, and why omitting it was wrong
+         *
+         * The first version of this file left `matchingFallbacks` off both, on the reasoning that
+         * `:app` has build types of exactly these names so no fallback could ever be needed — and
+         * that a fallback would quietly measure the wrong variant if somebody deleted one of them.
+         * CI falsified that in a way worth writing down, because the error names none of this:
+         *
+         *     Could not determine the dependencies of task
+         *     ':benchmark:connectedNonMinifiedBenchmarkAndroidTest'
+         *       ... EdgeState.calculateTargetConfigurations
+         *
+         * The missing step in the reasoning is that this module does not resolve only `:app`. A test
+         * module compiles and runs against the tested app's whole graph, so the request carries
+         * `BuildTypeAttr = nonMinifiedBenchmark` all the way down to `:core:common` and the other
+         * fourteen library modules — and a library module has `debug` and `release` and nothing
+         * else. `:app`'s own `matchingFallbacks` governs `:app`'s configurations, not this module's.
+         * The macrobenchmark documentation says to put the property in both modules for exactly this
+         * reason; the error it quotes is the same one, one project further along.
+         *
+         * `debug` and not `release`, so that these variants resolve the same library halves `:app`'s
+         * own benchmark variants do — `app/build.gradle.kts` falls back to `debug` because `release`
+         * cannot be built in this repository. Falling back differently here would compile the test
+         * APK against one set of library classes and install it beside an app built from another.
+         *
+         * The concern that motivated leaving it out is real but misplaced: deleting `:app`'s
+         * `benchmark` build type would now silently fall back to `debug` rather than fail. What
+         * catches that is `scripts/verify-startup-budget.py`, which fails on a run whose
+         * `warmupIterations` or iteration count does not match the budget, and
+         * `BaselineProfileMode.Require`, which fails on an app with no profile compiled in — a
+         * debuggable `debug` build would trip both.
+         *
+         * ## Why the stock variants stay
+         *
+         * `debug` and `release` are left in place and deliberately not filtered out with
+         * `beforeVariants`. `debug` is what carries this module through the gates every other module
+         * goes through — `compileDebugKotlin`, `lintDebug`, `detekt` and `resolveAllDependencies`
+         * are all unqualified in ci.yml, and `resolveAllDependencies` asserts it saw
+         * `debugCompileClasspath` specifically — so filtering it out would take this module out of
+         * every gate that can run without a device. Nothing assembles the `release` variant, here
+         * or anywhere else in this repository.
          */
         create("benchmark") {
             // The *test* APK, which is not the thing being measured. Debuggable so a failing
@@ -80,6 +110,7 @@ android {
             // the one key every checkout has, and an unsigned test APK will not install.
             isDebuggable = true
             signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
         }
 
         /*
@@ -94,6 +125,7 @@ android {
         create("nonMinifiedBenchmark") {
             isDebuggable = true
             signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
         }
     }
 }
