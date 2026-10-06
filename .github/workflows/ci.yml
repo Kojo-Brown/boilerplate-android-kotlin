@@ -218,14 +218,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 scripts/scan-dependencies.test.py
 
-      # `:app:licenseeDebug` and not the unqualified task: Licensee is applied to `:app` alone,
-      # whose runtime classpath is the shipped set and a superset of every other module's.
+      # `:app:licenseeAndroidDebug` and not the unqualified task: Licensee is applied to `:app`
+      # alone, whose runtime classpath is the shipped set and a superset of every other module's.
       # `debug` because `release` is deliberately unbuildable in this repository — the reasoning
       # is in app/build.gradle.kts next to the `licensee { }` block.
+      #
+      # The full name matters. Gradle's camel-case abbreviation happily matches `licenseeDebug` to
+      # this task, which is how the first version of this gate ran a task its own build file had
+      # disabled and still reported BUILD SUCCESSFUL over a SKIPPED line.
       - name: Licence gate
         id: licences
         if: ${{ !cancelled() }}
-        run: ./gradlew :app:licenseeDebug --stacktrace
+        run: ./gradlew :app:licenseeAndroidDebug --stacktrace
 
       # Licensee names the artifact and the licence it could not accept in its own report, and
       # that report is the answer to "which entry is missing from the allow list". Printing it
@@ -233,7 +237,7 @@ jobs:
       - name: What Licensee rejected
         if: ${{ failure() && steps.licences.conclusion == 'failure' }}
         run: |
-          report=app/build/reports/licensee/debug/validation.txt
+          report=app/build/reports/licensee/androidDebug/validation.txt
           if [ -f "$report" ]; then
             echo "::group::$report"
             cat "$report"

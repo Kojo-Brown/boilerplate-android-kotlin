@@ -719,11 +719,22 @@ licensee {
  * check, so `./gradlew check` gates licences without touching the release classpath.
  *
  * Matched by name rather than by task type so that this file does not need the plugin's task
- * class on its compile classpath. `licenseeDebug` is the name Licensee derives from the variant
- * name; if AGP or the plugin ever stops producing it, `:app:licenseeDebug` in ci.yml fails with
- * "task not found" rather than quietly passing.
+ * class on its compile classpath.
+ *
+ * `licenseeAndroidDebug` and not `licenseeDebug`: for an Android project Licensee names each
+ * variant's task `"licenseeAndroid" + variantName.capitalized()` and writes its report to
+ * `build/reports/licensee/android<Variant>/`. That name is worth a comment because getting it
+ * wrong does not fail loudly. Gradle's camel-case task abbreviation matches `licenseeDebug` to
+ * `licenseeAndroidDebug`, so the first version of this gate invoked the real task, found it
+ * disabled by the filter below — the name it excluded did not match the name it meant to keep —
+ * and reported BUILD SUCCESSFUL over `Task :app:licenseeAndroidDebug SKIPPED`. The licence gate
+ * passed without having run.
+ *
+ * What caught it is `scripts/scan-dependencies.py` refusing to scan a report that is not there,
+ * which is the backstop for exactly this: a gate that produces no output is not a gate that
+ * found nothing.
  */
-val licenceGateTask = "licenseeDebug"
+val licenceGateTask = "licenseeAndroidDebug"
 
 tasks.matching {
     it.name.startsWith("licensee") && it.name != "licensee" && it.name != licenceGateTask

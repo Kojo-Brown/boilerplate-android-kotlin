@@ -179,7 +179,7 @@ Two workflows run on every push to `main` and every pull request.
 |-----|------|
 | **compile · lint · detekt · test** | `compileDebugKotlin`, `lintDebug`, `detekt`, `testDebugUnitTest` |
 | **Build · verify APK · shrink** (needs the gates) | `assembleDebug`, then `scripts/verify-apk.sh`, then `assembleMinified` and `scripts/verify-r8-mapping.py` |
-| **licences · known vulnerabilities** | `:app:licenseeDebug`, then `scripts/scan-dependencies.py` over the report it writes |
+| **licences · known vulnerabilities** | `:app:licenseeAndroidDebug`, then `scripts/scan-dependencies.py` over the report it writes |
 
 All four gates run even when an earlier one fails, so a single run reports
 every result rather than stopping at the first.
@@ -276,7 +276,7 @@ date. That file is checked in both directions, so an entry cannot outlive the
 finding it suppresses, and it is empty today.
 
 ```bash
-./gradlew :app:licenseeDebug
+./gradlew :app:licenseeAndroidDebug
 python3 scripts/scan-dependencies.py
 ```
 

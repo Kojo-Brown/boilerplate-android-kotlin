@@ -20,7 +20,7 @@ reading first.
 |---|---|
 | `libs.plugins.licensee` on `:app` | Licensee 1.12.0. Resolves `:app`'s debug runtime classpath, reads each artifact's POM, and validates the licences against the allow list. |
 | `licensee { }` in `app/build.gradle.kts` | The licence policy: three SPDX identifiers and one URL. |
-| `app/build/reports/licensee/debug/artifacts.json` | Every external module in the shipped set, with its licences. Licensee's output and the scanner's input. |
+| `app/build/reports/licensee/androidDebug/artifacts.json` | Every external module in the shipped set, with its licences. Licensee's output and the scanner's input. |
 | `scripts/scan-dependencies.py` | Queries OSV.dev for every coordinate in that report. |
 | `config/supply-chain/vulnerability-allowlist.txt` | Vulnerabilities this project ships with anyway, each with a reason and an expiry. |
 | `scripts/scan-dependencies.test.py` | The scanner's failure paths, driven against a local stand-in for the OSV API. |
@@ -123,6 +123,14 @@ Five things it checks, and the first is the one that matters most:
 5. **An unreachable database fails.** A scanner that passes when it could not ask is worse than
    no scanner.
 
+The first of those is not hypothetical. For an Android project Licensee names the task
+`licenseeAndroid<Variant>` and the report directory `android<Variant>`, and Gradle's camel-case
+abbreviation matches `licenseeDebug` to `licenseeAndroidDebug` — so the first version of this
+gate invoked the real task, found it switched off by a filter that excluded the wrong name, and
+reported `BUILD SUCCESSFUL` over `Task :app:licenseeAndroidDebug SKIPPED`. The licence gate
+passed without running, and the only thing that said so was the scanner refusing to read a
+report that was not there.
+
 Withdrawn advisories are not findings: a build that goes red for an advisory its own source has
 retracted is a build nobody trusts.
 
@@ -147,7 +155,7 @@ with the reason for the pin beside it, that is a change with a written trail eit
 ## Running it
 
 ```bash
-./gradlew :app:licenseeDebug
+./gradlew :app:licenseeAndroidDebug
 python3 scripts/scan-dependencies.py
 ```
 

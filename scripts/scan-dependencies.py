@@ -49,7 +49,7 @@ Usage:
 
 Producing what it reads:
 
-    ./gradlew :app:licenseeDebug
+    ./gradlew :app:licenseeAndroidDebug
 """
 
 from __future__ import annotations
@@ -65,7 +65,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_ARTIFACTS = Path("app/build/reports/licensee/debug/artifacts.json")
+# `androidDebug` and not `debug`: for an Android project Licensee names both the task and the
+# report directory after `"android" + variantName.capitalized()`.
+DEFAULT_ARTIFACTS = Path("app/build/reports/licensee/androidDebug/artifacts.json")
 DEFAULT_ALLOWLIST = Path("config/supply-chain/vulnerability-allowlist.txt")
 DEFAULT_OSV_BASE_URL = "https://api.osv.dev"
 
@@ -135,7 +137,7 @@ def read_coordinates(paths: list[Path]) -> list[Coordinate]:
     for path in paths:
         if not path.is_file():
             raise ScanError(
-                f"{path} does not exist. It is written by `./gradlew :app:licenseeDebug`; "
+                f"{path} does not exist. It is written by `./gradlew :app:licenseeAndroidDebug`; "
                 "without it this scan has no dependency list and cannot report anything.",
             )
 

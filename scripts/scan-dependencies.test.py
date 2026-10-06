@@ -31,7 +31,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SCAN = HERE / "scan-dependencies.py"
 
-ARTIFACTS_PATH = Path("app/build/reports/licensee/debug/artifacts.json")
+# Must track scan-dependencies.py's own default: Licensee names an Android variant's report
+# directory after `"android" + variantName.capitalized()`, so `androidDebug` and not `debug`.
+ARTIFACTS_PATH = Path("app/build/reports/licensee/androidDebug/artifacts.json")
 ALLOWLIST_PATH = Path("config/supply-chain/vulnerability-allowlist.txt")
 
 # A plausible slice of what Licensee writes for :app's debug runtime classpath: the fields this
@@ -255,7 +257,7 @@ def main() -> int:
         "a missing artifacts.json fails rather than scanning nothing",
         write_artifacts=False,
         expect_exit=1,
-        expect_in_output="licenseeDebug",
+        expect_in_output="licenseeAndroidDebug",
     )
 
     check(
