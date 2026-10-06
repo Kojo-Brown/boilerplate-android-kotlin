@@ -3,6 +3,16 @@ agp = "8.7.3"
 kotlin = "2.1.0"
 ksp = "2.1.0-1.0.29"
 detekt = "1.23.8"
+# Licensee, the licence half of the dependency-and-licence scanning gate. 1.12.0 and not 1.13.0
+# or 1.14.x, for the reason the rest of this catalog is pinned the way it is: it is the release
+# contemporary with this toolchain. 1.12.0 ships `kotlin-stdlib` 2.0.21 and
+# `kotlinx-serialization-json` 1.7.3 — the same serialization release this project already pins
+# above — and the only AGP surface its bytecode touches is `AndroidComponentsExtension.onVariants`
+# plus `Variant`, both of which AGP 8.7.3 has. 1.13.0 and 1.14.1 additionally reach for
+# `Variant.sources` / `SourceDirectories` to copy the report into an asset directory, which is a
+# feature this gate does not want and an AGP surface it does not need. 1.12.0 also still carries
+# the plugin's own "requires Gradle 8.0 or later" guard, which the wrapper's 8.10.2 satisfies.
+licensee = "1.12.0"
 coreKtx = "1.15.0"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
@@ -343,3 +353,9 @@ ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+# Applied to `:app` only. The licence question is about what ships, and `:app` is the one
+# module whose runtime classpath is the whole shipped set — every other module's is a
+# subset of it, so applying this fifteen times would ask the same question fifteen times
+# and answer it once. The marker artifact resolves from `mavenCentral()`, which
+# settings.gradle.kts already lists in `pluginManagement`.
+licensee = { id = "app.cash.licensee", version.ref = "licensee" }
