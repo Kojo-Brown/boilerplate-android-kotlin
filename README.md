@@ -179,6 +179,7 @@ Two workflows run on every push to `main` and every pull request.
 |-----|------|
 | **compile · lint · detekt · test** | `compileDebugKotlin`, `lintDebug`, `detekt`, `testDebugUnitTest` |
 | **Build · verify APK · shrink** (needs the gates) | `assembleDebug`, then `scripts/verify-apk.sh`, then `assembleMinified` and `scripts/verify-r8-mapping.py` |
+| **licences · known vulnerabilities** | `:app:licenseeDebug`, then `scripts/scan-dependencies.py` over the report it writes |
 
 All four gates run even when an earlier one fails, so a single run reports
 every result rather than stopping at the first.
@@ -254,6 +255,41 @@ The debug build needs no secrets. A signed release build would add
 `KEYSTORE_FILE`, `KEY_ALIAS`, `KEY_PASSWORD` and `STORE_PASSWORD` to the
 repository secret store and extend the `build` job — none of those belong in
 the repository.
+
+### Licences and known vulnerabilities
+
+An Android app is mostly other people's code: seventy coordinates are declared in
+`gradle/libs.versions.toml` and several hundred modules end up in the APK, almost
+all of them transitively. Two questions follow, and one job asks both of a single
+resolution of `:app`'s debug runtime classpath.
+
+Licensee reads every artifact's POM and fails on a licence outside the allow list
+— `Apache-2.0`, `BSD-3-Clause`, `MIT`, plus the Android Software Development Kit
+License by URL, because Play services, Play Integrity and ML Kit ship under a
+licence that has no SPDX identifier. `scripts/scan-dependencies.py` then takes
+the report Licensee wrote and queries OSV.dev for every coordinate in it, failing
+on anything the database reports against the exact resolved version.
+
+A vulnerability this project ships with anyway goes in
+`config/supply-chain/vulnerability-allowlist.txt` with a reason and an expiry
+date. That file is checked in both directions, so an entry cannot outlive the
+finding it suppresses, and it is empty today.
+
+```bash
+./gradlew :app:licenseeDebug
+python3 scripts/scan-dependencies.py
+```
+
+`scripts/scan-dependencies.test.py` drives the scanner through each failure path
+against a local stand-in for the OSV API — a finding that must fail the build, an
+allowlist entry that must stop it, an expiry that must start it again, a
+withdrawn advisory, a truncated batch response and an unreachable database. It
+needs no Gradle, no SDK and no network, and runs in CI ahead of the Gradle work.
+
+Not covered: build-time and test-only dependencies, which ship in nothing; call
+reachability, which is a human's argument to write into an allowlist entry; and
+a NOTICE screen, which `artifacts.json` is the right input for and which nothing
+here builds yet. [`docs/supply-chain.md`](./docs/supply-chain.md) has the rest.
 
 ### `dependency-resolution.yml` — resolution only
 

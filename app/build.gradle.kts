@@ -17,6 +17,10 @@ import java.util.Properties
 plugins {
     id("boilerplate.android.application.compose")
     id("boilerplate.hilt")
+    // The licence half of SPEC.md Phase 11 item 6. Applied here and in no other module: see the
+    // `licensee { }` block near the bottom of this file for why `:app` is the only one that can
+    // answer the question, and docs/supply-chain.md for the gate as a whole.
+    alias(libs.plugins.licensee)
 }
 
 /*
@@ -634,6 +638,96 @@ tasks.register("writeDebugApkIdentity") {
             """.trimIndent() + "\n",
         )
     }
+}
+
+/*
+ * SPEC.md Phase 11 item 6, licence half: every third-party artifact that ships inside the APK
+ * carries a licence this project has decided it can ship, or the build fails.
+ *
+ * ## Why this module and no other
+ *
+ * The question is about the artifact a user installs, and `:app` is the only module that knows
+ * what goes into one. A `:feature:*` module's runtime classpath is a subset of this one's, so
+ * applying Licensee fifteen times would ask the same question fifteen times and answer it once —
+ * and it would still miss nothing that this does, because a transitive dependency of any module
+ * reaches `:app`'s classpath by definition. Project dependencies are not licence-checked at all:
+ * Licensee resolves the external modules and skips `project(...)` components, which is right,
+ * because the licence of this repository's own code is this repository's own business.
+ *
+ * ## Why `debug` is the variant that is gated
+ *
+ * `release` cannot be built here on purpose — `:data` fails `compileReleaseKotlin` while
+ * `gradle/certificate-pins.properties` and `gradle/play-integrity.properties` are deliberately
+ * empty — so a gate wired to `release` would be a gate that never produces a result. `debug` is
+ * the variant every other gate in this repository runs on, and for this question it is also a
+ * superset: every dependency in this project is declared `implementation`, so no artifact is in
+ * `releaseRuntimeClasspath` without being in `debugRuntimeClasspath`. The non-debug tasks are
+ * disabled below rather than left to be invoked by accident, which also keeps `./gradlew check`
+ * — which Licensee attaches itself to — off the release classpath.
+ *
+ * ## The allow list
+ *
+ * Three SPDX identifiers and one URL, and the URL is the interesting entry. Google ships
+ * Play services, Play Integrity and ML Kit under the Android Software Development Kit License,
+ * which has no SPDX identifier at all — so Licensee reports it as an *unknown* licence carrying
+ * only the URL from the POM, and the only way to accept it is by that URL. It is accepted
+ * because it is the licence every Android app that uses Play services already ships under; it
+ * is pinned by URL rather than waved through with `ignoreDependencies` so that a Google
+ * artifact appearing under some *other* non-SPDX licence still fails.
+ *
+ * Nothing permissive is added speculatively. An `allow` that matches no artifact is reported by
+ * `unusedAction`, which is `LOG` below and cannot be `FAIL` — the plugin offers only `LOG` and
+ * `IGNORE` — so an entry that stops being needed shows up in the log rather than failing the
+ * build. docs/supply-chain.md records that as a known gap.
+ */
+licensee {
+    // Everything AndroidX, JetBrains, Square, Dagger and Google's non-SDK-licensed artifacts
+    // publish under.
+    allow("Apache-2.0")
+    // protobuf-javalite, the runtime half of `:core:datastore-proto`'s schema.
+    allow("BSD-3-Clause")
+    // org.checkerframework:checker-qual, which arrives transitively through Guava's annotations.
+    allow("MIT")
+
+    // `it.because` and not a bare `because`: Licensee declares this overload as
+    // `Action<AllowUrlOptions>`, and Kotlin's SAM conversion hands the options in as the lambda's
+    // parameter rather than as its receiver. The Groovy form in Licensee's own README reads
+    // `because '…'` because a Groovy closure gets the delegate instead.
+    allowUrl("https://developer.android.com/studio/terms.html") {
+        it.because(
+            "The Android Software Development Kit License, which has no SPDX identifier. It " +
+                "covers com.google.android.gms:*, com.google.android.play:integrity and " +
+                "com.google.mlkit:* — the barcode scanner, text recognition and Play Integrity " +
+                "this app is built on. Accepting it by URL rather than ignoring the groups " +
+                "keeps a Google artifact under any other non-SPDX licence failing.",
+        )
+    }
+
+    // The default, written out because it is the whole point: a licence outside the list above
+    // fails the task rather than printing a warning into a log nobody reads.
+    violationAction(app.cash.licensee.ViolationAction.FAIL)
+    // `LOG` and not `IGNORE`: an allow entry that no longer matches anything is not worth
+    // failing a build over, but it is worth saying out loud.
+    unusedAction(app.cash.licensee.UnusedAction.LOG)
+}
+
+/*
+ * The gate runs on `debug` and on nothing else, for the reason the header above gives. Disabling
+ * the other variants' tasks rather than deleting them is deliberate: `licensee` — the aggregate
+ * task Licensee registers, and the one `check` depends on — still exists and still runs the debug
+ * check, so `./gradlew check` gates licences without touching the release classpath.
+ *
+ * Matched by name rather than by task type so that this file does not need the plugin's task
+ * class on its compile classpath. `licenseeDebug` is the name Licensee derives from the variant
+ * name; if AGP or the plugin ever stops producing it, `:app:licenseeDebug` in ci.yml fails with
+ * "task not found" rather than quietly passing.
+ */
+val licenceGateTask = "licenseeDebug"
+
+tasks.matching {
+    it.name.startsWith("licensee") && it.name != "licensee" && it.name != licenceGateTask
+}.configureEach {
+    enabled = false
 }
 
 /*

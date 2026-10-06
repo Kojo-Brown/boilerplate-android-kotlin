@@ -171,6 +171,95 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  supply-chain:
+    name: licences · known vulnerabilities
+    runs-on: ubuntu-latest
+    # SPEC.md Phase 11 item 6, both halves, in one job because they are two questions about one
+    # list: Licensee resolves `:app`'s debug runtime classpath and writes every external module in
+    # it to a report, the licence check validates that report, and scan-dependencies.py scans the
+    # same file against OSV. Splitting them across two runners would resolve the graph twice to
+    # ask about it twice.
+    #
+    # Not `needs: [gates]`. This resolves a configuration and reads POMs; it compiles nothing of
+    # this repository's own, so there is no reason to queue it behind twenty minutes of Kotlin —
+    # and a licence or CVE finding is worth reporting even on a commit that does not compile.
+    #
+    # No compilation, so this is Gradle configuration plus POM downloads: a few minutes on a cold
+    # cache. Twenty is well clear of it, and past that the job is stuck rather than slow.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # `packages` defaults to `tools platform-tools`, and `tools` is the obsolete SDK
+          # package Google removed from the repository years ago — cmdline-tools replaced it.
+          # The action runs `sdkmanager tools` regardless, which now answers "Failed to find
+          # package 'tools'" and exits 1, so this step fails on every run of both workflows
+          # whatever the commit contains. Naming the one package that still exists keeps the
+          # behaviour and drops the dead half.
+          packages: 'platform-tools'
+
+      # Seconds, no SDK, no Gradle and no network, and it runs before the Gradle work so a broken
+      # scanner is reported immediately rather than after the step it would have gated. The
+      # failure paths are the reason that script exists and a clean dependency graph exercises
+      # none of them.
+      - name: scan-dependencies.py self-test
+        if: ${{ !cancelled() }}
+        run: python3 scripts/scan-dependencies.test.py
+
+      # `:app:licenseeDebug` and not the unqualified task: Licensee is applied to `:app` alone,
+      # whose runtime classpath is the shipped set and a superset of every other module's.
+      # `debug` because `release` is deliberately unbuildable in this repository — the reasoning
+      # is in app/build.gradle.kts next to the `licensee { }` block.
+      - name: Licence gate
+        id: licences
+        if: ${{ !cancelled() }}
+        run: ./gradlew :app:licenseeDebug --stacktrace
+
+      # Licensee names the artifact and the licence it could not accept in its own report, and
+      # that report is the answer to "which entry is missing from the allow list". Printing it
+      # here turns a two-round diagnosis into one.
+      - name: What Licensee rejected
+        if: ${{ failure() && steps.licences.conclusion == 'failure' }}
+        run: |
+          report=app/build/reports/licensee/debug/validation.txt
+          if [ -f "$report" ]; then
+            echo "::group::$report"
+            cat "$report"
+            echo "::endgroup::"
+          else
+            echo "No $report — the failure above happened before validation ran, so it is"
+            echo "about resolving the classpath rather than about a licence."
+          fi
+
+      # Runs even when the licence gate failed, for the reason every gate in the `gates` job
+      # does: one run should report both results rather than stopping at the first. Licensee
+      # writes artifacts.json before it validates, so the scan has its input either way — and if
+      # it does not, the scanner says so and fails rather than reporting a clean graph.
+      - name: Known-vulnerability gate
+        if: ${{ !cancelled() }}
+        run: python3 scripts/scan-dependencies.py
+
+      - name: Upload the licence report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: licence-report
+          path: app/build/reports/licensee/
+          if-no-files-found: ignore
+          retention-days: 7
+
   upload-signing:
     name: upload signing
     runs-on: ubuntu-latest
