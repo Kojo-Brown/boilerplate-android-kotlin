@@ -689,12 +689,13 @@ licensee {
     // org.checkerframework:checker-qual, which arrives transitively through Guava's annotations.
     allow("MIT")
 
-    // `it.because` and not a bare `because`: Licensee declares this overload as
-    // `Action<AllowUrlOptions>`, and Kotlin's SAM conversion hands the options in as the lambda's
-    // parameter rather than as its receiver. The Groovy form in Licensee's own README reads
-    // `because '…'` because a Groovy closure gets the delegate instead.
+    // A bare `because` and not `it.because`, even though Licensee declares this overload as
+    // `Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler
+    // plugin for `org.gradle.api.Action`, so the lambda gets the options as its *receiver* and
+    // there is no `it` to qualify. That is why every configuration lambda in a `.gradle.kts`
+    // file reads this way.
     allowUrl("https://developer.android.com/studio/terms.html") {
-        it.because(
+        because(
             "The Android Software Development Kit License, which has no SPDX identifier. It " +
                 "covers com.google.android.gms:*, com.google.android.play:integrity and " +
                 "com.google.mlkit:* — the barcode scanner, text recognition and Play Integrity " +

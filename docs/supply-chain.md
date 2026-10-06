@@ -70,7 +70,7 @@ licensee {
     allow("Apache-2.0")
     allow("BSD-3-Clause")
     allow("MIT")
-    allowUrl("https://developer.android.com/studio/terms.html") { it.because("…") }
+    allowUrl("https://developer.android.com/studio/terms.html") { because("…") }
     violationAction(ViolationAction.FAIL)
     unusedAction(UnusedAction.LOG)
 }
@@ -91,10 +91,10 @@ two differ in exactly the case that matters: a Google artifact appearing under s
 non-SPDX licence still fails the URL form, and would have been silently accepted by the group
 form.
 
-`it.because` rather than a bare `because`: Licensee declares that overload as
-`Action<AllowUrlOptions>`, so Kotlin's SAM conversion hands the options in as the lambda's
-parameter. The Groovy form in Licensee's own README reads `because '…'` because a Groovy
-closure gets the delegate instead.
+A bare `because` rather than `it.because`, even though Licensee declares that overload as
+`Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler plugin
+for `org.gradle.api.Action`, so the lambda gets the options as its receiver and there is no
+`it` to qualify.
 
 Nothing permissive is added speculatively. An `allow` that no longer matches anything is reported
 by `unusedAction`, which is `LOG` below because the plugin offers only `LOG` and `IGNORE` — see
