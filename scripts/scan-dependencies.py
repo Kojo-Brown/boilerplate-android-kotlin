@@ -184,14 +184,23 @@ def _coordinate_from(entry: Any, path: Path, index: int) -> Coordinate:
     return Coordinate(fields["groupId"], fields["artifactId"], fields["version"])
 
 
-def read_licences(paths: list[Path]) -> dict[str, int]:
-    """Count the licences Licensee recorded, for the summary. Never a failure condition here.
+def read_licences(paths: list[Path]) -> tuple[dict[str, int], list[tuple[str, list[str]]]]:
+    """Summarise the licences Licensee recorded. Never a failure condition here.
 
-    The licence *decision* is Licensee's — `violationAction(FAIL)` in app/build.gradle.kts — and
-    duplicating it would mean two policies to keep in step. This is the same data summarised in
-    the same log, so one run of the gate says what it shipped and under what.
+    Returns the per-licence counts and, separately, the artifacts that declare more than one
+    licence. The second half exists because the first is otherwise quietly confusing: the counts
+    are per *licence*, so they sum to more than the number of modules scanned whenever a POM
+    carries two, and an unexplained 222-over-221 reads as a bug in this script. It also says
+    something worth seeing — Licensee accepts an artifact when any one of its licences is allowed,
+    so a dual-licensed module can pass on one that this project allows while declaring another it
+    does not.
+
+    The licence *decision* stays Licensee's — `violationAction(FAIL)` in app/build.gradle.kts —
+    because duplicating it would mean two policies to keep in step. This is the same data
+    summarised in the same log, so one run of the gate says what shipped and under what.
     """
     counts: dict[str, int] = {}
+    multiple: list[tuple[str, list[str]]] = []
 
     for path in paths:
         if not path.is_file():
@@ -199,9 +208,9 @@ def read_licences(paths: list[Path]) -> dict[str, int]:
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return {}
+            return {}, []
         if not isinstance(report, list):
-            return {}
+            return {}, []
 
         for entry in report:
             if not isinstance(entry, dict):
@@ -223,7 +232,13 @@ def read_licences(paths: list[Path]) -> dict[str, int]:
             for name in names or ["none declared"]:
                 counts[name] = counts.get(name, 0) + 1
 
-    return counts
+            if len(names) > 1:
+                coordinate = ":".join(
+                    str(entry.get(key, "?")) for key in ("groupId", "artifactId", "version")
+                )
+                multiple.append((coordinate, names))
+
+    return counts, sorted(multiple)
 
 
 def read_allowlist(path: Path) -> list[AllowEntry]:
@@ -594,11 +609,21 @@ def main() -> int:
             f"{', '.join(str(path) for path in arguments.artifacts)}",
         )
 
-        licences = read_licences(arguments.artifacts)
+        licences, multiple = read_licences(arguments.artifacts)
         if licences:
             print("Licences Licensee recorded for them:")
             for name, count in sorted(licences.items(), key=lambda item: (-item[1], item[0])):
                 print(f"  {count:4d}  {name}")
+            # Why the counts above can sum to more than the module count. Without this the
+            # difference looks like an arithmetic bug in this script rather than a POM with two
+            # licences in it.
+            if multiple:
+                print(
+                    f"{len(multiple)} of them declare more than one licence, which is why the "
+                    "counts above sum to more than the module count:",
+                )
+                for coordinate, names in multiple:
+                    print(f"  {coordinate}: {', '.join(names)}")
 
         hits = query_vulnerabilities(coordinates, arguments.osv_base_url, arguments.timeout)
         findings = collect_findings(hits, arguments.osv_base_url, arguments.timeout)

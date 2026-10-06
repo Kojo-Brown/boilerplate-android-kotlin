@@ -263,12 +263,15 @@ An Android app is mostly other people's code: seventy coordinates are declared i
 all of them transitively. Two questions follow, and one job asks both of a single
 resolution of `:app`'s debug runtime classpath.
 
-Licensee reads every artifact's POM and fails on a licence outside the allow list
-— `Apache-2.0`, `BSD-3-Clause`, `MIT`, plus the Android Software Development Kit
-License by URL, because Play services, Play Integrity and ML Kit ship under a
-licence that has no SPDX identifier. `scripts/scan-dependencies.py` then takes
-the report Licensee wrote and queries OSV.dev for every coordinate in it, failing
-on anything the database reports against the exact resolved version.
+Licensee reads every artifact's POM and fails on a licence outside the allow
+list. The 221 modules on `:app`'s debug runtime classpath turn out to be 197
+`Apache-2.0`, one `BSD-3-Clause`, and 23 under four Google service agreements —
+the Android SDK License, the ML Kit terms, Play Integrity's and Play Core's —
+none of which has an SPDX identifier, so each is allowed by the URL in its POM.
+`scripts/scan-dependencies.py` then takes the report Licensee wrote and queries
+OSV.dev for every coordinate in it, failing on anything the database reports
+against the exact resolved version. Today that is 221 modules scanned and no
+findings.
 
 A vulnerability this project ships with anyway goes in
 `config/supply-chain/vulnerability-allowlist.txt` with a reason and an expiry

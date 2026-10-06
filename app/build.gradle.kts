@@ -681,26 +681,72 @@ tasks.register("writeDebugApkIdentity") {
  * build. docs/supply-chain.md records that as a known gap.
  */
 licensee {
-    // Everything AndroidX, JetBrains, Square, Dagger and Google's non-SDK-licensed artifacts
-    // publish under.
+    // 197 of the 221 modules on the classpath: everything AndroidX, JetBrains, Square and
+    // Dagger publish, plus the Google artifacts that are not behind a service agreement.
     allow("Apache-2.0")
-    // protobuf-javalite, the runtime half of `:core:datastore-proto`'s schema.
+    // One module: protobuf-javalite, the runtime half of `:core:datastore-proto`'s schema.
     allow("BSD-3-Clause")
-    // org.checkerframework:checker-qual, which arrives transitively through Guava's annotations.
-    allow("MIT")
+    //
+    // `allow("MIT")` was here for `org.checkerframework:checker-qual`, on the assumption it
+    // arrives through Guava's annotations. It does not — the first run of this gate answered
+    // "Allowed SPDX identifier 'MIT' is unused", and an entry that matches nothing is exactly
+    // what this block says it does not carry. Removed rather than kept for a dependency that
+    // might show up one day: the day it does, this gate says so.
 
-    // A bare `because` and not `it.because`, even though Licensee declares this overload as
-    // `Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler
-    // plugin for `org.gradle.api.Action`, so the lambda gets the options as its *receiver* and
-    // there is no `it` to qualify. That is why every configuration lambda in a `.gradle.kts`
-    // file reads this way.
+    /*
+     * Four URLs, 23 modules between them, and all four are the same decision: Google ships these
+     * under a service agreement rather than an open-source licence, so none of them has an SPDX
+     * identifier and the only handle Licensee has on them is the URL in the POM. Each is accepted
+     * because this app uses the service it covers — remove the feature and the entry goes with it.
+     *
+     * By URL and not `ignoreDependencies("com.google.mlkit")`, because the two differ in exactly
+     * the case that matters: the group form would also accept these artifacts if a future release
+     * came under some *other* non-SPDX licence, and the URL form still fails that. Which URL
+     * covers which artifact is below, as reported by the first run of this gate.
+     *
+     * A bare `because` and not `it.because`, even though Licensee declares the overload as
+     * `Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler
+     * plugin for `org.gradle.api.Action`, so the lambda gets the options as its *receiver* and
+     * there is no `it` to qualify.
+     */
     allowUrl("https://developer.android.com/studio/terms.html") {
         because(
-            "The Android Software Development Kit License, which has no SPDX identifier. It " +
-                "covers com.google.android.gms:*, com.google.android.play:integrity and " +
-                "com.google.mlkit:* — the barcode scanner, text recognition and Play Integrity " +
-                "this app is built on. Accepting it by URL rather than ignoring the groups " +
-                "keeps a Google artifact under any other non-SPDX licence failing.",
+            "The Android Software Development Kit License. Eleven modules: " +
+                "com.google.android.gms:play-services-{auth,auth-api-phone,auth-base," +
+                "auth-blockstore,base,basement,fido,identity-credentials,tasks}, " +
+                "com.google.android.libraries.identity.googleid:googleid and " +
+                "com.google.android.odml:image — Credential Manager sign-in and the Play " +
+                "services substrate the rest of these sit on.",
+        )
+    }
+
+    allowUrl("https://developers.google.com/ml-kit/terms") {
+        because(
+            "The ML Kit Terms of Service. Ten modules: com.google.mlkit:{barcode-scanning," +
+                "barcode-scanning-common,common,text-recognition," +
+                "text-recognition-bundled-common,vision-common,vision-interfaces} and " +
+                "com.google.android.gms:play-services-mlkit-{barcode-scanning," +
+                "text-recognition,text-recognition-common}. These are :feature:scanner and " +
+                ":feature:textrecognition — the two screens whose whole job is on-device " +
+                "vision, so this is the licence that comes with having them at all.",
+        )
+    }
+
+    allowUrl("https://developer.android.com/google/play/integrity/overview#tos") {
+        because(
+            "The Play Integrity API Terms of Service. One module, " +
+                "com.google.android.play:integrity, which is the tamper check — the attestation " +
+                "is a Google service call, and its terms are what using the service costs. " +
+                "See docs/root-detection.md.",
+        )
+    }
+
+    allowUrl("https://developer.android.com/guide/playcore/license") {
+        because(
+            "The Play Core Software Development Kit Terms of Service. One module, " +
+                "com.google.android.play:core-common, which nothing here asks for directly: it " +
+                "arrives transitively under com.google.android.play:integrity above. Listed on " +
+                "its own anyway, because it is a separate agreement and a separate decision.",
         )
     }
 

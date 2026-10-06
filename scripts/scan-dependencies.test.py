@@ -63,10 +63,17 @@ CLEAN_ARTIFACTS = [
         "version": "17.3.0",
         "name": "ML Kit Barcode Scanning",
         "spdxLicenses": [],
+        # Two licences on one artifact, which is what the real ML Kit vision graph looks like:
+        # Licensee validates against whichever one is allowed, and the summary has to account
+        # for the other or its per-licence counts read as an arithmetic bug.
         "unknownLicenses": [
             {
-                "name": "Android Software Development Kit License",
-                "url": "https://developer.android.com/studio/terms.html",
+                "name": "ML Kit Terms of Service",
+                "url": "https://developers.google.com/ml-kit/terms",
+            },
+            {
+                "name": "libyuv",
+                "url": "https://chromium.googlesource.com/libyuv/libyuv/+/main/README.chromium",
             },
         ],
     },
@@ -250,7 +257,19 @@ def main() -> int:
     check(
         "the licence summary names the non-SPDX licence as well as the SPDX ones",
         expect_exit=0,
-        expect_in_output="non-SPDX: https://developer.android.com/studio/terms.html",
+        expect_in_output="non-SPDX: https://developers.google.com/ml-kit/terms",
+    )
+
+    check(
+        "an artifact declaring two licences is named, so the counts add up",
+        expect_exit=0,
+        expect_in_output="com.google.mlkit:barcode-scanning:17.3.0: non-SPDX: ",
+    )
+
+    check(
+        "and the reason the counts exceed the module count is spelled out",
+        expect_exit=0,
+        expect_in_output="declare more than one licence",
     )
 
     check(

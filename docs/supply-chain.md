@@ -65,40 +65,53 @@ and `./gradlew check` gates licences without touching the release classpath.
 
 ## The licence policy
 
-```kotlin
-licensee {
-    allow("Apache-2.0")
-    allow("BSD-3-Clause")
-    allow("MIT")
-    allowUrl("https://developer.android.com/studio/terms.html") { because("…") }
-    violationAction(ViolationAction.FAIL)
-    unusedAction(UnusedAction.LOG)
-}
-```
+`:app`'s debug runtime classpath is **221 external modules**, and they divide cleanly:
 
-Three identifiers cover almost the whole graph: Apache-2.0 for everything AndroidX, JetBrains,
-Square and Dagger publish, BSD-3-Clause for `protobuf-javalite`, MIT for
-`org.checkerframework:checker-qual`.
+| Licence | Modules |
+|---|---|
+| `Apache-2.0` | 197 — everything AndroidX, JetBrains, Square and Dagger publish |
+| `BSD-3-Clause` | 1 — `com.google.protobuf:protobuf-javalite` |
+| Android Software Development Kit License | 11 — `com.google.android.gms:play-services-*`, `googleid`, `com.google.android.odml:image` |
+| ML Kit Terms of Service | 10 — `com.google.mlkit:*` and `play-services-mlkit-*` |
+| Play Integrity API Terms of Service | 1 — `com.google.android.play:integrity` |
+| Play Core SDK Terms of Service | 1 — `com.google.android.play:core-common`, transitively under `integrity` |
 
-The URL is the entry worth explaining. Google ships Play services, Play Integrity and ML Kit under
-the **Android Software Development Kit License**, which has no SPDX identifier at all — so
-Licensee reports it as an *unknown* licence carrying only the URL from the POM, and the only way
-to accept it is by that URL. It is accepted because it is the licence every Android app built on
-Play services already ships under.
+Two SPDX identifiers, then, and **four URLs** — and the URLs are the entries worth explaining.
+Google ships Play services, ML Kit, Play Integrity and Play Core under service agreements rather
+than open-source licences. None has an SPDX identifier, so Licensee reports each as an *unknown*
+licence carrying only the URL from its POM, and that URL is the only handle on it. All four are
+accepted because this app uses the service each one covers: remove `:feature:scanner` and
+`:feature:textrecognition` and the ML Kit entry goes with them; remove the tamper check in
+`docs/root-detection.md` and the other two do.
 
 Pinned by URL rather than waved through with `ignoreDependencies("com.google.mlkit")`, because the
-two differ in exactly the case that matters: a Google artifact appearing under some *other*
-non-SPDX licence still fails the URL form, and would have been silently accepted by the group
-form.
+two differ in exactly the case that matters: the group form would keep accepting those artifacts if
+a future release arrived under some *other* non-SPDX licence, and the URL form still fails it.
+
+`app/build.gradle.kts` carries the per-URL module lists in each `because`, as the first run of the
+gate reported them.
 
 A bare `because` rather than `it.because`, even though Licensee declares that overload as
-`Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler plugin
-for `org.gradle.api.Action`, so the lambda gets the options as its receiver and there is no
-`it` to qualify.
+`Action<AllowUrlOptions>`: Gradle's Kotlin DSL turns on the SAM-with-receiver compiler plugin for
+`org.gradle.api.Action`, so the lambda gets the options as its receiver and there is no `it` to
+qualify.
 
-Nothing permissive is added speculatively. An `allow` that no longer matches anything is reported
-by `unusedAction`, which is `LOG` below because the plugin offers only `LOG` and `IGNORE` — see
-**What is not covered**.
+Nothing permissive is added speculatively, and that is enforced rather than claimed. `allow("MIT")`
+was in the first draft for `org.checkerframework:checker-qual`, on the assumption it arrives
+through Guava's annotations. It does not, and the first run of the gate answered *"Allowed SPDX
+identifier 'MIT' is unused"*. The entry is gone. An `allow` that stops matching is reported the
+same way — by `unusedAction`, which is `LOG` and not `FAIL` because the plugin offers only `LOG`
+and `IGNORE`; see **What is not covered**.
+
+### Why the licence counts sum to 222
+
+One artifact declares two licences: an ML Kit vision module carrying both the ML Kit terms and
+libyuv's Chromium `README.chromium`. Licensee accepts an artifact when **any one** of its licences
+is allowed, so that module passes on the first and the second is never validated against the allow
+list at all. `scripts/scan-dependencies.py` names every multi-licence artifact in its summary for
+exactly that reason: a per-licence count that silently exceeds the module count reads as an
+arithmetic bug in the script, and the artifact that explains it is also the one place where an
+unexamined licence rides along.
 
 ## The vulnerability gate
 
