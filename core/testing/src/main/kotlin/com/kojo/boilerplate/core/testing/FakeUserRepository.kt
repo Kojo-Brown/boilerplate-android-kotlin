@@ -29,7 +29,19 @@ class FakeUserRepository(initialUsers: List<User> = emptyList()) : UserRepositor
         list.firstOrNull { it.id == id }
     }
 
+    /**
+     * Every user handed to [saveUser], in call order.
+     *
+     * A caller that decides *not* to write — because the edit changed nothing, or because it was
+     * rejected — cannot be held to that by reading the rows back afterwards: the row it would
+     * have written is the row that is already there, so the store looks identical either way.
+     * This is what makes "and writes nothing" an assertion rather than a hope.
+     */
+    var savedUsers: List<User> = emptyList()
+        private set
+
     override suspend fun saveUser(user: User) {
+        savedUsers = savedUsers + user
         _users.update { current ->
             val index = current.indexOfFirst { it.id == user.id }
             if (index >= 0) {

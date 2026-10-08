@@ -329,7 +329,7 @@ with no default is the same principle applied to the thread pool.
 | 3 | DIP | `ThemePreferencesRepository` has no interface and `MainActivity` depends on the concrete type | Open |
 | 4 | DIP | `core.datastore` imports `ui.theme.ThemeMode`; data depends on UI | Open |
 | 5 | LSP | `FakeUserRepository.syncUser`/`syncCurrentUser` do not cache, and unknown ids succeed with a fabricated user | Open |
-| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open — still one (`saveUser`; `syncUser` gained `ObserveUserProfileUseCase`). Still six methods: the idempotency item put its push on a separate interface rather than making it seven |
+| 6 | ISP | Three of `UserRepository`'s six methods have no production caller | Open, and now one hop further away rather than closed. `saveUser` gained `EditUserProfileUseCase` (`docs/tdd.md`), which is the first thing outside a test to call it and the first time anything has decided what a local edit means — but nothing calls that use case either, so the write path is still reached only from tests. It closes when an edit screen submits one. Still six methods: the idempotency item put its push on a separate interface rather than making it seven |
 | 7 | OCP | Sync strategy and cross-cutting behaviour are closed inside `UserRepositoryImpl` | **Fixed** for both — `SyncStrategy` multibinding, and `decorateUserRepository` for cache/retry/telemetry. The fetch-and-write body itself is still closed |
 | 8 | SRP | `DataStoreTokenProvider` serves a synchronous interface and an unused flow | Open |
 | 9 | ISP / DIP | The user read is two abstractions — `UserRepository` and `PagedUserRepository` — and a caller has to know which one it wants | Recorded, not a defect: see below |

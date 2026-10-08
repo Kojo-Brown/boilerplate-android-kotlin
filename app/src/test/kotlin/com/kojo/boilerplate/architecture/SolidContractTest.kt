@@ -208,6 +208,7 @@ class SolidContractTest {
          * moves out of the domain package fails this even though its simple name is unchanged.
          */
         val AUDITED_USE_CASES = listOf(
+            "$DOMAIN_PACKAGE.usecase.EditUserProfileUseCase",
             "$DOMAIN_PACKAGE.usecase.ObserveUserProfileUseCase",
             "$DOMAIN_PACKAGE.usecase.PerformBackgroundSyncUseCase",
             "$DOMAIN_PACKAGE.usecase.RefreshVisibleUsersUseCase",

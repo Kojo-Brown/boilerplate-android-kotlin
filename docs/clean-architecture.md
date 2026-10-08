@@ -26,15 +26,25 @@ So the test for whether something belongs here is not "is it business logic". It
 
 > Would a second screen have to make this decision again, and could it get a different answer?
 
-Two things passed that test, and a third has since joined them for a different reason:
+Two things passed that test, and two more have since joined them for different reasons:
 
 | Use case | The policy it owns | Was duplicated in |
 | --- | --- | --- |
 | `ObserveUserProfileUseCase` | Retry, dedupe, "a missing row is a failed load, not an empty one", and — since it became a `networkBoundResource` — that observing a profile also refreshes it, and that a refresh which fails keeps showing the cached row ([offline-first](./offline-first.md)) | `ProfileViewModel`, `ProfileDetailPaneViewModel` |
 | `RefreshVisibleUsersUseCase` | Which sync a list refresh performs: a person tapping refresh covers what the screen is showing | `HomeViewModel.refresh()` |
 | `PerformBackgroundSyncUseCase` | Which sync a *worker* performs, what counts as done, and when to stop retrying | nothing — see below |
+| `EditUserProfileUseCase` | What a local profile edit means: normalise before comparing, report every broken rule rather than the first, refuse an id this device does not hold, and do not write an edit that changes nothing ([tdd](./tdd.md)) | nothing — it is the first caller `saveUser` has had outside a test |
 
 `getUsers()` did not, and is still called on the repository directly.
+
+`EditUserProfileUseCase` is the other one that did not arrive by extraction, and it arrived for
+the opposite reason to `PerformBackgroundSyncUseCase`: not because its caller cannot be tested,
+but because it has no caller at all yet. `saveUser` had never been called outside a test, so
+every decision in that last row was a decision nobody had made — and the answer to "could a
+second screen get a different answer?" is plainly yes for every one of them. Writing
+them down before the first edit screen exists is what stops that screen from being where they
+get decided. The cost is a use case nothing calls, which is the same trade `CurrentUserSyncStrategy`
+took and is recorded as open in finding 6 of [`solid.md`](./solid.md).
 
 `PerformBackgroundSyncUseCase` is the one that did not arrive by extraction, and it is worth
 saying why it still belongs here rather than inside `UserSyncWorker`. The question above —
