@@ -157,6 +157,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   `UiEvent` / `UiEffect` contract every screen is written against: when a field beats a sealed
   case, why two flows for one screen is a bug waiting for a race, and what `Nothing` says that
   a comment cannot.
+- [A TDD kata, in three commits](./docs/tdd.md) — one use case built red→green→refactor, with
+  the red run's output recorded rather than claimed: which three of the fifteen tests a skeleton
+  that does nothing already satisfies, which weak assertion that exposed, and why the refactor
+  is judged by what it makes impossible rather than by how it reads.
 
 ## Quick Start
 

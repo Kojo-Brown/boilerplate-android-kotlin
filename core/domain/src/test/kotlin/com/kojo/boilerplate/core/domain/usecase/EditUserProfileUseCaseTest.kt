@@ -1,5 +1,6 @@
 package com.kojo.boilerplate.core.domain.usecase
 
+import com.kojo.boilerplate.core.domain.model.ProfileEdit
 import com.kojo.boilerplate.core.domain.model.ProfileEditOutcome
 import com.kojo.boilerplate.core.domain.model.ProfileEditViolation
 import com.kojo.boilerplate.core.domain.model.ProfileEditViolation.Companion.MAX_DISPLAY_NAME_LENGTH
@@ -215,5 +216,30 @@ class EditUserProfileUseCaseTest {
             ProfileEditOutcome.Rejected(setOf(ProfileEditViolation.DISPLAY_NAME_BLANK)),
             outcome,
         )
+    }
+
+    /**
+     * Added by the refactor step rather than by a red one, because the refactor is what created
+     * something new to protect: the rules now live on `ProfileEditViolation`'s entries, and
+     * `brokenBy` walks `entries`, so a rule that is added is a rule that runs. The failure that
+     * buys nothing is an entry whose check can never answer `true` — declared, rendered by a
+     * screen's exhaustive `when`, and produced by nothing. `docs/tdd.md` records this as the one
+     * deviation from the three-step form: the fifteen behaviour tests above are untouched by the
+     * green and refactor commits, which is what says the refactor preserved behaviour.
+     */
+    @Test
+    fun `every declared violation is produced by some edit`() {
+        val edits = listOf(
+            ProfileEdit.normalising(displayName = "", avatarUrl = null),
+            ProfileEdit.normalising(
+                displayName = "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1),
+                avatarUrl = null,
+            ),
+            ProfileEdit.normalising(displayName = "Ada", avatarUrl = "http://example.com/ada.png"),
+        )
+
+        val produced = edits.flatMapTo(mutableSetOf()) { ProfileEditViolation.brokenBy(it) }
+
+        assertEquals(ProfileEditViolation.entries.toSet(), produced)
     }
 }
