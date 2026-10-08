@@ -238,6 +238,7 @@ class DomainLayerContractTest {
         const val USE_CASE_SUFFIX = "UseCase"
 
         val DOCUMENTED_USE_CASES = listOf(
+            "com.kojo.boilerplate.core.domain.usecase.EditUserProfileUseCase",
             "com.kojo.boilerplate.core.domain.usecase.ObserveUserProfileUseCase",
             "com.kojo.boilerplate.core.domain.usecase.PerformBackgroundSyncUseCase",
             "com.kojo.boilerplate.core.domain.usecase.RefreshVisibleUsersUseCase",
