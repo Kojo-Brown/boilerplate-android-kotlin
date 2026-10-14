@@ -83,6 +83,20 @@ serializationRetrofit = "1.0.0"
 credentials = "1.5.0"
 googleid = "1.1.1"
 mockk = "1.13.14"
+# Turbine, for the Flow emission assertions Phase 12 asks for. 1.2.0 and not 1.2.1, which is the
+# newest release: 1.2.1 declares `kotlin-stdlib` 2.1.21 and `kotlinx-coroutines-core` 1.10.2, and
+# Gradle resolves a dependency to the *highest* version anyone in the graph asks for, so taking it
+# moves both. The stdlib move is the one `kotlinxCollectionsImmutable` above is already pinned
+# around — a runtime JAR ahead of this compiler's 2.1.0 makes every compile task warn that the
+# libraries are newer than the API version. The coroutines move is the worse of the two, and it
+# would land on a test configuration: `kotlinx-coroutines-play-services` is versioned with
+# `coroutines` deliberately, because `Task.await()` is built on the same `CancellableContinuation`
+# internals as the release it ships with, and a unit test running the bridge of one release
+# against the core of another is the kind of mismatch that surfaces as a coroutine that never
+# resumes rather than as anything naming a version. 1.2.0 is built against coroutines 1.9.0
+# exactly — the version this catalog declares — over a stdlib (2.0.21) below this compiler's, so
+# it adds nothing to the graph it is asserting about.
+turbine = "1.2.0"
 junit-jupiter = "5.11.4"
 # Robolectric is here for exactly one thing: `AppDatabaseMigrationTest`, which needs a real
 # SQLite database and a real `Context` and has nowhere else to run — `androidTest` never
@@ -326,6 +340,11 @@ detekt-gradlePlugin = { group = "io.gitlab.arturbosch.detekt", name = "detekt-gr
 kotlin-reflect = { group = "org.jetbrains.kotlin", name = "kotlin-reflect", version.ref = "kotlin" }
 junit = { group = "junit", name = "junit", version = "4.13.2" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+# Turbine. Declared in `sharedTestDependencies()` with the rest of the stack rather than per
+# module: which assertions a `Flow` test is written with is a repository-wide choice, like the
+# JUnit 5 move above. `docs/turbine.md` says when it is the right tool and when a plain collector
+# still is.
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 junit-jupiter-api = { group = "org.junit.jupiter", name = "junit-jupiter-api", version.ref = "junit-jupiter" }
 junit-jupiter-engine = { group = "org.junit.jupiter", name = "junit-jupiter-engine", version.ref = "junit-jupiter" }
 junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engine", version.ref = "junit-jupiter" }

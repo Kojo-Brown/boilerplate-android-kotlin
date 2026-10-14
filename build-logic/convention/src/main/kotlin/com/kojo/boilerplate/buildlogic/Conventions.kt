@@ -135,9 +135,10 @@ internal fun Project.configureDetekt() {
  *
  * Declared once here rather than per module because the choice is repository-wide: JUnit 5 for
  * new tests, the vintage engine so the JUnit 4 classes that predate it still run, `runTest` for
- * anything with a coroutine in it, and mockk for the handful of platform types a fake cannot
- * stand in for. A module that needed a different stack would be a signal worth noticing, not a
- * convenience worth pre-supporting.
+ * anything with a coroutine in it, mockk for the handful of platform types a fake cannot stand
+ * in for, and Turbine for the assertions whose subject is a sequence of emissions. A module that
+ * needed a different stack would be a signal worth noticing, not a convenience worth
+ * pre-supporting.
  */
 internal fun Project.sharedTestDependencies() {
     dependencies.apply {
@@ -147,6 +148,12 @@ internal fun Project.sharedTestDependencies() {
         add("testRuntimeOnly", libs.findLibrary("junit-vintage-engine").get())
         add("testImplementation", libs.findLibrary("kotlinx-coroutines-test").get())
         add("testImplementation", libs.findLibrary("mockk").get())
+        // Turbine, for the tests whose subject is a *sequence* of emissions rather than a value.
+        // Here rather than in the one module that uses it today for the same reason the five
+        // above are: how a `Flow` test states its assertions is a repository-wide choice, and
+        // `docs/turbine.md` is where it is written down — including when the plain collector
+        // the rest of these suites use is still the better tool.
+        add("testImplementation", libs.findLibrary("turbine").get())
     }
 }
 

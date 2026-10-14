@@ -77,8 +77,8 @@ seconds. Two failures it is specifically shaped to catch:
   message says to move it to `:core:testing`.
 
 **Then compilation, per module, in dependency order**, each against only the classpath its build
-file entitles it to. At the time of writing: 108 of 168 `src/main` files, 48 of 78 `src/test`
-files, 334 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
+file entitles it to. At the time of writing: 124 of 196 `src/main` files, 66 of 97 `src/test`
+files, 477 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
 module with the repo's own config — the same three source sets the `detekt` convention gives the
 Gradle task, so that gate is covered in full rather than in part.
 
@@ -161,8 +161,8 @@ the wrong reason:
   reports `AdaptiveNavItem` as holding an unstable property — a failure about the stub rather
   than about the app, which is the other way a stub can waste an afternoon.
 
-Everything else — dagger, hilt-core, Retrofit, OkHttp, kotlinx, mockk, JUnit — is the real
-artifact from Maven Central at the version `gradle/libs.versions.toml` pins.
+Everything else — dagger, hilt-core, Retrofit, OkHttp, kotlinx, mockk, Turbine, JUnit — is the
+real artifact from Maven Central at the version `gradle/libs.versions.toml` pins.
 
 ## Invoking the Kotlin compiler as a library
 

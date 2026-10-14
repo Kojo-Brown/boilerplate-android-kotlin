@@ -161,6 +161,10 @@ module's own build file is its namespace and its dependencies and nothing else.
   the red run's output recorded rather than claimed: which three of the fifteen tests a skeleton
   that does nothing already satisfies, which weak assertion that exposed, and why the refactor
   is judged by what it makes impossible rather than by how it reads.
+- [Testing a Flow's emissions with Turbine](./docs/turbine.md) — when the subject of a test is
+  a sequence rather than a value: the three things a list collector cannot say, the rule for
+  which of the two idioms a given assertion wants, and the five claims `UdfViewModel`'s effect
+  channel was making in prose before anything asserted them.
 
 ## Quick Start
 

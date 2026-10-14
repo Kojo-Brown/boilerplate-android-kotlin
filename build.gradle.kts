@@ -53,7 +53,12 @@ val moduleDependencyRules: Map<String, Set<String>> = mapOf(
     // test-only rule below is what keeps the back-edge from reaching a shipped variant.
     ":core:auth" to setOf(":core:common", ":core:testing"),
     ":core:domain" to setOf(":core:common", ":core:testing"),
-    ":core:ui" to setOf(":core:common"),
+    // `:core:ui` takes the same edge for `MainDispatcherExtension` rather than for a fake:
+    // `UdfViewModel.emitEffect` posts through `viewModelScope`, so a test of the effect stream
+    // has to own `Dispatchers.Main`, and that extension is where this repository keeps that.
+    // Not a back-edge in this case — `:core:testing` does not depend on `:core:ui` and must not,
+    // since a fake of a design-system type would be a fake of something with no behaviour.
+    ":core:ui" to setOf(":core:common", ":core:testing"),
     // The typed-preferences schema. It depends on nothing in this repository and — unlike every
     // other entry here — the interesting half of its rule is who may depend on *it*: only
     // `:data`. A generated `UserPreferencesProto` is the shape of a file on disk, and a screen
