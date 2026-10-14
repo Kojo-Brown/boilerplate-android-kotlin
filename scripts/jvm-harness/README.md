@@ -77,8 +77,8 @@ seconds. Two failures it is specifically shaped to catch:
   message says to move it to `:core:testing`.
 
 **Then compilation, per module, in dependency order**, each against only the classpath its build
-file entitles it to. At the time of writing: 108 of 168 `src/main` files, 48 of 78 `src/test`
-files, 334 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
+file entitles it to. At the time of writing: 124 of 196 `src/main` files, 66 of 97 `src/test`
+files, 477 tests, and detekt over `src/main`, `src/test` **and** `src/androidTest` in every
 module with the repo's own config — the same three source sets the `detekt` convention gives the
 Gradle task, so that gate is covered in full rather than in part.
 
