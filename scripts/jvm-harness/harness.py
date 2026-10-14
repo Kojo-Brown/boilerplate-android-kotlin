@@ -75,6 +75,10 @@ DEPS = [
     "io/mockk:mockk-core-jvm:1.13.14",
     "io/mockk:mockk-agent-jvm:1.13.14",
     "io/mockk:mockk-agent-api-jvm:1.13.14",
+    # Turbine, for the Flow emission assertions. One jar and no transitive dependencies beyond
+    # the stdlib and coroutines core already above — which is the whole reason the catalog pins
+    # 1.2.0 rather than 1.2.1; see the note there.
+    "app/cash/turbine:turbine-jvm:1.2.0",
     "org/objenesis:objenesis:3.3",
     "net/bytebuddy:byte-buddy:1.14.9",
     "net/bytebuddy:byte-buddy-agent:1.14.9",
@@ -98,7 +102,7 @@ DEPS = [
 # dropped `FlowRetry.kt` and its 83 tests out of this run.
 RESOLVABLE = re.compile(
     r"^(kotlin|kotlinx|java|javax\.(inject|crypto|net)|org\.junit|org\.jetbrains|io\.mockk"
-    r"|dagger|retrofit2|okhttp3|okio|com\.kojo\.boilerplate)\."
+    r"|app\.cash\.turbine|dagger|retrofit2|okhttp3|okio|com\.kojo\.boilerplate)\."
 )
 STUBBED = re.compile(
     r"^(android\.util\.Log"
@@ -928,6 +932,7 @@ def test_classpath(jars: Path) -> list[str]:
         str(jars / name)
         for name in (
             "kotlinx-coroutines-test-jvm-1.9.0.jar",
+            "turbine-jvm-1.2.0.jar",
             "mockwebserver-4.12.0.jar",
             "okhttp-tls-4.12.0.jar",
             "mockk-jvm-1.13.14.jar",

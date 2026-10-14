@@ -45,4 +45,9 @@ dependencies {
     // called from `:app`, so the adaptive types they expose have to travel with them.
     api(libs.androidx.material3.adaptive.navigation.suite)
     api(libs.androidx.adaptive)
+
+    // For `MainDispatcherExtension`. `UdfViewModelEffectsTest` drives `emitEffect`, which posts
+    // through `viewModelScope` — so the test has to install a `Dispatchers.Main` before the base
+    // class can deliver anything at all.
+    testImplementation(project(":core:testing"))
 }

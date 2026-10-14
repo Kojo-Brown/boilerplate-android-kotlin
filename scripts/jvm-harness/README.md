@@ -161,8 +161,8 @@ the wrong reason:
   reports `AdaptiveNavItem` as holding an unstable property — a failure about the stub rather
   than about the app, which is the other way a stub can waste an afternoon.
 
-Everything else — dagger, hilt-core, Retrofit, OkHttp, kotlinx, mockk, JUnit — is the real
-artifact from Maven Central at the version `gradle/libs.versions.toml` pins.
+Everything else — dagger, hilt-core, Retrofit, OkHttp, kotlinx, mockk, Turbine, JUnit — is the
+real artifact from Maven Central at the version `gradle/libs.versions.toml` pins.
 
 ## Invoking the Kotlin compiler as a library
 
