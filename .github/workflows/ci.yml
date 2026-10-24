@@ -37,12 +37,19 @@ jobs:
   gates:
     name: modules · compile · lint · detekt · test
     runs-on: ubuntu-latest
+    # Read by `record-screenshots` below, which is the only consumer and runs on exactly one
+    # value. A job cannot read another job's step outcomes directly, and the alternative —
+    # `if: failure()` on `needs: [gates]` — would record images every time *any* gate went red.
+    outputs:
+      screenshots: ${{ steps.verify-paparazzi.outcome }}
     # KSP runs in most of the fifteen modules on a cold Gradle cache, and the first run on a
-    # branch also downloads the compileSdk 35 platform. Forty minutes is well clear of that;
+    # branch also downloads the compileSdk 35 platform. Forty-five minutes is well clear of that;
     # beyond it the job is stuck and should fail rather than hold a runner for the six-hour
     # default. Raised from thirty with the module split: the same work is now spread over more
-    # Gradle projects, each with its own configuration and KSP round.
-    timeout-minutes: 40
+    # Gradle projects, each with its own configuration and KSP round. Raised again by five with
+    # the screenshot gate, which fetches layoutlib and its native renderer on a cold cache and
+    # renders `:core:ui` twice — once in the test step and once to compare.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -154,6 +161,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      # SPEC.md Phase 12 item 1, and the half of it that is a gate rather than a test.
+      #
+      # The step above has already *rendered* every snapshot: asked for neither a recording nor a
+      # verification, Paparazzi writes an HTML report, so a composable that cannot be rendered at
+      # all — a crash inside layoutlib, a missing resource — fails `testDebugUnitTest` as an
+      # ordinary test failure. What it does not do is compare. This is the step that holds the
+      # pixels against the images the commit carries, and it re-runs `:core:ui:testDebugUnitTest`
+      # rather than reusing it because the mode is one of that task's declared inputs.
+      #
+      # No project path, like every gate above it: the task exists only in `:core:ui` today, and a
+      # module that takes up screenshot testing later is picked up without an edit here.
+      - name: verifyPaparazziDebug
+        id: verify-paparazzi
+        if: ${{ !cancelled() }}
+        run: ./gradlew verifyPaparazziDebug --stacktrace
+
       - name: Upload reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -168,8 +191,100 @@ jobs:
             **/build/test-results/
             **/build/compose-reports/
             **/build/compose-metrics/
+            **/build/paparazzi/failures/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Runs only when the screenshot diff gate above went red, which is the only time a golden image
+  # needs producing.
+  #
+  # Nobody working on this repository can render one locally. `dl.google.com` answers 403 on
+  # CONNECT from the scheduled agent's network, and that one host is both the Android SDK and —
+  # through the `maven.google.com` redirect — the repository layoutlib itself is published to, so
+  # CI is the only place these images can come from. It is the same conclusion Phase 0 items 1 and
+  # 2 reached about every other gate here. Even with the network open it would still be the right
+  # place: Paparazzi ships a different native renderer per operating system and they do not agree
+  # about antialiasing, so one machine has to own the images and the only machine every
+  # contributor shares is this one.
+  #
+  # **It publishes the images and changes nothing that is gated.** The recording goes to an
+  # artifact for a human and to a branch of its own for a script — `paparazzi-record/<branch>`,
+  # force-pushed — and never to the branch under test. So a red gate stays red until somebody
+  # reads the deltas, agrees with the new rendering and commits the images deliberately, which is
+  # the whole point of having the gate. The branch exists because an artifact is not a transport
+  # every contributor here can use: the scheduled agent's network refuses the blob host GitHub
+  # serves artifact downloads from, so `git fetch` is the only way it can collect them.
+  #
+  # A separate job rather than two more steps in `gates`, because it needs `contents: write` and
+  # `gates` does not. Everything it writes is under `paparazzi-record/`.
+  record-screenshots:
+    name: Record screenshot goldens
+    runs-on: ubuntu-latest
+    needs: [gates]
+    if: ${{ always() && needs.gates.outputs.screenshots == 'failure' }}
+    permissions:
+      contents: write
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: recordPaparazziDebug
+        run: ./gradlew recordPaparazziDebug --stacktrace
+
+      - name: Upload recorded snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: paparazzi-snapshots
+          path: core/ui/src/test/snapshots
+          # `error` rather than `ignore`: the step above is the only thing that writes these, and
+          # an empty artifact would send a reader looking for a file that was never produced.
+          if-no-files-found: error
+          retention-days: 7
+
+      # The same images, reachable by `git fetch`. One branch per branch under test, force-pushed,
+      # so there is one place to look and it is never stale.
+      - name: Publish the recorded images to a branch
+        env:
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          target="paparazzi-record/${HEAD_REF}"
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git checkout -B "$target"
+          git add -A -- core/ui/src/test/snapshots
+          if git diff --cached --quiet; then
+            echo "The recorded images match what the commit already carries; nothing to publish."
+            exit 0
+          fi
+          git commit -m "chore: screenshot goldens recorded from ${GITHUB_SHA}"
+          git push --force origin "$target"
+          {
+            echo "### Screenshot goldens recorded"
+            echo
+            echo "Pushed to \`${target}\`. To take them:"
+            echo
+            echo '```'
+            echo "git fetch origin ${target}"
+            echo "git checkout FETCH_HEAD -- core/ui/src/test/snapshots"
+            echo '```'
+            echo
+            echo "Read the deltas in the \`gate-reports\` artifact before committing them."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   supply-chain:
     name: licences · known vulnerabilities

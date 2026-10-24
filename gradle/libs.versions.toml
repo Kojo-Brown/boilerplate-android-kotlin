@@ -105,6 +105,30 @@ junit-jupiter = "5.11.4"
 # stable release and the first line that ships an `android-all` image for API 35, which is this
 # repository's `compileSdk` and what `@Config(sdk = …)` in that test asks for.
 robolectric = "4.16.1"
+# Paparazzi, the JVM renderer behind the screenshot diff gate. 1.3.5 is the newest stable
+# release, and it is the right pin here for the reason the rest of this catalog is pinned the way
+# it is: everything it brings is at or below what this project already resolves. It declares
+# `kotlin-stdlib` 2.0.21 — below this compiler's 2.1.0, so no compile task starts warning that
+# the runtime JARs are newer than the API version — and `kotlinx-coroutines-android` 1.9.0,
+# which is the `coroutines` version above exactly. It names no `androidx.lifecycle` artifact at
+# all, so it cannot undo the 2.8.7 pin that keeps the lint bundled with AGP 8.7.3 from crashing.
+#
+# 2.0.0-alpha05 is the only newer line and it is out on both counts: it is built on
+# `kotlin-stdlib` 2.3.0, whose metadata this compiler cannot read — the wall
+# `kotlinxCollectionsImmutable` above is already pinned around — and it renders through layoutlib
+# 16.2.1 over `com.android.tools:sdk-common` 31.13.2, which is AGP 8.13's vintage rather than
+# this repository's 8.7.3.
+#
+# What 1.3.5 renders with is layoutlib 14.0.11, which implements **API 34** and which the plugin
+# resolves itself (`com.android.tools.layoutlib:layoutlib-{runtime,resources}` from Google Maven,
+# `app.cash.paparazzi:layoutlib-native-linux` from Maven Central). The API level the renderer
+# reports to the code under test is not that one: it is `android.defaultConfig.targetSdkVersion`,
+# falling back to 34 when a module declares none — and a library module here declares none, by
+# the comment in `AndroidLibraryConventionPlugin`. So `Build.VERSION.SDK_INT` is 34 under every
+# snapshot, which is the framework the resources belong to, and it is still well past
+# `Build.VERSION_CODES.S` — which is the whole reason every snapshot has to pass
+# `dynamicColor = false`. See docs/screenshot-testing.md.
+paparazzi = "1.3.5"
 # 0.4.0 and 0.5.x are both published, and both are the wrong pin for Kotlin 2.1.0.
 # 0.5.0/0.5.1 are compiled against kotlin-stdlib 2.3.0, whose metadata this compiler
 # cannot read at all; 0.4.0 is on 2.1.20, which reads fine but drags the stdlib ahead
@@ -372,6 +396,12 @@ ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+# Applied to `:core:ui` only, which is the module that owns every composable with a golden image.
+# The marker resolves from `mavenCentral()`, which settings.gradle.kts already lists in
+# `pluginManagement`; the plugin's own AGP and Kotlin Gradle plugin dependencies (8.4.2 and
+# 2.0.21) are both below the ones the root build script already puts on that classpath, so
+# Gradle's highest-wins resolution leaves this repository's versions in place.
+paparazzi = { id = "app.cash.paparazzi", version.ref = "paparazzi" }
 # Applied to `:app` only. The licence question is about what ships, and `:app` is the one
 # module whose runtime classpath is the whole shipped set — every other module's is a
 # subset of it, so applying this fifteen times would ask the same question fifteen times
