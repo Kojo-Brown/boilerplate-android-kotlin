@@ -74,12 +74,18 @@ class UserMonogramScreenshotTest {
  * A separate class because the font scale belongs to the device configuration, which Paparazzi
  * takes once per rule, and a rule is per test class.
  *
- * This is the one trade-off `UserMonogram`'s KDoc admits to: the glyph is sized in `sp` off a `dp`
- * container, so it does not grow with the system font scale, while everything around it does. The
- * image is what makes that visible — the circle and its letter are the same size as in
- * [UserMonogramScreenshotTest.listRow] while the name beside them is twice as tall — and it
- * is what turns the accessibility decision recorded in prose into something a reviewer sees. If
- * the circle is ever made scalable, this golden is the one that has to change.
+ * **This golden is a picture of a defect, and it is the first thing this gate found.**
+ * `UserMonogram`'s KDoc claimed that its letter does not grow with the system font scale — a
+ * trade-off a monogram can defend, and the opposite of what the component does. `sp` is the unit
+ * that follows the font scale; `dp` is the one that does not, and the circle is the `dp` half. So
+ * at 200% the letter grows, the circle does not, and the glyph drops below centre and runs over
+ * the bottom edge of the circle it is supposed to sit inside. Measured against
+ * [UserMonogramScreenshotTest.listRow], the same letter goes from 23x31 to 38x41 pixels and from
+ * the middle of the circle to its lower edge.
+ *
+ * It is recorded rather than fixed, because the fix is a decision about a drawing two features
+ * animate between — see that KDoc. The golden is what will make the decision visible when it
+ * lands, which is the job a screenshot test has that no other test here can do.
  */
 class UserMonogramFontScaleScreenshotTest {
 

@@ -37,12 +37,21 @@ import androidx.compose.ui.unit.sp
  * not scale with its container — which is exactly the mismatch the paragraph above is about. The
  * ratio is what keeps the two a single drawing at two magnifications.
  *
- * The consequence is that this one glyph does not grow with the system font scale: it is sized in
- * `sp` off a `dp` container, so a reader at 200% text size gets the same letter in the same
- * circle. That is deliberate for a monogram — the alternative is a letter that overflows a fixed
- * circle — and it is a decision the accessibility pass should revisit as a whole, alongside making
- * the circle itself scalable. [displayName] is announced in full by the label beside every
- * instance of this, so nothing is lost to a screen reader.
+ * The consequence is a glyph in `sp` inside a container in `dp`, and the two do not move
+ * together. This paragraph used to claim that the letter therefore stays put — that a reader at
+ * 200% text size gets the same letter in the same circle, which is a trade-off a monogram can
+ * defend. `UserMonogramFontScaleScreenshotTest` renders it and the claim is the wrong way round:
+ * `sp` is exactly the unit that *does* follow the system font scale, so at 200% the letter grows
+ * while the circle does not, lands below centre and runs over the bottom edge. The golden image is
+ * what that looks like.
+ *
+ * It is left as it renders rather than fixed here, because the fix is a decision rather than a
+ * patch: either the glyph stops scaling (sized through the current density, so the font scale
+ * divides out) or the circle starts to, and the second is a change to a drawing that two features
+ * animate between. It belongs to the accessibility pass this already defers to, alongside making
+ * the circle itself scalable — and the golden is what will show that pass landing.
+ * [displayName] is announced in full by the label beside every instance of this, so nothing is
+ * lost to a screen reader either way.
  *
  * ### Why it is invisible to a screen reader
  *

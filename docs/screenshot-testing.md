@@ -33,6 +33,26 @@ Each of those is now a golden image, and `LabelledValue`'s is the second half of
 `MeasurePolicyTest` holds the *decision* on a plain JVM and says in its own KDoc that holding the
 policy in place would mean composing. These images are that coverage.
 
+## What it found on the first run
+
+One defect, in the first component whose KDoc this gate was pointed at, and it is the clearest
+argument for the whole exercise.
+
+`UserMonogram` sizes its letter in `sp` and its circle in `dp`, and its KDoc said the consequence
+was that the letter stays put while everything around it grows — a trade-off a monogram can
+defend, and recorded as deliberate in `docs/accessibility.md` too. It is the wrong way round.
+`sp` is the unit that follows the system font scale; `dp` is the one that does not. At 200% the
+letter grows, the circle does not, the glyph lands below centre and runs over the bottom edge:
+23x31 pixels in the middle of the circle at the normal font scale, 38x41 against its lower edge at
+twice it.
+
+Nothing else in this repository could have caught that. It is not a crash, not a failed assertion,
+not a semantics error — the component still announces correctly, still composes, still passes
+every test it had. It is a claim in prose that the code does not keep, and the only way to check
+such a claim is to look at the pixels. The image is committed as the record of what the component
+does today; the fix is a decision about a drawing two features animate between, so it belongs to
+the accessibility pass both KDocs defer to, and this golden is what will show it landing.
+
 ## How it is set up
 
 Paparazzi is applied to `:core:ui` and to no other module. The gate is a design-system gate: a
