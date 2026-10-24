@@ -15,11 +15,20 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
    ./gradlew compileDebugKotlin
    ./gradlew lintDebug detekt
    ./gradlew testDebugUnitTest
+   ./gradlew verifyPaparazziDebug
    ./gradlew assembleDebug
    ```
-   None of these take a project path: the tasks exist in every module, so one invocation
-   covers all fifteen. `checkModuleDependencies` is first because it is seconds of work and
-   fails on a layering violation every other gate would compile happily.
+   None of these take a project path. The first five exist in every module, so one invocation
+   covers all fifteen; `verifyPaparazziDebug` exists only in `:core:ui`, which is the one module
+   Paparazzi is applied to, and an unqualified invocation finds it there.
+   `checkModuleDependencies` is first because it is seconds of work and fails on a layering
+   violation every other gate would compile happily. `verifyPaparazziDebug` is the screenshot
+   diff gate and blocks a merge like the rest — it re-runs `:core:ui`'s unit tests in verify
+   mode and holds every golden image under `core/ui/src/test/snapshots` to the current
+   rendering. It cannot run in the scheduled agent's environment at all: layoutlib comes from
+   Google Maven, which answers 403 there. Read `docs/screenshot-testing.md` before touching a
+   golden image, and never re-record one to turn a red build green without reading the delta
+   first.
 6. Commit, `git push -u origin <branch>`, then `gh pr create`.
 7. `gh pr checks --watch` → **merge only if every check is green**:
    `gh pr merge --squash --delete-branch`

@@ -1,9 +1,37 @@
 plugins {
     id("boilerplate.android.library.compose")
+    // Paparazzi, and in this module alone. The gate is a design-system gate: every composable
+    // with a golden image is one of the widgets below, drawn from the palette and the type scale
+    // this module owns, so this is the one place where a pixel diff is a statement about shared
+    // code rather than about one screen. A feature module joining it is a decision to make when
+    // a feature has UI worth pinning that is not already pinned here — not a convention plugin
+    // waiting to be applied, which is why this is an `alias` here rather than a sixth
+    // `boilerplate.*` plugin in build-logic. See docs/screenshot-testing.md.
+    alias(libs.plugins.paparazzi)
 }
 
 android {
     namespace = "com.kojo.boilerplate.core.ui"
+}
+
+/*
+ * The one piece of build configuration in this file that is neither a namespace nor a dependency,
+ * which CLAUDE.md asks to be justified rather than inherited.
+ *
+ * Gradle forks unit tests into their own JVM with a 512 MB default heap — `org.gradle.jvmargs`
+ * in gradle.properties sizes the *daemon*, not this. That is ample for the other fourteen
+ * modules and not for this one: a Paparazzi test loads layoutlib, the whole API 34 framework
+ * resource repository and the platform font set into the test JVM, then renders at this device's
+ * 440 dpi, where a full-screen bitmap alone is around 10 MB. The failure mode is an
+ * `OutOfMemoryError` from inside the renderer rather than a failed assertion, so it reads as a
+ * broken gate rather than as a limit worth raising.
+ *
+ * It belongs here rather than in `configureUnitTests()` because the reason is Paparazzi and
+ * Paparazzi is applied here. A runner has 16 GB and the daemon is capped at 4 GB, so this and
+ * the Kotlin compile daemon fit alongside each other with room to spare.
+ */
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
 }
 
 /*

@@ -38,11 +38,13 @@ jobs:
     name: modules · compile · lint · detekt · test
     runs-on: ubuntu-latest
     # KSP runs in most of the fifteen modules on a cold Gradle cache, and the first run on a
-    # branch also downloads the compileSdk 35 platform. Forty minutes is well clear of that;
+    # branch also downloads the compileSdk 35 platform. Forty-five minutes is well clear of that;
     # beyond it the job is stuck and should fail rather than hold a runner for the six-hour
     # default. Raised from thirty with the module split: the same work is now spread over more
-    # Gradle projects, each with its own configuration and KSP round.
-    timeout-minutes: 40
+    # Gradle projects, each with its own configuration and KSP round. Raised again by five with
+    # the screenshot gate, which fetches layoutlib and its native renderer on a cold cache and
+    # renders `:core:ui` twice — once in the test step and once to compare.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -154,6 +156,49 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      # SPEC.md Phase 12 item 1, and the half of it that is a gate rather than a test.
+      #
+      # The step above has already *rendered* every snapshot: asked for neither a recording nor a
+      # verification, Paparazzi writes an HTML report, so a composable that cannot be rendered at
+      # all — a crash inside layoutlib, a missing resource — fails `testDebugUnitTest` as an
+      # ordinary test failure. What it does not do is compare. This is the step that holds the
+      # pixels against the images the commit carries, and it re-runs `:core:ui:testDebugUnitTest`
+      # rather than reusing it because the mode is one of that task's declared inputs.
+      #
+      # No project path, like every gate above it: the task exists only in `:core:ui` today, and a
+      # module that takes up screenshot testing later is picked up without an edit here.
+      - name: verifyPaparazziDebug
+        id: verify-paparazzi
+        if: ${{ !cancelled() }}
+        run: ./gradlew verifyPaparazziDebug --stacktrace
+
+      # Only on a red diff gate, and only into an artifact.
+      #
+      # Nobody working on this repository can render locally. `dl.google.com` answers 403 on
+      # CONNECT from the scheduled agent's network, and that one host is both the Android SDK and
+      # — through the `maven.google.com` redirect — the repository layoutlib itself is published
+      # to, so CI is the only place a golden image can be produced. It is the same conclusion
+      # Phase 0 items 1 and 2 reached about every other gate in this repository.
+      #
+      # So this is the recording a UI change needs: read the deltas in `gate-reports`, agree that
+      # the new rendering is the intended one, then download `paparazzi-snapshots` from this run
+      # and commit it. It cannot launder a failure — the gate has already failed the job by the
+      # time this runs, and it writes nothing the gate reads.
+      - name: Record snapshots for download
+        if: ${{ failure() && steps.verify-paparazzi.outcome == 'failure' }}
+        run: ./gradlew recordPaparazziDebug --stacktrace
+
+      - name: Upload recorded snapshots
+        if: ${{ failure() && steps.verify-paparazzi.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: paparazzi-snapshots
+          path: core/ui/src/test/snapshots
+          # `error` rather than `ignore`: the step above is the only way to get these images, and
+          # an empty artifact would send a reader looking for a file that was never written.
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -168,6 +213,7 @@ jobs:
             **/build/test-results/
             **/build/compose-reports/
             **/build/compose-metrics/
+            **/build/paparazzi/failures/
           if-no-files-found: ignore
           retention-days: 7
 
