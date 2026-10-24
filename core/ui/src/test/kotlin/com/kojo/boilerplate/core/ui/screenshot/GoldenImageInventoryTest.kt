@@ -2,6 +2,7 @@ package com.kojo.boilerplate.core.ui.screenshot
 
 import java.io.File
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 
 /**
@@ -32,9 +33,21 @@ class GoldenImageInventoryTest {
      * this package is expected to have a committed image; a tree with none of them means the
      * images were recorded in CI and never added to the commit, which would otherwise show up as
      * a wall of "does not exist" from the diff gate and nothing at all from this suite.
+     *
+     * Skipped under `recordPaparazziDebug`, and that is not a loophole — it is the one run where
+     * the question has no answer. A recording *produces* this directory while the suite is
+     * running, and whether this test has seen the files yet depends on the order JUnit happens to
+     * run the classes in. Asserted anyway, it made the first recording in this repository's
+     * history fail the task that was writing the images, which is the sort of check that teaches
+     * people to pass `--continue` and stop reading. Nothing is lost: a verification run is where
+     * the committed tree matters, and a recording run never gates a merge.
      */
     @Test
     fun `the golden images are committed`() {
+        assumeFalse(isRecordingRun()) {
+            "Skipped: this is a recording run, which is what writes the images."
+        }
+
         assertTrue(goldenImages().isNotEmpty()) {
             "No golden images under ${imagesDirectory()}. Record them in CI and commit them — " +
                 "see docs/screenshot-testing.md."
@@ -52,6 +65,10 @@ class GoldenImageInventoryTest {
                 orphans.joinToString("\n") { "  - $it" }
         }
     }
+
+    /** Whether this run is `recordPaparazziDebug`, which the Paparazzi plugin says in a property. */
+    private fun isRecordingRun(): Boolean =
+        System.getProperty(RECORD_PROPERTY)?.toBooleanStrictOrNull() == true
 
     private fun imagesDirectory(): File {
         val root = requireNotNull(System.getProperty(SNAPSHOT_DIR_PROPERTY)) {
@@ -88,6 +105,9 @@ class GoldenImageInventoryTest {
     private companion object {
         /** Set by the Paparazzi Gradle plugin; the same directory `recordPaparazziDebug` writes. */
         private const val SNAPSHOT_DIR_PROPERTY = "paparazzi.snapshot.dir"
+
+        /** Also set by the plugin, on the test task a record run depends on. */
+        private const val RECORD_PROPERTY = "paparazzi.test.record"
 
         /** Package, class, and then the method and any snapshot label it chose. */
         private const val PARTS = 3

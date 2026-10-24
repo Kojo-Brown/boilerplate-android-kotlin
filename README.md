@@ -192,6 +192,7 @@ Two workflows run on every push to `main` and every pull request.
 | **compile · lint · detekt · test** | `compileDebugKotlin`, `lintDebug`, `detekt`, `testDebugUnitTest`, `verifyPaparazziDebug` |
 | **Build · verify APK · shrink** (needs the gates) | `assembleDebug`, then `scripts/verify-apk.sh`, then `assembleMinified` and `scripts/verify-r8-mapping.py` |
 | **licences · known vulnerabilities** | `:app:licenseeAndroidDebug`, then `scripts/scan-dependencies.py` over the report it writes |
+| **Record screenshot goldens** (only when the screenshot gate is red) | `recordPaparazziDebug`, published as an artifact and on `paparazzi-record/<branch>` |
 
 Every gate in that job runs even when an earlier one fails, so a single run reports
 every result rather than stopping at the first.
@@ -202,10 +203,13 @@ Artifacts: `gate-reports` (lint HTML, detekt, test reports and JUnit XML,
 wrote beside it, 90-day retention). The APK is uploaded even when verification
 fails, so the artifact is available to inspect without re-running CI.
 
-A red screenshot gate adds one more: **`paparazzi-snapshots`**, the golden images
-re-recorded from that run. Nobody can render them locally — layoutlib comes from
-Google Maven, which the agent's network refuses — so this is how an intended UI
-change gets its new images. Read the deltas in `gate-reports` first;
+A red screenshot gate starts one more job, **Record screenshot goldens**, which
+re-renders the images and publishes them twice: as the `paparazzi-snapshots`
+artifact and as a commit on `paparazzi-record/<branch>`. Nobody can render them
+locally — layoutlib comes from Google Maven, which the agent's network refuses —
+so this is how an intended UI change gets its new images. It never writes to the
+branch under test, so the gate stays red until the images are committed on
+purpose. Read the deltas in `gate-reports` first;
 [`docs/screenshot-testing.md`](./docs/screenshot-testing.md) has the procedure.
 
 ### Verifying the APK

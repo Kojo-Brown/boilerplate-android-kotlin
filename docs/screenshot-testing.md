@@ -135,11 +135,22 @@ code. One machine has to own them, and the only machine every contributor shares
 So the recording path runs there, on a red gate only:
 
 1. Push the change. The diff gate fails.
-2. The job then runs `recordPaparazziDebug` and uploads the result as the **`paparazzi-snapshots`**
-   artifact. It cannot launder the failure — the gate has already failed the job, and nothing the
-   gate reads is written by it.
-3. Download the artifact, read `gate-reports` for the deltas, and commit the images you agree with
-   into `core/ui/src/test/snapshots/images`.
+2. The **Record screenshot goldens** job then runs `recordPaparazziDebug` and publishes what it
+   rendered two ways: as the **`paparazzi-snapshots`** artifact, and as a commit on
+   **`paparazzi-record/<branch>`**, force-pushed. It writes nothing to the branch under test, so
+   the gate stays red until somebody commits the images on purpose.
+3. Read the deltas in `gate-reports`. If the new rendering is the intended one, take the images
+   and commit them:
+
+   ```
+   git fetch origin paparazzi-record/<branch>
+   git checkout FETCH_HEAD -- core/ui/src/test/snapshots
+   ```
+
+The branch exists because the artifact is not a transport everyone here can use. GitHub serves
+artifact downloads from a blob host the scheduled agent's network also refuses, so `git fetch` is
+the only way *it* can collect what CI rendered; the artifact is the convenient half, for a person
+with a browser.
 
 Locally, for anyone whose network does reach Google Maven, `./gradlew recordPaparazziDebug` writes
 the same tree — but commit only what CI records, or the gate will go red on the next run for the
