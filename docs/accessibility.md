@@ -97,10 +97,13 @@ Turner".
 
 ## What is not covered here
 
-- **Text scaling.** `UserMonogram` sizes its glyph in `sp` off a `dp` container, so it does not
-  grow with the system font scale. That is deliberate for a monogram — the alternative is a letter
-  that overflows a fixed circle — but making the circle itself scalable is open work, and its
-  KDoc says so.
+- **Text scaling.** `UserMonogram` sizes its glyph in `sp` off a `dp` container, and this entry
+  used to say the glyph therefore does not grow with the system font scale. It has that backwards,
+  and a golden image is what settled it: `sp` is the unit that follows the font scale and `dp` is
+  the one that does not, so at 200% the letter grows, the circle does not, and the letter overflows
+  the circle — the outcome this entry described as the avoided alternative. See
+  `UserMonogramFontScaleScreenshotTest` and `docs/screenshot-testing.md`. Whether the glyph should
+  stop scaling or the circle should start is open work, and the component's KDoc says so.
 - **Touch target sizes.** Every interactive control in the app is a Material 3 component, and
   those carry `minimumInteractiveComponentSize` themselves. Nothing enforces it for a control
   that is not.
