@@ -25,6 +25,34 @@ interesting ones, because they are the specific way an instrumented Compose test
 queries the semantics tree, the semantics tree is not the composable tree, and an assertion
 pointed at a node that cannot exist is indistinguishable from a passing test.
 
+## What turning it on broke
+
+Two things, both in the build rather than in a test, and both invisible until an androidTest APK
+was actually assembled.
+
+**`compileDebugAndroidTestKotlin` failed on an import.** `HomeScreenTest` imported
+`assertDoesNotExist`, which is a *member* of `SemanticsNodeInteraction` rather than a top-level
+extension, so the import does not resolve. Six seconds, one error, before any emulator — which is
+the argument for that step being a gate of its own.
+
+**`:core:testing` could not package its androidTest APK**, and it has no `src/androidTest` at
+all. AGP builds an androidTest APK for every library variant whether or not there is anything in
+it, and `:core:testing` is the test-support module: its helpers *are* JUnit 5 extensions, so
+JUnit 5 sits on its `api` configuration rather than its `testImplementation` one. Its androidTest
+runtime classpath is therefore the whole JUnit 5 stack and nothing of its own — and
+`junit-jupiter-api` and `junit-platform-commons` both carry `META-INF/LICENSE.md`, which AGP
+treats as a conflict and fails on rather than resolving.
+
+`BoilerplateBuild.DUPLICATE_PACKAGING_RESOURCES` is the fix: the four licence and notice files
+that two jars on one APK classpath both ship, excluded in both convention plugins. AGP's own
+defaults already drop the non-Markdown variants of two of them, so this keeps the existing
+behaviour; attribution in this repository is the `supply-chain` job's `artifacts.json`, which
+records all 221 dependencies rather than whichever files survived a merge.
+
+Both failed in the `Build the test APKs` step, which runs *before* the emulator starts
+deliberately: a build failure should read as a build failure rather than as an emulator step that
+timed out, and three legs' worth of boot time is not spent discovering it.
+
 ## The matrix
 
 `.github/workflows/ci.yml`, job `instrumented`. Three legs, `fail-fast: false`, each an

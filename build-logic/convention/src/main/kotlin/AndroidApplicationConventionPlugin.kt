@@ -30,6 +30,14 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 sourceCompatibility = BoilerplateBuild.JAVA_VERSION
                 targetCompatibility = BoilerplateBuild.JAVA_VERSION
             }
+            // See BoilerplateBuild.DUPLICATE_PACKAGING_RESOURCES: two jars on one APK
+            // classpath carrying the same licence file is a build failure in AGP, not a
+            // warning, and the androidTest APKs are where it lands.
+            packaging {
+                resources {
+                    excludes += BoilerplateBuild.DUPLICATE_PACKAGING_RESOURCES
+                }
+            }
         }
 
         configureKotlinJvmTarget()
