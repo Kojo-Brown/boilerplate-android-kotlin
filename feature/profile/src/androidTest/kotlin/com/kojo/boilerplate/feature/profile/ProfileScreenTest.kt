@@ -1,7 +1,6 @@
 package com.kojo.boilerplate.feature.profile
 
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -15,11 +14,15 @@ import org.junit.Test
 /**
  * What `ProfileContent` renders for each of its three states.
  *
- * Written before any emulator existed to run it, and two things in it were wrong in ways only a
- * run could show: `assertDoesNotExist` was used without being imported, so the file did not
- * compile, and one test asserted the monogram's initial is readable as text when the component
- * deliberately removes itself from the semantics tree. Both are fixed below, the second by
- * asserting the contract the component actually has rather than by deleting the test.
+ * Written before any emulator existed to run it, and one test in it asserted the monogram's
+ * initial is readable as text when the component deliberately removes itself from the semantics
+ * tree. It is fixed below by asserting the contract the component actually has rather than by
+ * deleting the test.
+ *
+ * `assertDoesNotExist()` is used here and deliberately not imported: it is a **member** of
+ * `SemanticsNodeInteraction`, not a top-level extension like `assertIsDisplayed`, so an import
+ * for it does not resolve. `HomeScreenTest` carried one and that is what the first run of
+ * `compileDebugAndroidTestKotlin` failed on.
  */
 class ProfileScreenTest {
 

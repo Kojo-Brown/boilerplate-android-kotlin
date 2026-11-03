@@ -15,7 +15,7 @@ review and none of them could have passed a run:
 
 | What | Where | Why it could not pass |
 |---|---|---|
-| `assertDoesNotExist` used, never imported | `ProfileScreenTest`, `AppButtonTest` | the file does not compile |
+| an import for `assertDoesNotExist` | `HomeScreenTest` | it is a *member* of `SemanticsNodeInteraction`, not a top-level extension, so the import does not resolve and the module does not compile |
 | the monogram's initial asserted as readable text | `ProfileScreenTest` | `UserMonogram` is `clearAndSetSemantics {}` — the letter is not in the semantics tree at all |
 | one node asserted for a string rendered twice | `GoogleSignInScreenTest` | `onNodeWithText` fails on two matches as loudly as on none |
 | an icon's label queried with `onNodeWithText` | `HomeScreenTest`, ×3 | a `contentDescription` is never matched by a text query, so the assertion could not have found the icon either way — and two of the three were asserting *absence*, so they passed while testing nothing |
@@ -124,6 +124,14 @@ has the same string on screen twice, and the test for that case has to say so �
 `onAllNodesWithText(…).assertCountEquals(2)`, paired with the one-node case above it. Reaching
 for `onAllNodes…` to silence a failure you did not expect is how a count regression becomes
 invisible.
+
+**Half of the assertion API is a member and half is an extension, and the import line is where
+that bites.** `assertIsDisplayed`, `assertIsEnabled`, `assertIsNotEnabled`, `assertHasClickAction`
+and `assertCountEquals` are top-level extensions in `androidx.compose.ui.test` and need importing.
+`assertExists` and `assertDoesNotExist` are **members of `SemanticsNodeInteraction`** and must
+not be: an import for one does not resolve, which is a compile error on the import line rather
+than at the call. That was the first thing `compileDebugAndroidTestKotlin` ever reported, and the
+reason it is a gate of its own — `HomeScreenTest` had carried that import since it was written.
 
 A fifth rule is a consequence of the first: **a Material button, card or toggle merges its
 descendants into one semantics node.** The merged node carries the children's text and content
