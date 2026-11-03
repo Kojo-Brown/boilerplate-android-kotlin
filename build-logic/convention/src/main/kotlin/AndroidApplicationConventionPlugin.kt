@@ -4,6 +4,7 @@ import com.kojo.boilerplate.buildlogic.configureDependencyResolutionCheck
 import com.kojo.boilerplate.buildlogic.configureDetekt
 import com.kojo.boilerplate.buildlogic.configureKotlinJvmTarget
 import com.kojo.boilerplate.buildlogic.configureUnitTests
+import com.kojo.boilerplate.buildlogic.sharedAndroidTestDependencies
 import com.kojo.boilerplate.buildlogic.sharedTestDependencies
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -36,5 +37,6 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         configureDetekt()
         configureDependencyResolutionCheck()
         sharedTestDependencies()
+        sharedAndroidTestDependencies()
     }
 }

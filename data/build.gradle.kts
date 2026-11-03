@@ -362,10 +362,8 @@ dependencies {
     // other fourteen modules would pay Robolectric's startup cost for nothing.
     testImplementation(libs.robolectric)
 
-    // `UserDaoTest` stands up an in-memory Room database and reaches for
-    // `InstrumentationRegistry`, which arrives with the Compose test rig's `androidx.test`
-    // dependencies. This module draws nothing, so that is the only reason the artifact is here.
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    androidTestImplementation(libs.kotlinx.coroutines.test)
+    // Nothing module-specific for `src/androidTest`. `UserDaoTest` needs a real `Context` and
+    // `runTest`, and both now arrive with `sharedAndroidTestDependencies()`, which every module
+    // gets — so the Compose test rig this module used to pull in for `InstrumentationRegistry`
+    // alone is gone. This module draws nothing, and its test classpath says so again.
 }

@@ -110,6 +110,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./gradlew compileDebugKotlin --no-build-cache --stacktrace
 
+      # `src/androidTest` compiles here and not only in the `instrumented` job below, and the
+      # reason is where the failure lands rather than whether it is caught. That job needs this
+      # one, boots an emulator on three API levels and would report the same compile error three
+      # times, twenty minutes later, from a step whose name is about devices. This is an
+      # incremental Kotlin compile over the source set the step above has already built the main
+      # half of, and a test that does not compile fails once, here, next to the compile gate.
+      #
+      # It earned the place immediately: five modules had `src/androidTest` and none of it had
+      # ever been compiled. Two files were referring to `assertDoesNotExist` without importing
+      # it, which is the kind of error no amount of reading finds reliably and this step finds
+      # in seconds. Unqualified for the usual reason — the task exists in every module.
+      - name: compileDebugAndroidTestKotlin
+        if: ${{ !cancelled() }}
+        run: ./gradlew compileDebugAndroidTestKotlin --stacktrace
+
       # SPEC.md Phase 10 item 2. The compiler decides, per composable, whether it can be
       # skipped on recomposition, and records that in a report nobody reads. StabilityContractTest
       # holds the state types to `@Immutable`/`@Stable`; this holds the composables built out of
@@ -285,6 +300,169 @@ jobs:
             echo
             echo "Read the deltas in the \`gate-reports\` artifact before committing them."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # SPEC.md Phase 12 item 7: the instrumented suites, on an emulator matrix.
+  #
+  # ## What was actually here before
+  #
+  # Eight test classes across five modules — `:core:ui`, `:data` and three features — and not one
+  # of them had ever been compiled, let alone run. `testDebugUnitTest` does not see
+  # `src/androidTest`, nothing assembled a test APK, and no device existed, so the files were
+  # read by detekt and by nobody else. That is the same shape as every Phase 0 finding in this
+  # repository, and it produced the same class of defect: two files referenced
+  # `assertDoesNotExist` without importing it; one asserted the avatar monogram's initial is
+  # readable as text, when `UserMonogram` deliberately clears itself out of the semantics tree;
+  # one asserted a single node for a string the screen renders twice; and three asserted the
+  # *absence* of an icon label under `onNodeWithText`, which never matches a `contentDescription`
+  # and so could not have found it either way — two of them under names promising the opposite.
+  # Every one of those is a test that passed review and could not have passed a run.
+  #
+  # ## Why three API levels and these three
+  #
+  # A single emulator answers "does this work", which the `gates` job already answers for the
+  # JVM half. The question an instrumented suite is uniquely able to answer is "does this work on
+  # the versions this app says it supports", and that range is declared in two numbers in
+  # `BoilerplateBuild`: `MIN_SDK` 26 and `TARGET_SDK` 35. Both ends run, because a boilerplate's
+  # `minSdk` is a promise and an untested promise is a guess — Compose itself is the compatibility
+  # layer here, and the failures it cannot hide are platform behaviours that moved. API 30 is the
+  # middle leg: it is where the framework's own text and window handling changed enough to be
+  # worth a sample between the two, and one middle leg is the most this is worth paying for.
+  #
+  # `default` rather than `google_apis`: the AOSP image is the smaller download, nothing in these
+  # suites touches a Play service, and it is the target the `startup-benchmark` job below already
+  # runs on this runner. If a level ever stops publishing an AOSP `x86_64` image, `google_apis`
+  # is the substitute for that leg and nothing else changes.
+  #
+  # `fail-fast: false`, so a failure on the `minSdk` leg does not hide the state of the other two.
+  # The whole value of a matrix is the comparison between legs.
+  instrumented:
+    name: Instrumented tests · API ${{ matrix.api-level }}
+    runs-on: ubuntu-latest
+    # Same ordering as `build` and `startup-benchmark`: an instrumented suite is only worth
+    # booting an emulator for once the code under it has compiled, linted and passed its unit
+    # tests. `compileDebugAndroidTestKotlin` is one of those gates, so a test source set that
+    # does not compile never reaches this job at all.
+    needs: [gates]
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [26, 30, 35]
+    # An AVD cold boot is several minutes, a cache miss adds the image download and a second boot
+    # to snapshot it, and the suites themselves install five test APKs. Sixty minutes is well
+    # clear of that; beyond it the emulator is wedged — which happens — and the job should fail
+    # rather than hold a runner for the six-hour default.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # See the note on this input in the `gates` job: the action's default `tools` package no
+          # longer exists in the SDK repository and fails the step on every run.
+          packages: 'platform-tools'
+
+      # An emulator without KVM falls back to software CPU emulation, roughly an order of
+      # magnitude slower — enough that the boot alone outlives this job's timeout. GitHub's Linux
+      # runners expose /dev/kvm but not to the runner's own user, so this is the standard udev
+      # rule that grants it. It is not an optimisation: without it this gate cannot run at all.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Built before the emulator comes up rather than inside the step below, so that a build
+      # failure is a build failure and not an emulator step that timed out — the same ordering
+      # `startup-benchmark` uses and for the same reason.
+      #
+      # Unqualified and with nothing excluded: a `com.android.test` project has no `androidTest`
+      # source set, so `:benchmark` simply does not have this task, and an unqualified task name
+      # runs in the projects that have it rather than requiring all of them to.
+      - name: Build the test APKs
+        run: ./gradlew assembleDebugAndroidTest --stacktrace
+
+      # The image download and the first boot are the expensive half of this job and neither
+      # depends on the commit, so they are cached per API level and reused. The key carries the
+      # target and the architecture as well, because a change to either produces a different AVD
+      # under the same name and a stale cache would be restored over it.
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-default-x86_64
+
+      # Only on a miss, and it runs the emulator with a trivial script purely so that the action
+      # saves a booted snapshot on exit. `force-avd-creation: false` so this reuses whatever the
+      # cache restored on a partial hit, and `disable-animations: false` because the settings that
+      # flag writes belong to the run that tests, not to the snapshot.
+      - name: Create the AVD and snapshot it
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      # `disable-animations: true` is not cosmetic here. Compose's test rule synchronises on
+      # composition and on its own clock, but a window or activity transition still running under
+      # it is a source of nodes that are present and not yet where the assertion expects them —
+      # which is the classic way an instrumented suite becomes flaky rather than red.
+      #
+      # `-no-snapshot-save` so a run that leaves the emulator in some state does not write that
+      # state back over the cached snapshot the next run restores.
+      #
+      # `script` is one word on purpose; scripts/run-instrumented-tests.sh carries the invocation
+      # and explains why the action cannot be handed anything longer.
+      - name: connectedDebugAndroidTest
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          force-avd-creation: false
+          disable-animations: true
+          emulator-options: >-
+            -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none
+          script: ./scripts/run-instrumented-tests.sh
+
+      # Per API level, or three legs would overwrite one artifact. The XML is the half worth
+      # keeping: a connected run's HTML report says which assertion failed, and the XML carries
+      # the stack trace and the device it came from.
+      - name: Upload instrumented test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-test-reports-api-${{ matrix.api-level }}
+          path: |
+            **/build/reports/androidTests/connected/
+            **/build/outputs/androidTest-results/connected/
+          if-no-files-found: ignore
+          retention-days: 7
 
   supply-chain:
     name: licences · known vulnerabilities

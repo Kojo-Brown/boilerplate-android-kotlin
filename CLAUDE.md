@@ -13,14 +13,16 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
    ./gradlew --version
    ./gradlew checkModuleDependencies
    ./gradlew compileDebugKotlin
+   ./gradlew compileDebugAndroidTestKotlin
    ./gradlew lintDebug detekt
    ./gradlew testDebugUnitTest
    ./gradlew verifyPaparazziDebug
+   ./gradlew connectedDebugAndroidTest
    ./gradlew assembleDebug
    ```
-   None of these take a project path. The first five exist in every module, so one invocation
-   covers all fifteen; `verifyPaparazziDebug` exists only in `:core:ui`, which is the one module
-   Paparazzi is applied to, and an unqualified invocation finds it there.
+   None of these take a project path. All of them but one exist in every module, so a single
+   invocation covers all fifteen; `verifyPaparazziDebug` exists only in `:core:ui`, which is the
+   one module Paparazzi is applied to, and an unqualified invocation finds it there.
    `checkModuleDependencies` is first because it is seconds of work and fails on a layering
    violation every other gate would compile happily. `verifyPaparazziDebug` is the screenshot
    diff gate and blocks a merge like the rest — it re-runs `:core:ui`'s unit tests in verify
@@ -29,6 +31,15 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
    Google Maven, which answers 403 there. Read `docs/screenshot-testing.md` before touching a
    golden image, and never re-record one to turn a red build green without reading the delta
    first.
+   `connectedDebugAndroidTest` is the instrumented suite and blocks a merge the same way. In CI
+   it runs on three emulators — `minSdk` 26, 30 and `targetSdk` 35, `fail-fast: false` — and
+   locally it needs an SDK and a device, so it is one more gate the scheduled agent cannot
+   execute. `compileDebugAndroidTestKotlin` is the half of it that is only a compile, and it is
+   listed separately because it is where a broken test source set should fail: five modules had
+   `src/androidTest` that had never been compiled once. Read `docs/instrumented-testing.md`
+   before writing a Compose assertion — a query aimed at a node that cannot exist is
+   indistinguishable from a passing test, which is how three of the suites there were asserting
+   nothing at all.
 6. Commit, `git push -u origin <branch>`, then `gh pr create`.
 7. `gh pr checks --watch` → **merge only if every check is green**:
    `gh pr merge --squash --delete-branch`
