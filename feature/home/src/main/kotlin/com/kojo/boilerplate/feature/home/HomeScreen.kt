@@ -391,27 +391,7 @@ private fun HomeUserList(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
         if (users.itemCount == 0) {
-            // `weight(1f)` and not `fillMaxSize()`, which is what this was and which put the
-            // message partly off the bottom of the screen.
-            //
-            // A `Column` measures a child that has no weight against the *whole* incoming max
-            // height, not against what is left after its siblings — distributing what remains is
-            // what a weight is for. So `fillMaxSize()` here produced a box as tall as the screen,
-            // placed below a greeting that is ~48dp tall, giving a Column ~48dp taller than the
-            // Box it sits in. A Box does not clip, so nothing failed and nothing looked wrong in
-            // a preview: the message simply centred itself 24dp below the middle of a region that
-            // ran off the bottom edge.
-            //
-            // Found by the instrumented matrix on its first green run, identically on API 26, 30
-            // and 35, as `assertIsDisplayed` failing on a node that existed — which is the only
-            // kind of assertion that can see this and the reason the two empty-state tests are
-            // written with it rather than with `assertExists`.
-            EmptyUserList(
-                searchQuery = searchQuery,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-            )
+            EmptyUserList(searchQuery = searchQuery, modifier = Modifier.fillMaxSize())
         } else {
             // Keyed on the user id and typed by slot, which is the pair this list needs now that
             // it is not one shape any more. The key is what survives a reorder: the rows are

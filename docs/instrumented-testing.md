@@ -55,29 +55,41 @@ timed out, and three legs' worth of boot time is not spent discovering it.
 
 ## What the first green run found
 
-Three failures out of 58, identical on all three legs — API 26, 30 and 35 — so none of them was
-a flake. Two were defects and one was a test asserting something Material 3 does not do.
-
-**The home screen's empty-state message was partly off the bottom of the screen.** This is the
-find that pays for the whole item, and it is a defect in `HomeScreen.kt` rather than in a test.
-`EmptyUserList` was given `Modifier.fillMaxSize()` as the second child of a `Column` whose first
-child is the greeting. A `Column` measures a child that has no weight against the *whole*
-incoming max height, not against what is left after its siblings — distributing the remainder is
-what `Modifier.weight` is for — so that box was as tall as the screen and placed ~48dp down,
-making the `Column` taller than the `Box` containing it. A `Box` does not clip, so nothing threw
-and a preview looked fine; the message simply centred itself below the middle of a region running
-off the bottom edge. It is `Modifier.fillMaxWidth().weight(1f)` now.
-
-`assertIsDisplayed` is the only assertion that could have caught it. `assertExists` passes, every
-unit test passes, and a Paparazzi golden of the component on its own passes, because the component
-is correct in isolation — the defect is in how its parent measures it. That is the gap this gate
-closes and the reason both empty-state tests are written with `assertIsDisplayed`.
+Three failures out of 58, identical on all three legs — API 26, 30 and 35. One was a test
+asserting behaviour Material 3 does not have; two were a race, and the two cost three CI rounds
+to identify because the first diagnosis was wrong.
 
 **`AppTextField`'s placeholder is not displayed until the field is focused.** With a label
 declared, Material 3 keeps the label in the input row while the field is empty and unfocused and
-does not show the placeholder — otherwise the two would be drawn over each other. The test
-asserted it on an untouched field. It asserts both states now, which is a narrower claim than the
-one it replaces.
+does not show the placeholder — drawing both would put them on top of each other. The test
+asserted it on an untouched field. It asserts both states now, which is narrower than the
+assertion it replaces.
+
+**The two empty-state tests were racing `LazyPagingItems`' delivery**, and that is worth the
+detail because the first two attempts at it were wrong.
+
+`HomeBody`'s first branch is guarded on `refresh is LoadState.Loading && users.itemCount == 0`,
+and a freshly built `LazyPagingItems` reports exactly that until its presenter's load state has
+been delivered: `flowOf(PagingData.from(…))` is not a `cachedIn` flow, so nothing fills that in
+synchronously. With rows the guard is false on the first frame — `itemCount` is not zero — and
+the list composes straight away, which is why every other test in that file is deterministic.
+With no rows the screen shows the spinner first and the empty message a delivery later, and
+`waitForIdle` does not reach across that hop. `composeRule.waitUntil` does, and the assertion
+after it is still `assertIsDisplayed`.
+
+What made it hard to see is the failure text. `assertIsDisplayed` reports
+*"The component is not displayed!"*, which covers three unrelated defects — a node never placed,
+a node with empty bounds, a node laid out past the window edge — and names neither the node's
+bounds nor its parents. Read as geometry, it produced a confident and wrong diagnosis: that
+`EmptyUserList`'s `fillMaxSize()` overflowed its `Column`. A `Modifier.weight(1f)` was written
+against that theory, changed nothing, and was reverted.
+
+What settled it was making the failure legible instead of guessing again — and the answer arrived
+as the message *changing*, to `assertExists`'s "could not find any node", with nothing between
+the two runs but an edit to the test file. **A symptom that moves between runs of the same code
+is a race, and no amount of reasoning about layout was going to say so.** The lesson generalises:
+when an instrumented assertion fails in a way that admits more than one cause, spend the round
+trip that distinguishes them rather than the two that follow from picking one.
 
 ## The matrix
 

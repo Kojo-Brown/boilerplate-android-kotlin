@@ -7,11 +7,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.printToString
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -130,7 +129,8 @@ class HomeScreenTest {
         composeRule.setContent {
             BoilerplateTheme { HomeBodyUnderTest(items = emptyList()) }
         }
-        assertDisplayedWithTree("No users yet")
+        awaitText("No users yet")
+        composeRule.onNodeWithText("No users yet").assertIsDisplayed()
     }
 
     @Test
@@ -140,9 +140,10 @@ class HomeScreenTest {
         }
         // The distinction is the user-visible half of "a search does not drive remote loading":
         // an empty result means nobody downloaded matches, not that nobody matches.
-        assertDisplayedWithTree(
-            "No downloaded users match “zoe”. Clear the search to load more.",
-        )
+        awaitText("No downloaded users match “zoe”. Clear the search to load more.")
+        composeRule
+            .onNodeWithText("No downloaded users match “zoe”. Clear the search to load more.")
+            .assertIsDisplayed()
     }
 
     @Test
@@ -245,42 +246,41 @@ class HomeScreenTest {
     }
 
     /**
-     * `assertIsDisplayed`, with the semantics tree attached to the failure.
+     * Waits for [text] to reach the semantics tree, then lets the caller assert on it.
      *
-     * Not a convenience. Nobody working on this repository can run an instrumented test:
-     * `dl.google.com` is denied from the scheduled agent's network, so there is no Android SDK
-     * and no emulator, and the connected-test report is an Actions artifact served from a blob
-     * host the same policy refuses. The only channel from the device is the Gradle log, and what
-     * that log carries is an assertion's message and nothing else — so
-     * "Assert failed: The component is not displayed!" arrives with no bounds, no parents, and no
-     * way to tell a node that was never placed from one laid out past the window edge. Those have
-     * different fixes, and guessing between them costs a CI round trip each time.
+     * `LazyPagingItems` delivers asynchronously, and an **empty** page is the one case in this
+     * file where that shows. `HomeBody`'s first branch is guarded on
+     * `refresh is LoadState.Loading && users.itemCount == 0`, and a freshly created
+     * `LazyPagingItems` reports exactly that until its presenter's load state has been delivered
+     * — `flowOf(PagingData.from(…))` is not a `cachedIn` flow, so nothing fills that in
+     * synchronously. With rows the guard is false on the first frame, because `itemCount` is not
+     * zero, and the list composes straight away; that is why every other test here is
+     * deterministic. With no rows the screen shows the spinner first and the empty message a
+     * delivery later, and `waitForIdle` does not reach across that hop.
      *
-     * It is the same problem `startup-benchmark` has with a baseline profile and the same answer:
-     * put what a reader needs where the reader can actually see it. See
-     * docs/instrumented-testing.md.
+     * The evidence for it being a race rather than a layout is that the symptom moved. These two
+     * tests failed on all three API levels as `assertIsDisplayed`'s "The component is not
+     * displayed!" on one commit and as `assertExists`'s "could not find any node" on the next,
+     * with nothing between them but a change to this file. A geometry defect does not do that.
      *
-     * Scoped to the two empty-state assertions rather than applied to every test in the file.
-     * `assertIsDisplayed` is the right assertion for them — the defect it is capable of catching
-     * is a message laid out off the screen, which every other kind of assertion passes — and they
-     * are the two that have needed this.
+     * This is not a softened assertion. The caller still asserts the message is *displayed*,
+     * which is the assertion that would catch an empty state laid out off the screen; a message
+     * that never arrives fails here with a timeout naming the condition, which is a clearer
+     * failure than the one it replaces. What it stops doing is racing the delivery.
      */
-    private fun assertDisplayedWithTree(text: String) {
-        val interaction = composeRule.onNodeWithText(text)
-        try {
-            interaction.assertIsDisplayed()
-        } catch (failure: AssertionError) {
-            throw AssertionError(
-                buildString {
-                    appendLine(failure.message)
-                    appendLine()
-                    appendLine("node:")
-                    appendLine(interaction.printToString(maxDepth = 0))
-                    appendLine("root:")
-                    append(composeRule.onRoot().printToString(maxDepth = Int.MAX_VALUE))
-                },
-                failure,
-            )
+    private fun awaitText(text: String) {
+        composeRule.waitUntil(timeoutMillis = TEXT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private companion object {
+
+        /**
+         * Generous on purpose: it is only ever reached when the message never arrives, which is a
+         * failure, and a tight bound on an emulator's first composition is how a real gate turns
+         * into a flaky one.
+         */
+        const val TEXT_TIMEOUT_MS = 5_000L
     }
 }
