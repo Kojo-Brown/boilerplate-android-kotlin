@@ -9,7 +9,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.printToString
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -128,7 +130,7 @@ class HomeScreenTest {
         composeRule.setContent {
             BoilerplateTheme { HomeBodyUnderTest(items = emptyList()) }
         }
-        composeRule.onNodeWithText("No users yet").assertIsDisplayed()
+        assertDisplayedWithTree("No users yet")
     }
 
     @Test
@@ -138,9 +140,9 @@ class HomeScreenTest {
         }
         // The distinction is the user-visible half of "a search does not drive remote loading":
         // an empty result means nobody downloaded matches, not that nobody matches.
-        composeRule
-            .onNodeWithText("No downloaded users match “zoe”. Clear the search to load more.")
-            .assertIsDisplayed()
+        assertDisplayedWithTree(
+            "No downloaded users match “zoe”. Clear the search to load more.",
+        )
     }
 
     @Test
@@ -240,5 +242,45 @@ class HomeScreenTest {
             }
         }
         composeRule.onNodeWithContentDescription("Clear search").assertDoesNotExist()
+    }
+
+    /**
+     * `assertIsDisplayed`, with the semantics tree attached to the failure.
+     *
+     * Not a convenience. Nobody working on this repository can run an instrumented test:
+     * `dl.google.com` is denied from the scheduled agent's network, so there is no Android SDK
+     * and no emulator, and the connected-test report is an Actions artifact served from a blob
+     * host the same policy refuses. The only channel from the device is the Gradle log, and what
+     * that log carries is an assertion's message and nothing else — so
+     * "Assert failed: The component is not displayed!" arrives with no bounds, no parents, and no
+     * way to tell a node that was never placed from one laid out past the window edge. Those have
+     * different fixes, and guessing between them costs a CI round trip each time.
+     *
+     * It is the same problem `startup-benchmark` has with a baseline profile and the same answer:
+     * put what a reader needs where the reader can actually see it. See
+     * docs/instrumented-testing.md.
+     *
+     * Scoped to the two empty-state assertions rather than applied to every test in the file.
+     * `assertIsDisplayed` is the right assertion for them — the defect it is capable of catching
+     * is a message laid out off the screen, which every other kind of assertion passes — and they
+     * are the two that have needed this.
+     */
+    private fun assertDisplayedWithTree(text: String) {
+        val interaction = composeRule.onNodeWithText(text)
+        try {
+            interaction.assertIsDisplayed()
+        } catch (failure: AssertionError) {
+            throw AssertionError(
+                buildString {
+                    appendLine(failure.message)
+                    appendLine()
+                    appendLine("node:")
+                    appendLine(interaction.printToString(maxDepth = 0))
+                    appendLine("root:")
+                    append(composeRule.onRoot().printToString(maxDepth = Int.MAX_VALUE))
+                },
+                failure,
+            )
+        }
     }
 }
