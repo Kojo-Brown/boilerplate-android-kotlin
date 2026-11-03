@@ -4,6 +4,7 @@ import com.kojo.boilerplate.buildlogic.configureDependencyResolutionCheck
 import com.kojo.boilerplate.buildlogic.configureDetekt
 import com.kojo.boilerplate.buildlogic.configureKotlinJvmTarget
 import com.kojo.boilerplate.buildlogic.configureUnitTests
+import com.kojo.boilerplate.buildlogic.sharedAndroidTestDependencies
 import com.kojo.boilerplate.buildlogic.sharedTestDependencies
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -29,6 +30,14 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 sourceCompatibility = BoilerplateBuild.JAVA_VERSION
                 targetCompatibility = BoilerplateBuild.JAVA_VERSION
             }
+            // See BoilerplateBuild.DUPLICATE_PACKAGING_RESOURCES: two jars on one APK
+            // classpath carrying the same licence file is a build failure in AGP, not a
+            // warning, and the androidTest APKs are where it lands.
+            packaging {
+                resources {
+                    excludes += BoilerplateBuild.DUPLICATE_PACKAGING_RESOURCES
+                }
+            }
         }
 
         configureKotlinJvmTarget()
@@ -36,5 +45,6 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         configureDetekt()
         configureDependencyResolutionCheck()
         sharedTestDependencies()
+        sharedAndroidTestDependencies()
     }
 }

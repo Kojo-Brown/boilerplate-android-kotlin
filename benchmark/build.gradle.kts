@@ -130,6 +130,31 @@ android {
     }
 }
 
+/*
+ * This module is not part of the instrumented-test matrix, and it has to say so itself.
+ *
+ * `ci.yml`'s `instrumented` job runs `connectedDebugAndroidTest` with no project path, like every
+ * other gate in this repository: the task exists in each of the fifteen modules, so one
+ * invocation covers all of them and a module that takes up instrumented testing later is picked
+ * up without an edit to the workflow. The sixteenth project is this one, and its `debug` variant
+ * carries `BaselineProfileGenerator` and `StartupBenchmark` — two macrobenchmarks, which measure
+ * another process starting and are run by the `startup-benchmark` job against the `benchmark` and
+ * `nonMinifiedBenchmark` variants, on a pinned API level, with a budget. Running them here would
+ * be wrong three times over: `:app`'s `debug` build is debuggable, which Macrobenchmark refuses
+ * outright rather than measuring; the suppression list in `defaultConfig` above is written for
+ * the emulator this repository measures on and not for three of them; and a number taken from a
+ * variant nothing ships says nothing at all.
+ *
+ * Disabled rather than excluded with `-x` in the workflow for the reason `tasks.matching` is used
+ * elsewhere in this build: the exclusion would name a task from a file that cannot see whether it
+ * exists, and `-x` on a name AGP no longer uses fails every invocation. This is inert if the task
+ * goes away, and it keeps the reason next to the module it is about. The `benchmark` and
+ * `nonMinifiedBenchmark` variants are untouched, which is what `startup-benchmark` drives.
+ */
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    enabled = false
+}
+
 dependencies {
     /*
      * `implementation` and nothing else: this module has no API — no other module may depend on

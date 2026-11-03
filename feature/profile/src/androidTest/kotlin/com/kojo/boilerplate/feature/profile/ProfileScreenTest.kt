@@ -1,7 +1,9 @@
 package com.kojo.boilerplate.feature.profile
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.kojo.boilerplate.core.ui.theme.BoilerplateTheme
@@ -9,6 +11,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+/**
+ * What `ProfileContent` renders for each of its three states.
+ *
+ * Written before any emulator existed to run it, and one test in it asserted the monogram's
+ * initial is readable as text when the component deliberately removes itself from the semantics
+ * tree. It is fixed below by asserting the contract the component actually has rather than by
+ * deleting the test.
+ *
+ * `assertDoesNotExist()` is used here and deliberately not imported: it is a **member** of
+ * `SemanticsNodeInteraction`, not a top-level extension like `assertIsDisplayed`, so an import
+ * for it does not resolve. `HomeScreenTest` carried one and that is what the first run of
+ * `compileDebugAndroidTestKotlin` failed on.
+ */
 class ProfileScreenTest {
 
     @get:Rule
@@ -100,8 +115,20 @@ class ProfileScreenTest {
         composeRule.onNodeWithText("user-123").assertIsDisplayed()
     }
 
+    /**
+     * The monogram is a decoration, and `UserMonogram` says so in the one way the platform reads:
+     * `clearAndSetSemantics {}` with nothing in it, which drops the circle and the letter inside
+     * it from the semantics tree entirely. The name beside it already carries the whole string, so
+     * the failure that decision prevents is a screen reader announcing "A" and then
+     * "Alice Johnson" — the initial twice, once as a letter.
+     *
+     * This test used to read `onNodeWithText("A").assertIsDisplayed()`, which is the opposite
+     * claim and would have failed on the first emulator that ran it. Asserted as the pair rather
+     * than deleted: the letter is not announced, *and* the name is announced exactly once. Either
+     * half alone passes against a regression that breaks the other.
+     */
     @Test
-    fun profileContent_whenSuccess_showsAvatarInitial() {
+    fun profileContent_whenSuccess_announcesTheNameOnceAndNotItsInitial() {
         composeRule.setContent {
             BoilerplateTheme {
                 ProfileContent(
@@ -110,7 +137,8 @@ class ProfileScreenTest {
                 )
             }
         }
-        composeRule.onNodeWithText("A").assertIsDisplayed()
+        composeRule.onNodeWithText("A").assertDoesNotExist()
+        composeRule.onAllNodesWithText("Alice Johnson").assertCountEquals(1)
     }
 
     @Test

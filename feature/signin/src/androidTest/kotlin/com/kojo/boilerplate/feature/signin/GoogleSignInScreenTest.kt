@@ -1,7 +1,9 @@
 package com.kojo.boilerplate.feature.signin
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.kojo.boilerplate.core.auth.GoogleUser
@@ -10,6 +12,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+/**
+ * The two halves of the sign-in screen: the state before a credential exists and the state after.
+ *
+ * Every `onNodeWithText` here is also an implicit uniqueness assertion — it fails on two matching
+ * nodes as loudly as on none — which is what the last test in this file turns into the subject.
+ */
 class GoogleSignInScreenTest {
 
     @get:Rule
@@ -117,14 +125,26 @@ class GoogleSignInScreenTest {
         assertTrue(signedOut)
     }
 
+    /**
+     * The name line falls back to the address — `user.displayName.ifEmpty { user.email }` — and
+     * the address line below it is unconditional, so a user with no display name has their email
+     * on screen twice.
+     *
+     * That is the assertion, and the count is the point rather than an inconvenience. This test
+     * was written as `onNodeWithText("alice@gmail.com").assertIsDisplayed()`, which cannot pass:
+     * `onNodeWithText` requires exactly one match and fails with "Expected exactly '1' node but
+     * found '2'". `signedInContent_showsEmail` above is the same query against a user who *has* a
+     * name and does find one node, so the two together are what pin the fallback — without this
+     * one, a regression that dropped the name line entirely would leave both green.
+     */
     @Test
-    fun signedInContent_whenDisplayNameEmpty_showsEmailInstead() {
+    fun signedInContent_whenDisplayNameEmpty_showsEmailInTheNameLineToo() {
         val userWithEmptyName = sampleUser.copy(displayName = "")
         composeRule.setContent {
             BoilerplateTheme {
                 SignedInContent(user = userWithEmptyName, onSignOut = {})
             }
         }
-        composeRule.onNodeWithText("alice@gmail.com").assertIsDisplayed()
+        composeRule.onAllNodesWithText("alice@gmail.com").assertCountEquals(2)
     }
 }

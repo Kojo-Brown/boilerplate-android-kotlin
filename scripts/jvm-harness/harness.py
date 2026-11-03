@@ -141,6 +141,21 @@ HARD_EXCLUDES = {
     "app/src/test/kotlin/com/kojo/boilerplate/architecture/UnidirectionalDataFlowContractTest.kt":
         "pins every view model in the app; HomeViewModel needs androidx.paging and is not "
         "compiled here",
+    # A different category from the three above, and the first entry here that is about the
+    # *environment* rather than about coverage. Every import in this file resolves — it reads
+    # PNG filenames off disk and nothing else — so the selection takes it, and then both of its
+    # tests throw before asserting anything: they locate the goldens through the
+    # `paparazzi.snapshot.dir` system property, which the Paparazzi Gradle plugin sets on the
+    # test JVM and nothing outside Gradle can. The file says so itself in the message.
+    #
+    # There is nothing to stub: the property's value is a path the plugin computes. Setting it
+    # here would be this script asserting against a directory it chose, which is weaker than not
+    # running the test. It arrived with PR #61 and has failed every harness run since, which is
+    # also why it is listed rather than left — the run exits non-zero at the tests and never
+    # reaches detekt, so one unrunnable file was costing the whole lint gate.
+    "core/ui/src/test/kotlin/com/kojo/boilerplate/core/ui/screenshot/GoldenImageInventoryTest.kt":
+        "locates the goldens through the `paparazzi.snapshot.dir` system property, which only "
+        "the Paparazzi Gradle plugin sets",
 }
 
 

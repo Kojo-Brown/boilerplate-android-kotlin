@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.kojo.boilerplate.core.ui.theme.BoilerplateTheme
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -39,6 +40,13 @@ class AppButtonTest {
         assertTrue(clicked)
     }
 
+    /**
+     * Both halves, because the name promises the second one and the test only ever made the
+     * first: `clicked` was declared, assigned from a lambda and never read, so a disabled button
+     * that still invoked its callback would have passed. A tap is injected as a touch at the
+     * node's centre whether or not it carries a click action, which is what makes the negative
+     * assertion possible at all.
+     */
     @Test
     fun button_whenDisabled_doesNotTriggerOnClick() {
         var clicked = false
@@ -48,8 +56,18 @@ class AppButtonTest {
             }
         }
         composeRule.onNodeWithText("Submit").assertIsNotEnabled()
+        composeRule.onNodeWithText("Submit").performClick()
+        assertFalse(clicked)
     }
 
+    /**
+     * `useUnmergedTree` on the spinner, and it is not optional. `AppButton`'s spinner sits inside
+     * a Material button, whose clickable modifier merges its descendants into one semantics node
+     * — and a test tag is not one of the properties that merge, so in the merged tree the
+     * indicator is neither a node of its own nor a tag on the button above it. The label needs no
+     * such flag: when `isLoading` is true the `Text` is not composed at all, so it is absent from
+     * both trees.
+     */
     @Test
     fun button_whenLoading_showsIndicatorAndHidesLabel() {
         composeRule.setContent {
@@ -58,7 +76,9 @@ class AppButtonTest {
             }
         }
         composeRule.onNodeWithText("Submit").assertDoesNotExist()
-        composeRule.onNodeWithTag("AppButtonLoadingIndicator").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("AppButtonLoadingIndicator", useUnmergedTree = true)
+            .assertIsDisplayed()
     }
 
     @Test

@@ -171,6 +171,25 @@ uiautomator = "2.3.0"
 # vintage, and Gradle resolves to the highest version anybody asks for — see the note on
 # `lifecycleRuntimeKtx`.
 androidxTestJunit = "1.2.1"
+# The rest of `androidx.test`, which is what an instrumented test needs at *runtime* rather than
+# at compile time, and which nothing in this repository declared until the emulator matrix existed.
+# `AndroidJUnitRunner` — the class `BoilerplateBuild.TEST_RUNNER` has named since the first
+# convention plugin — ships in `androidx.test:runner`, so every module declared a runner it did not
+# have on any classpath. That is invisible until an instrumented test is actually executed: AGP
+# writes the name into the test APK's manifest without resolving it, and the failure is
+# `ClassNotFoundException: androidx.test.runner.AndroidJUnitRunner` from the instrumentation,
+# not from the build.
+#
+# Both are the 2024 wave that `androidxTestJunit` above already pins into: `androidx.test:core`
+# 1.6.1 and `androidx.test:runner` 1.6.2 are the releases `androidx.test.ext:junit` 1.2.1 and
+# Espresso 3.6.1 ship alongside, and the whole group is versioned and tested as one. They version
+# separately here only because the group does not publish a single number for it — `core` stopped
+# at 1.6.1 and `runner` took a 1.6.2.
+#
+# Nothing in either reaches `androidx.lifecycle` above 2.8.7, which is the pin the lint bundled
+# with AGP 8.7.3 depends on — see the note on `lifecycleRuntimeKtx`. Both are androidTest-only.
+androidxTestCore = "1.6.1"
+androidxTestRunner = "1.6.2"
 # ProfileInstaller. This is the runtime half of a baseline profile: AGP compiles
 # `app/src/main/baseline-prof.txt` into `assets/dexopt/baseline.prof`, and it is this library's
 # `androidx.startup` initialiser that hands the profile to ART on first run. Without it the file
@@ -304,6 +323,15 @@ okhttp-tls = { group = "com.squareup.okhttp3", name = "okhttp-tls", version.ref 
 # `com.android.test` module and ships in no APK the user installs.
 androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
+# The on-device test stack every module gets, declared in `sharedAndroidTestDependencies()` for
+# the reason `sharedTestDependencies()` declares the JVM one: which runner an instrumented test is
+# executed by is a repository-wide choice, not a per-module one.
+#
+# `runner` carries `AndroidJUnitRunner` itself. `core` carries `InstrumentationRegistry` and
+# `ApplicationProvider` — the two ways a test reaches a real `Context` — which is what
+# `UserDaoTest` builds its in-memory Room database against.
+androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
 
 # ProfileInstaller, in `:app`. The one dependency in this repository whose entire job runs before

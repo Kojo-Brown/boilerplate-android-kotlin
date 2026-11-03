@@ -31,6 +31,41 @@ object BoilerplateBuild {
     const val TEST_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
     val JAVA_VERSION: JavaVersion = JavaVersion.VERSION_17
     val JVM_TARGET: JvmTarget = JvmTarget.JVM_17
+
+    /**
+     * Licence and notice files that two jars on the same APK classpath both carry, which AGP
+     * treats as a packaging conflict and fails the build on rather than picking one.
+     *
+     * It is not a hypothetical list. The first run of the emulator matrix died in `:core:testing`
+     * on `META-INF/LICENSE.md`, present in both `junit-jupiter-api` and
+     * `junit-platform-commons` — and in a module with **no** `src/androidTest` at all, which is
+     * what makes the conflict surprising enough to be worth a comment. `:core:testing` is the
+     * test-support module: its helpers *are* JUnit 5 extensions, so JUnit 5 is on its `api`
+     * configuration rather than its `testImplementation` one, and AGP still builds an (empty)
+     * androidTest APK for every library variant. So its androidTest runtime classpath carries
+     * the whole JUnit 5 stack and nothing of its own.
+     *
+     * `LICENSE-notice.md` is the same pair's other file and would have been the very next
+     * failure; `AL2.0` and `LGPL2.1` are shipped by every `kotlinx-coroutines` artifact, and
+     * `kotlinx-coroutines-test` joined every module's androidTest classpath with
+     * [sharedAndroidTestDependencies].
+     *
+     * ### Why this is not a licensing decision
+     *
+     * AGP's own defaults already drop `META-INF/LICENSE`, `META-INF/LICENSE.txt`,
+     * `META-INF/NOTICE` and `META-INF/NOTICE.txt` from every APK this build has ever produced.
+     * These are the Markdown variants the same libraries started shipping later, so this keeps
+     * the existing behaviour rather than introducing one. What this repository does about
+     * attribution is the `supply-chain` job: Licensee resolves `:app`'s runtime classpath and
+     * writes every module's licence to `artifacts.json`, which is a record of 221 dependencies
+     * rather than of whichever files survived a merge.
+     */
+    val DUPLICATE_PACKAGING_RESOURCES: List<String> = listOf(
+        "/META-INF/LICENSE.md",
+        "/META-INF/LICENSE-notice.md",
+        "/META-INF/AL2.0",
+        "/META-INF/LGPL2.1",
+    )
 }
 
 /** The main build's version catalog, which `build-logic/settings.gradle.kts` shares with it. */
@@ -158,6 +193,46 @@ internal fun Project.sharedTestDependencies() {
 }
 
 /**
+ * The stack every module's **instrumented** tests are written against: the on-device half, which
+ * is a different stack from the JVM one above and not a superset of it.
+ *
+ * ### Why the runner has to be declared
+ *
+ * `BoilerplateBuild.TEST_RUNNER` has named `androidx.test.runner.AndroidJUnitRunner` in every
+ * convention plugin since the module split, and until the emulator matrix landed nothing put that
+ * class on any classpath. The gap is silent by construction: AGP writes the name straight into
+ * the test APK's manifest without resolving it, so every gate stays green and the failure arrives
+ * as `ClassNotFoundException` out of `am instrument` the first time a device is asked to run
+ * anything. Declaring the runner here is what makes `testInstrumentationRunner` a statement the
+ * build can keep.
+ *
+ * ### Why JUnit 4 and not the platform
+ *
+ * [configureUnitTests] runs the JVM suites on the JUnit Platform, and that is deliberately not
+ * what happens on a device: `AndroidJUnitRunner` is a JUnit 4 runner, the JUnit 5 engine has no
+ * Android runtime to start, and bridging the two needs a third-party Gradle plugin and a second
+ * instrumentation. So `src/androidTest` is JUnit 4 — `org.junit.Test`, `@get:Rule` — and
+ * `src/test` is JUnit 5, and the split is a property of where the code runs rather than a
+ * migration that stalled. `docs/instrumented-testing.md` says so where a test author will see it.
+ *
+ * `androidx.test:core` is here rather than only in `:data` because reaching a real `Context` —
+ * `InstrumentationRegistry` or `ApplicationProvider` — is the one thing every instrumented test
+ * has in common, whatever it then does with it.
+ */
+internal fun Project.sharedAndroidTestDependencies() {
+    dependencies.apply {
+        add("androidTestImplementation", libs.findLibrary("junit").get())
+        add("androidTestImplementation", libs.findLibrary("androidx-test-core").get())
+        add("androidTestImplementation", libs.findLibrary("androidx-test-ext-junit").get())
+        add("androidTestImplementation", libs.findLibrary("androidx-test-runner").get())
+        // `runTest`, for the suspending calls an instrumented test makes directly — a DAO's
+        // `upsert`, a repository's `refresh`. Here rather than in `configureCompose()`, where it
+        // used to sit: a Room test needs it and draws nothing.
+        add("androidTestImplementation", libs.findLibrary("kotlinx-coroutines-test").get())
+    }
+}
+
+/**
  * The Compose dependencies every UI module needs, all of them versioned by the BOM.
  *
  * Only the common floor is here — `ui`, `material3`, the tooling preview and the test rig.
@@ -183,7 +258,6 @@ internal fun Project.configureCompose() {
         add("debugImplementation", libs.findLibrary("androidx-ui-test-manifest").get())
 
         add("androidTestImplementation", libs.findLibrary("androidx-ui-test-junit4").get())
-        add("androidTestImplementation", libs.findLibrary("kotlinx-coroutines-test").get())
     }
 
     configureComposeCompilerReports()
