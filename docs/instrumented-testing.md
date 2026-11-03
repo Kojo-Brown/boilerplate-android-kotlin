@@ -65,31 +65,42 @@ does not show the placeholder — drawing both would put them on top of each oth
 asserted it on an untouched field. It asserts both states now, which is narrower than the
 assertion it replaces.
 
-**The two empty-state tests were racing `LazyPagingItems`' delivery**, and that is worth the
-detail because the first two attempts at it were wrong.
+**The two empty-state tests could never have passed**, and that is worth the detail because it
+took three CI rounds and two wrong diagnoses to establish.
 
+`PagingData.from(items)` — the one-argument overload — leaves `refresh` at `LoadState.Loading`.
 `HomeBody`'s first branch is guarded on `refresh is LoadState.Loading && users.itemCount == 0`,
-and a freshly built `LazyPagingItems` reports exactly that until its presenter's load state has
-been delivered: `flowOf(PagingData.from(…))` is not a `cachedIn` flow, so nothing fills that in
-synchronously. With rows the guard is false on the first frame — `itemCount` is not zero — and
-the list composes straight away, which is why every other test in that file is deterministic.
-With no rows the screen shows the spinner first and the empty message a delivery later, and
-`waitForIdle` does not reach across that hop. `composeRule.waitUntil` does, and the assertion
-after it is still `assertIsDisplayed`.
+so with rows the guard is false the moment `itemCount` is not zero, the list composes, and
+nothing notices. With **no** rows both halves hold for ever: the screen shows the spinner and the
+empty message is never composed at all. The fix is to pass `sourceLoadStates` explicitly, which
+`PagingData.from` has a second overload for precisely because a static generation otherwise has
+no settled state.
 
-What made it hard to see is the failure text. `assertIsDisplayed` reports
-*"The component is not displayed!"*, which covers three unrelated defects — a node never placed,
-a node with empty bounds, a node laid out past the window edge — and names neither the node's
-bounds nor its parents. Read as geometry, it produced a confident and wrong diagnosis: that
-`EmptyUserList`'s `fillMaxSize()` overflowed its `Column`. A `Modifier.weight(1f)` was written
-against that theory, changed nothing, and was reverted.
+A `composeRule.waitUntil` sits in front of the assertion as well, and both are needed for
+different reasons: `LazyPagingItems.loadState` starts from a presenter that has nothing yet, so
+`refresh` is `Loading` on the first composition whatever the `PagingData` says, and the wait is
+what lets the delivered state arrive. The assertion after it is still `assertIsDisplayed`.
 
-What settled it was making the failure legible instead of guessing again — and the answer arrived
-as the message *changing*, to `assertExists`'s "could not find any node", with nothing between
-the two runs but an edit to the test file. **A symptom that moves between runs of the same code
-is a race, and no amount of reasoning about layout was going to say so.** The lesson generalises:
-when an instrumented assertion fails in a way that admits more than one cause, spend the round
-trip that distinguishes them rather than the two that follow from picking one.
+What made it hard is the failure text, and the path through it is the part worth keeping.
+
+`assertIsDisplayed` reports *"The component is not displayed!"*, which covers a node never
+placed, a node with empty bounds and a node laid out past the window edge, and names neither the
+node's bounds nor its parents. Read as geometry it produced a confident, wrong diagnosis — that
+`EmptyUserList`'s `fillMaxSize()` overflowed its `Column` — and a `Modifier.weight(1f)` written
+against that theory changed nothing and was reverted.
+
+The next round stopped guessing and made the failure legible instead. The answer came not from
+the tree it printed but from the message *moving*, to `assertExists`'s "could not find any node",
+with nothing between the two runs but an edit to the test file. That ruled out geometry: the node
+was not misplaced, it was absent. The round after that replaced the implicit wait with an
+explicit one, and `ComposeTimeoutException: Condition still not satisfied after 5000 ms` is what
+finally said *never* rather than *late* — which is what pointed at the load state.
+
+Three rounds, two tests, two wrong diagnoses. The lesson generalises past Paging: when an
+instrumented assertion fails in a way that admits more than one cause, spend the round trip that
+narrows it rather than the ones that follow from picking a cause. A failure message that cannot
+distinguish *absent* from *misplaced* from *never arrived* is worth replacing with one that can,
+before any fix is attempted.
 
 ## The matrix
 

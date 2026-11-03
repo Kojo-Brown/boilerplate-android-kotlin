@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.paging.LoadState
+import androidx.paging.LoadStates
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -58,9 +60,36 @@ class HomeScreenTest {
     private val alice = HomeItem(id = "1", title = "Alice", description = "alice@example.com")
     private val bob = HomeItem(id = "2", title = "Bob", description = "bob@example.com")
 
+    /**
+     * A fully-loaded generation, built the way the screen builds one: from a
+     * `Flow<PagingData<…>>` through `collectAsLazyPagingItems()`.
+     *
+     * The `sourceLoadStates` are passed explicitly and that is not boilerplate — it is what makes
+     * the empty case reachable at all. `PagingData.from(items)` leaves `refresh` at
+     * `LoadState.Loading`, and `HomeBody`'s first branch is guarded on
+     * `refresh is LoadState.Loading && users.itemCount == 0`: with rows the guard is false because
+     * `itemCount` is not zero, so the list composes and nothing notices, but with no rows the
+     * screen shows the spinner **for ever** and the empty message never appears. Both empty-state
+     * tests below timed out against the one-argument overload before this existed.
+     *
+     * `append` is `NotLoading(endOfPaginationReached = false)` deliberately rather than `true`:
+     * `true` would also render `EndOfListFooter`, which is a load-state branch this file does not
+     * claim to cover — see the note on the class.
+     */
     @Composable
     private fun pagedItems(items: List<HomeItem>): LazyPagingItems<HomeItem> =
-        remember(items) { flowOf(PagingData.from(items)) }.collectAsLazyPagingItems()
+        remember(items) {
+            flowOf(
+                PagingData.from(
+                    data = items,
+                    sourceLoadStates = LoadStates(
+                        refresh = LoadState.NotLoading(endOfPaginationReached = false),
+                        prepend = LoadState.NotLoading(endOfPaginationReached = true),
+                        append = LoadState.NotLoading(endOfPaginationReached = false),
+                    ),
+                ),
+            )
+        }.collectAsLazyPagingItems()
 
     @Composable
     private fun HomeBodyUnderTest(
@@ -248,25 +277,19 @@ class HomeScreenTest {
     /**
      * Waits for [text] to reach the semantics tree, then lets the caller assert on it.
      *
-     * `LazyPagingItems` delivers asynchronously, and an **empty** page is the one case in this
-     * file where that shows. `HomeBody`'s first branch is guarded on
-     * `refresh is LoadState.Loading && users.itemCount == 0`, and a freshly created
-     * `LazyPagingItems` reports exactly that until its presenter's load state has been delivered
-     * — `flowOf(PagingData.from(…))` is not a `cachedIn` flow, so nothing fills that in
-     * synchronously. With rows the guard is false on the first frame, because `itemCount` is not
-     * zero, and the list composes straight away; that is why every other test here is
-     * deterministic. With no rows the screen shows the spinner first and the empty message a
-     * delivery later, and `waitForIdle` does not reach across that hop.
+     * `LazyPagingItems` is handed its first generation asynchronously: `loadState` starts from
+     * its presenter, which has nothing yet, so `refresh` is `LoadState.Loading` on the first
+     * composition whatever the `PagingData` says. [pagedItems] is what makes the state *settle*
+     * on something other than `Loading`; this is what waits for it to arrive. With rows neither
+     * is needed, because `HomeBody`'s guard is false the moment `itemCount` is not zero — which
+     * is why every other test in this file is deterministic without either.
      *
-     * The evidence for it being a race rather than a layout is that the symptom moved. These two
-     * tests failed on all three API levels as `assertIsDisplayed`'s "The component is not
-     * displayed!" on one commit and as `assertExists`'s "could not find any node" on the next,
-     * with nothing between them but a change to this file. A geometry defect does not do that.
-     *
-     * This is not a softened assertion. The caller still asserts the message is *displayed*,
-     * which is the assertion that would catch an empty state laid out off the screen; a message
-     * that never arrives fails here with a timeout naming the condition, which is a clearer
-     * failure than the one it replaces. What it stops doing is racing the delivery.
+     * The caller still asserts the message is *displayed* after this returns. That is the
+     * assertion which would catch an empty state laid out off the screen, and it is deliberately
+     * not replaced by `assertExists`; what this removes is the race in front of it, not the
+     * claim behind it. A message that never arrives fails here as
+     * `ComposeTimeoutException: Condition still not satisfied`, which is how the missing
+     * `sourceLoadStates` was finally identified.
      */
     private fun awaitText(text: String) {
         composeRule.waitUntil(timeoutMillis = TEXT_TIMEOUT_MS) {
