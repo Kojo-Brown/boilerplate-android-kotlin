@@ -120,9 +120,18 @@ image is the smaller download, and it is the target the `startup-benchmark` job 
 this runner. If a level stops publishing an AOSP `x86_64` image, `google_apis` is the substitute
 for that leg and nothing else changes.
 
-The image and its first boot are cached per leg (`actions/cache`, keyed on API level, target and
-architecture), so only the first run on a key pays for them. The test run passes
+The image and its first boot are cached per leg (`actions/cache`, keyed on API level, target,
+architecture and disk size), so only the first run on a key pays for them. The test run passes
 `-no-snapshot-save`, so a wedged emulator cannot write itself back over the cached snapshot.
+
+**`disk-size` is pinned and that is load-bearing.** `profile: pixel_6` brings a 7.2 GB userdata
+partition with it, which is a statement about the phone rather than about what a test needs, and
+a runner that has already restored a Gradle cache and assembled fifteen modules plus five test
+APKs has nothing like that left. The API 26 leg died with *"Not enough space to create userdata
+partition. Available: 4353.87 MB, need 7372.80 MB"* while the other two happened to fit — a gate
+failing on whichever leg drew the smaller runner rather than on anything in the commit.
+`AVD_DISK_SIZE` is 3 GB, far more than five small APKs and an in-memory Room database use, and it
+puts the requirement in this repository instead of in a device definition.
 
 ## Running it
 

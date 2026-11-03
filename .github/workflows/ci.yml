@@ -347,6 +347,26 @@ jobs:
       fail-fast: false
       matrix:
         api-level: [26, 30, 35]
+    # The AVD's userdata partition, pinned rather than inherited from the device profile, and it
+    # is the difference between this job working and not.
+    #
+    # `profile: pixel_6` brings a 7.2 GB userdata partition with it, which is a statement about
+    # the phone rather than about what a test needs. A GitHub runner that has already restored a
+    # Gradle cache and assembled fifteen modules plus five test APKs has nothing like that left:
+    # the API 26 leg died with "Not enough space to create userdata partition. Available: 4353.87
+    # MB, need 7372.80 MB" while the other two happened to fit, which is the shape of a gate that
+    # fails on whichever leg drew the smaller runner rather than on anything in the commit.
+    #
+    # 3 GB is far more than these suites use — five small APKs and an in-memory Room database —
+    # and it makes the requirement a number in this file instead of a property of a device
+    # definition. It is part of the cache key below, so changing it rebuilds the AVDs rather than
+    # restoring one sized to the old value over it.
+    #
+    # If free space ever becomes the binding constraint again, the next move is to reclaim some on
+    # the runner (the preinstalled .NET and Android SDKs are the usual several gigabytes) rather
+    # than to shrink this further.
+    env:
+      AVD_DISK_SIZE: 3072M
     # An AVD cold boot is several minutes, a cache miss adds the image download and a second boot
     # to snapshot it, and the suites themselves install five test APKs. Sixty minutes is well
     # clear of that; beyond it the emulator is wedged — which happens — and the job should fail
@@ -403,7 +423,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ matrix.api-level }}-default-x86_64
+          key: avd-${{ matrix.api-level }}-default-x86_64-disk${{ env.AVD_DISK_SIZE }}
 
       # Only on a miss, and it runs the emulator with a trivial script purely so that the action
       # saves a booted snapshot on exit. `force-avd-creation: false` so this reuses whatever the
@@ -418,6 +438,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           ram-size: 4096M
+          disk-size: ${{ env.AVD_DISK_SIZE }}
           force-avd-creation: false
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
@@ -443,6 +464,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           ram-size: 4096M
+          disk-size: ${{ env.AVD_DISK_SIZE }}
           force-avd-creation: false
           disable-animations: true
           emulator-options: >-
