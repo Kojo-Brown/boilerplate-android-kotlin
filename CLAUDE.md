@@ -39,7 +39,10 @@ Production-grade Kotlin + Jetpack Compose Android boilerplate. Spec-driven and P
    `src/androidTest` that had never been compiled once. Read `docs/instrumented-testing.md`
    before writing a Compose assertion — a query aimed at a node that cannot exist is
    indistinguishable from a passing test, which is how three of the suites there were asserting
-   nothing at all.
+   nothing at all. Read `docs/hilt-testing.md` before touching a `@TestInstallIn` module or
+   `HiltTestRunner` in `:app` — a replacement module compiled without the processor in
+   `kspAndroidTest` contributes nothing and leaves the suite running against the real
+   `OkHttpClient` and a real database file, which is silent rather than red.
 6. Commit, `git push -u origin <branch>`, then `gh pr create`.
 7. `gh pr checks --watch` → **merge only if every check is green**:
    `gh pr merge --squash --delete-branch`

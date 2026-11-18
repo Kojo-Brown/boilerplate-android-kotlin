@@ -340,6 +340,26 @@ android {
         applicationId = "com.kojo.boilerplate"
         versionCode = 1
         versionName = "1.0.0"
+
+        /*
+         * The one module whose instrumented tests run against a Hilt graph, so the one module
+         * that overrides the runner the convention plugin sets.
+         *
+         * `AndroidApplicationConventionPlugin` names `BoilerplateBuild.TEST_RUNNER` —
+         * `androidx.test.runner.AndroidJUnitRunner` — and that runner starts the `Application`
+         * the merged manifest names, which is `BoilerplateApp`. A Hilt test cannot use it: the
+         * test's component is built by `HiltTestApplication`, and `@TestInstallIn` is how a
+         * module gets replaced, so a test run under the real `Application` would get the real
+         * `NetworkModule` and the real `DatabaseModule` and talk to a socket and a file.
+         *
+         * `HiltTestRunner` is three lines in `src/androidTest` and does nothing but substitute
+         * that class name. It stays here rather than in `:core:testing` because it is used once:
+         * putting it there would put `hilt-android-testing` on the `api` configuration of a
+         * module whose classes are real and shippable, and add an `:app` → `:core:testing` edge
+         * to the rule map for a single class. The second module that wants a Hilt suite is when
+         * that trade changes — docs/hilt-testing.md says so where whoever writes it will look.
+         */
+        testInstrumentationRunner = "com.kojo.boilerplate.HiltTestRunner"
     }
 
     signingConfigs {
@@ -867,4 +887,30 @@ dependencies {
     // reflection. Shipping it in the app would add ~1.7 MB to the APK to answer a question only
     // the build asks.
     testImplementation(libs.kotlin.reflect)
+
+    /*
+     * The Hilt rig for `src/androidTest`, and the three artifacts under it that are only there
+     * because `:data` declares its own as `implementation`.
+     *
+     * `hilt-android-testing` carries `@HiltAndroidTest`, `HiltAndroidRule`, `@TestInstallIn` and
+     * `HiltTestApplication`. The KSP processor has to run in this configuration as well as in
+     * `implementation`, and for the same reason `HiltConventionPlugin`'s KDoc gives about
+     * `@InstallIn`: a `@TestInstallIn` module is discovered through the `@AggregatedDeps`
+     * metadata the processor writes *next to the module it processes*, so a replacement module
+     * compiled without the processor is a file that compiles, contributes nothing, and leaves
+     * the test running against the real `NetworkModule`. That failure is silent — the suite
+     * would open a socket and pass or fail on whether the network happened to answer.
+     *
+     * The other three are `implementation` dependencies of `:data`, which means they reach
+     * `:data`'s own source and stop there; `:app` never names a Room, Retrofit or serialization
+     * type in `src/main` and should not start. `src/androidTest` does, and only to stand in for
+     * what `:data` binds: `Room.inMemoryDatabaseBuilder` for the database, and the annotations on
+     * `UserApi`/`AuthApi` and on the DTOs the fakes return. Declared per source set rather than
+     * promoted to `implementation` so the APK's classpath is unchanged by any of this.
+     */
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.android.compiler)
+    androidTestImplementation(libs.androidx.room.runtime)
+    androidTestImplementation(libs.retrofit)
+    androidTestImplementation(libs.kotlinx.serialization.json)
 }

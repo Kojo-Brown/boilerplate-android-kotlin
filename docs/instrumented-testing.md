@@ -141,8 +141,8 @@ In CI it is `scripts/run-instrumented-tests.sh`, which is one Gradle invocation:
 ./gradlew connectedDebugAndroidTest --stacktrace
 ```
 
-No project path, like every gate in `CLAUDE.md`: the task exists in all fifteen modules, five of
-which have `src/androidTest` today, and the other ten report `NO-SOURCE`. A module that takes up
+No project path, like every gate in `CLAUDE.md`: the task exists in all fifteen modules, six of
+which have `src/androidTest` today, and the other nine report `NO-SOURCE`. A module that takes up
 instrumented testing later is picked up without an edit to the workflow.
 
 `:benchmark` is the sixteenth project and is **not** in that set. It disables its own
@@ -233,13 +233,19 @@ needs `useUnmergedTree = true`.
   and the error content are never rendered. Driving them means constructing `LoadStates` by hand,
   which is what `androidx.paging:paging-testing` is for, and it is not on the classpath.
   `docs/paging.md` has the assertions that would be worth making.
-- **Anything needing a Hilt graph.** Every suite here composes a component directly and passes
-  its state in. Replacing the network and the database with fake bindings is the next SPEC item,
-  and it needs a custom `AndroidJUnitRunner` and `HiltTestApplication` before a test can launch a
-  screen that injects a view model.
-- **`:app`.** It has no `src/androidTest`, so nothing yet navigates between two screens on a
-  device. The shared-element transitions in `docs/shared-elements.md` are the obvious subject and
-  need the Hilt rig above.
+- **A Hilt graph behind a screen.** The rig itself now exists — `HiltTestRunner`,
+  `TestNetworkModule` and `TestDatabaseModule` in `:app`'s androidTest source set, with
+  `docs/hilt-testing.md` as the map — and `FakeBindingsTest` drives the real repository stack over
+  a fake API and an in-memory database. What it does not do is compose anything: every suite in
+  the four UI modules still builds a component directly and passes its state in. Launching a
+  screen that injects a view model needs an `@AndroidEntryPoint` activity in the androidTest
+  manifest, because `createAndroidComposeRule`'s `ComponentActivity` from `ui-test-manifest` is
+  not one.
+- **`:app` navigating.** `src/androidTest` exists there now, but nothing in it moves between two
+  screens on a device, so the shared-element transitions in `docs/shared-elements.md` stay
+  untested. They are the obvious next subject: both `ProfileViewModel` and `HomeViewModel` read
+  their route from a `SavedStateHandle`, which is what makes navigating — rather than composing —
+  the only way to reach them.
 - **A real device.** `profile: pixel_6` is a screen size and a density, not a phone. Gestures,
   the predictive-back animation `rememberPredictiveBackDismiss` is written for, and anything
   touching a camera are all emulator fictions here.
